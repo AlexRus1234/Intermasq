@@ -41,7 +41,7 @@ func statusHandler(c *gin.Context) {
 func setupHandler(c *gin.Context) {
 	mu.Lock()
 	defer mu.Unlock()
-	if len(users) > 0 { c.JSON(403, gin.H{"error": "Уже настроено"}); return }
+	if len(users) > 0 { c.JSON(403, gin.H{"error": "already_setup"}); return }
 	var req AuthReq
 	if err := c.BindJSON(&req); err != nil { return }
 	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -57,7 +57,7 @@ func loginHandler(c *gin.Context) {
 	hash, ok := users[req.Username]
 	mu.Unlock()
 	if !ok || bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil {
-		c.JSON(401, gin.H{"error": "Неверный логин или пароль"}); return
+		c.JSON(401, gin.H{"error": "invalid_credentials"}); return
 	}
 	c.JSON(200, gin.H{"token": makeToken(req.Username)})
 }
@@ -70,7 +70,7 @@ func getArpHandler(c *gin.Context) {
 func getHostsHandler(c *gin.Context) {
 	hosts := []HostEntry{}
 	files, err := os.ReadDir(*ConfigDir)
-	if err != nil { c.JSON(500, gin.H{"error": "Ошибка чтения директории"}); return }
+	if err != nil { c.JSON(500, gin.H{"error": "dir_read_error"}); return }
 
 	for _, f := range files {
 		if filepath.Ext(f.Name()) != ".conf" { continue }
@@ -113,7 +113,7 @@ func addHostHandler(c *gin.Context) {
 	var req HostEntry
 	if err := c.BindJSON(&req); err != nil { return }
 	if !macRegex.MatchString(req.Mac) || net.ParseIP(req.Ip) == nil || !hostnameRegex.MatchString(req.Hostname) || !isSafePath(req.File) {
-		c.JSON(400, gin.H{"error": "Неверные данные"}); return
+		c.JSON(400, gin.H{"error": "invalid_data"}); return
 	}
 
 	mu.Lock()
@@ -122,7 +122,7 @@ func addHostHandler(c *gin.Context) {
 	createLocalBackup(req.File) // БЭКАП ПЕРЕД ИЗМЕНЕНИЕМ
 
 	content, err := os.ReadFile(req.File)
-	if err != nil && !os.IsNotExist(err) { c.JSON(500, gin.H{"error": "Ошибка чтения файла"}); return }
+	if err != nil && !os.IsNotExist(err) { c.JSON(500, gin.H{"error": "file_read_error"}); return }
 
 	lines := strings.Split(string(content), "\n")
 	newLines := []string{}
@@ -133,7 +133,7 @@ func addHostHandler(c *gin.Context) {
 	newLines = append(newLines, fmt.Sprintf("dhcp-host=%s,%s,%s", req.Mac, req.Hostname, req.Ip))
 
 	if err := os.WriteFile(req.File, []byte(strings.Join(newLines, "\n")+"\n"), 0644); err != nil {
-		c.JSON(500, gin.H{"error": "Ошибка записи файла"}); return
+		c.JSON(500, gin.H{"error": "file_write_error"}); return
 	}
 	c.JSON(200, gin.H{"status": "ok"})
 }
@@ -141,8 +141,8 @@ func addHostHandler(c *gin.Context) {
 // НОВОЕ: Массовый импорт
 func bulkAddHostsHandler(c *gin.Context) {
 	var req BulkHostReq
-	if err := c.BindJSON(&req); err != nil { c.JSON(400, gin.H{"error": "Bad JSON"}); return }
-	if !isSafePath(req.File) { c.JSON(403, gin.H{"error": "Access denied"}); return }
+	if err := c.BindJSON(&req); err != nil { c.JSON(400, gin.H{"error": "invalid_data"}); return }
+	if !isSafePath(req.File) { c.JSON(403, gin.H{"error": "access_denied"}); return }
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -150,7 +150,7 @@ func bulkAddHostsHandler(c *gin.Context) {
 	createLocalBackup(req.File) // БЭКАП ПЕРЕД ИЗМЕНЕНИЕМ
 
 	content, err := os.ReadFile(req.File)
-	if err != nil && !os.IsNotExist(err) { c.JSON(500, gin.H{"error": "Ошибка чтения"}); return }
+	if err != nil && !os.IsNotExist(err) { c.JSON(500, gin.H{"error": "read_error"}); return }
 
 	lines := strings.Split(string(content), "\n")
 	newLines := []string{}
@@ -183,7 +183,7 @@ func bulkAddHostsHandler(c *gin.Context) {
 	}
 
 	if err := os.WriteFile(req.File, []byte(strings.Join(newLines, "\n")+"\n"), 0644); err != nil {
-		c.JSON(500, gin.H{"error": "Ошибка записи"}); return
+		c.JSON(500, gin.H{"error": "write_error"}); return
 	}
 	c.JSON(200, gin.H{"status": "ok"})
 }
@@ -192,7 +192,7 @@ func deleteHostHandler(c *gin.Context) {
 	mac := c.Param("mac")
 	file := c.Query("file")
 	if !macRegex.MatchString(mac) || !isSafePath(file) {
-		c.JSON(400, gin.H{"error": "Bad request"})
+		c.JSON(400, gin.H{"error": "bad_request"})
 		return
 	}
 
@@ -206,7 +206,7 @@ func deleteHostHandler(c *gin.Context) {
 
 	content, err := os.ReadFile(file)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Ошибка чтения файла"})
+		c.JSON(500, gin.H{"error": "file_read_error"})
 		return
 	}
 
@@ -228,7 +228,7 @@ func deleteHostHandler(c *gin.Context) {
 		os.WriteFile(file, []byte(strings.Join(newLines, "\n")+"\n"), 0644)
 		c.JSON(200, gin.H{"status": "deleted"})
 	} else {
-		c.JSON(404, gin.H{"error": "Хост не найден"})
+		c.JSON(404, gin.H{"error": "host_not_found"})
 	}
 }
 
@@ -241,7 +241,7 @@ func rollbackHandler(c *gin.Context) {
 	defer mu.Unlock()
 
 	if err := rollbackFile(req.File); err != nil {
-		c.JSON(500, gin.H{"error": "Ошибка отката: " + err.Error()})
+		c.JSON(500, gin.H{"error": "rollback_error"})
 		return
 	}
 	c.JSON(200, gin.H{"status": "rollback_ok"})
@@ -249,13 +249,13 @@ func rollbackHandler(c *gin.Context) {
 
 func backupHandler(c *gin.Context) {
 	zipBytes, fileName, err := createBackupZip()
-	if err != nil { c.JSON(500, gin.H{"error": "Ошибка бэкапа"}); return }
+	if err != nil { c.JSON(500, gin.H{"error": "backup_error"}); return }
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))
 	c.Data(200, "application/zip", zipBytes)
 }
 
 func reloadHandler(c *gin.Context) {
-	out, err := reloadDnsmasq()
-	if err != nil { c.JSON(400, gin.H{"error": "Ошибка перезапуска!\n" + string(out)}); return }
+	_, err := reloadDnsmasq()
+	if err != nil { c.JSON(400, gin.H{"error": "reload_error"}); return }
 	c.JSON(200, gin.H{"status": "reloaded"})
 }

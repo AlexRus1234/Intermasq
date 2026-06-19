@@ -2,44 +2,40 @@
   <div :class="['card mb-4 p-3 shadow-sm', isEditing ? 'border-warning' : 'border-primary']">
       <div class="d-flex justify-content-between align-items-center mb-2">
           <h6 :class="isEditing ? 'text-warning text-dark' : 'text-primary'" class="mb-0 fw-bold">
-              {{ isEditing ? '✏️ Редактирование' : (selectedFile === 'all' ? '➕ Новое устройство' : '➕ Добавить в ' + selectedFile.split('/').pop()) }}
+              {{ isEditing ? '✏️ ' + $t('hosts.editing') : (selectedFile === 'all' ? '➕ ' + $t('hosts.newDevice') : '➕ ' + $t('hosts.addTo') + ' ' + selectedFile.split('/').pop()) }}
           </h6>
           
           <div v-if="!isEditing" class="form-check form-switch mb-0">
               <input class="form-check-input" type="checkbox" id="importMode" v-model="isImportMode">
-              <label class="form-check-label small text-muted" for="importMode">Импорт списком</label>
+              <label class="form-check-label small text-muted" for="importMode">{{ $t('hosts.importList') }}</label>
           </div>
           
-          <button v-if="isEditing" @click="$emit('cancel-edit')" class="btn btn-sm btn-outline-secondary">✕ Отмена</button>
+          <button v-if="isEditing" @click="$emit('cancel-edit')" class="btn btn-sm btn-outline-secondary">✕ {{ $t('hosts.cancel') }}</button>
       </div>
       
-      <!-- ОДИНОЧНОЕ ДОБАВЛЕНИЕ / РЕДАКТИРОВАНИЕ -->
       <div v-if="!isImportMode" class="row g-2">
-        <div class="col-md-3"><input v-model="form.mac" placeholder="MAC (aa:bb...)" class="form-control"></div>
+        <div class="col-md-3"><input v-model="form.mac" :placeholder="'MAC (aa:bb...)'" class="form-control"></div>
         <div class="col-md-3"><input v-model="form.ip" placeholder="IP (172.20...)" class="form-control"></div>
         <div class="col-md-3"><input v-model="form.hostname" placeholder="Hostname" class="form-control"></div>
         <div class="col-md-3">
             <div class="input-group">
-                <input v-model="form.file" :readonly="selectedFile !== 'all' && !isEditing" :class="['form-control', (selectedFile !== 'all' && !isEditing) ? 'bg-light' : '']" placeholder="Файл (/etc/...)">
-                
-                <!-- ИСПРАВЛЕННАЯ СТРОКА -->
+                <input v-model="form.file" :readonly="selectedFile !== 'all' && !isEditing" :class="['form-control', (selectedFile !== 'all' && !isEditing) ? 'bg-light' : '']" :placeholder="$t('hosts.filePlaceholder')">
                 <button @click="saveHost" class="btn fw-bold" :class="isEditing ? 'btn-warning' : 'btn-success'">
-                    {{ isEditing ? 'Сохранить' : 'Добавить' }}
+                    {{ isEditing ? $t('hosts.save') : $t('hosts.add') }}
                 </button>
             </div>
         </div>
       </div>
 
-      <!-- МАССОВЫЙ ИМПОРТ -->
       <div v-if="isImportMode" class="row g-2 fade-in">
           <div class="col-12">
-              <textarea v-model="bulkText" class="form-control font-monospace" rows="4" placeholder="Вставьте текст (MAC IP Hostname) через пробел или Tab. Каждое устройство с новой строки."></textarea>
+              <textarea v-model="bulkText" class="form-control font-monospace" rows="4" :placeholder="$t('hosts.bulkPlaceholder')"></textarea>
           </div>
           <div class="col-12 d-flex justify-content-between align-items-center">
-              <span class="text-muted small">Распознано: <strong>{{ parsedBulkHosts.length }}</strong> устройств</span>
+              <span class="text-muted small">{{ $t('hosts.parsed') }} <strong>{{ parsedBulkHosts.length }}</strong> {{ $t('hosts.devices') }}</span>
               <div class="input-group" style="width: auto;">
-                  <input v-model="form.file" :readonly="selectedFile !== 'all'" :class="['form-control', selectedFile !== 'all' ? 'bg-light' : '']" placeholder="Файл назначения">
-                  <button @click="saveBulkHosts" class="btn btn-success fw-bold" :disabled="parsedBulkHosts.length === 0">Импортировать</button>
+                  <input v-model="form.file" :readonly="selectedFile !== 'all'" :class="['form-control', selectedFile !== 'all' ? 'bg-light' : '']" :placeholder="$t('hosts.destFile')">
+                  <button @click="saveBulkHosts" class="btn btn-success fw-bold" :disabled="parsedBulkHosts.length === 0">{{ $t('hosts.importBtn') }}</button>
               </div>
           </div>
       </div>
@@ -48,7 +44,11 @@
 
 <script setup>
 import { ref, watch, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { store, api, actions } from '../../store.js'
+import { translateApiError } from '../../i18n.js'
+
+const { t } = useI18n()
 
 const props = defineProps(['selectedFile', 'editData'])
 const emit = defineEmits(['cancel-edit'])
@@ -93,8 +93,8 @@ watch(() => store.transferData, (data) => {
 
 async function saveHost() {
   const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/i;
-  if (!macRegex.test(form.value.mac)) { alert('Неверный формат MAC'); return; }
-  if (!form.value.file) { alert('Укажите имя файла'); return; }
+  if (!macRegex.test(form.value.mac)) { alert(t('alert.invalidMac')); return; }
+  if (!form.value.file) { alert(t('alert.fileRequired')); return; }
   
   try {
     if (isEditing.value) {
@@ -105,7 +105,10 @@ async function saveHost() {
     emit('cancel-edit')
     form.value.mac = ''; form.value.ip = ''; form.value.hostname = ''
     actions.loadData()
-  } catch (e) { alert(e.response?.data?.error || "Ошибка сохранения") }
+  } catch (e) { 
+    const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.saveError')
+    alert(msg)
+  }
 }
 
 const parsedBulkHosts = computed(() => {
@@ -128,7 +131,10 @@ async function saveBulkHosts() {
         await api.post('/hosts/bulk', { file: form.value.file, hosts: parsedBulkHosts.value })
         bulkText.value = ''
         actions.loadData()
-        alert(`Успешно импортировано ${parsedBulkHosts.value.length} устройств!`)
-    } catch (e) { alert(e.response?.data?.error || "Ошибка импорта") }
+        alert(t('alert.importSuccess', { count: parsedBulkHosts.value.length }))
+    } catch (e) { 
+        const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.importError')
+        alert(msg)
+    }
 }
 </script>

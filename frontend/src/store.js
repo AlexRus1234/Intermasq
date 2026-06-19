@@ -1,5 +1,8 @@
 import { reactive } from 'vue'
 import axios from 'axios'
+import i18n, { translateApiError } from './i18n.js'
+
+const { t } = i18n.global
 
 export const store = reactive({
     token: localStorage.getItem('token') || '',
@@ -11,7 +14,7 @@ export const store = reactive({
     hosts: [],
     leases: [],
     arpTable: {},
-    plugins: [], // <--- НОВОЕ ПОЛЕ: Список загруженных плагинов
+    plugins: [],
     
     transferData: null 
 })
@@ -46,17 +49,16 @@ export const actions = {
 
     async loadData() {
         try {
-            // Запрашиваем хосты, аренды, ARP и ПЛАГИНЫ
             const [hRes, lRes, aRes, pRes] = await Promise.all([
                 api.get('/hosts'), 
                 api.get('/leases'), 
                 api.get('/arp'),
-                api.get('/plugins').catch(() => ({ data: [] })) // Если API плагинов нет, вернем пустой массив
+                api.get('/plugins').catch(() => ({ data: [] }))
             ])
             store.hosts = hRes.data
             store.leases = lRes.data
             store.arpTable = aRes.data
-            store.plugins = pRes.data // Сохраняем список плагинов
+            store.plugins = pRes.data
         } catch (e) {
             if (e.response?.status === 401) this.logout()
             else store.view = 'error'
@@ -72,11 +74,11 @@ export const actions = {
     async applyConfig() {
         try {
             await api.post('/reload')
-            alert('Конфигурация проверена и успешно применена!')
+            alert(t('alert.applySuccess'))
             this.checkStatus()
         } catch (e) {
-            if (e.response && e.response.status === 400) alert(e.response.data.error)
-            else alert("Ошибка перезагрузки сервера")
+            if (e.response && e.response.status === 400) alert(translateApiError(e.response.data.error))
+            else alert(t('alert.reloadError'))
         }
     },
 
@@ -88,16 +90,15 @@ export const actions = {
             link.href = url
             link.setAttribute('download', `dnsmasq_backup.zip`)
             document.body.appendChild(link); link.click(); document.body.removeChild(link)
-        } catch (e) { alert("Ошибка резервной копии") }
+        } catch (e) { alert(t('alert.backupError')) }
     },
 
-    // НОВОЕ: Рестарт самой службы Intermasq (чтобы подцепить новые плагины)
     async restartSystem() {
-        if(!confirm("Перезагрузить службу Intermasq? (Нужно для активации новых плагинов)")) return
+        if(!confirm(t('confirm.restartSystem'))) return
         try {
             await api.post('/restart-self')
-            alert("Сервер перезагружается... Страница обновится через 5 секунд.")
+            alert(t('alert.restartInProgress'))
             setTimeout(() => location.reload(), 5000)
-        } catch (e) { alert("Ошибка рестарта") }
+        } catch (e) { alert(t('alert.restartError')) }
     }
 }
