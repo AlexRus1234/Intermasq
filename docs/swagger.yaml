@@ -1,4 +1,8 @@
 info:
+  title: Intermasq API
+  license:
+    name: AGPL-3.0-only
+    url: https://www.gnu.org/licenses/agpl-3.0.html
   contact: {}
 paths: {}
 swagger: "2.0"
