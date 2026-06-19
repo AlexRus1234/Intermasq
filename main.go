@@ -42,13 +42,16 @@ import (
 var staticFiles embed.FS
 
 var (
-	Port       = flag.String("port", "8080", "Port to listen on")
-	DBPath     = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
-	ConfigDir  = flag.String("conf-dir", "/etc/dnsmasq.d", "Directory with dnsmasq configs")
-	LeasesPath = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
-	PluginsDir = "/etc/intermasq/plugins"
-	SocketsDir = "/run/intermasq/sockets" // Папка для сокетов (в оперативной памяти)
-	SecretKey  = []byte(os.Getenv("INTERMASQ_SECRET"))
+	Port          = flag.String("port", "8080", "Port to listen on")
+	DBPath        = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
+	ConfigDir     = flag.String("conf-dir", "/etc/dnsmasq.d", "Directory with dnsmasq configs")
+	LeasesPath    = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
+	ArpPath       = flag.String("arp-file", "/proc/net/arp", "Path to ARP table file")
+	SystemdScope  = flag.String("systemd-scope", "auto", "Systemd scope: auto, system, user, none")
+	CiMode        = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
+	PluginsDir    = "/etc/intermasq/plugins"
+	SocketsDir    = "/run/intermasq/sockets"
+	SecretKey     = []byte(os.Getenv("INTERMASQ_SECRET"))
 )
 
 var (
@@ -62,7 +65,6 @@ type PluginManifest struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Bin  string `json:"bin"`
-	// Port убрали, он больше не нужен
 }
 
 func init() {
@@ -70,7 +72,6 @@ func init() {
 }
 
 func loadPlugins(r *gin.Engine) {
-	// Создаем папку для сокетов (tmpfs)
 	os.MkdirAll(SocketsDir, 0770)
 
 	entries, err := os.ReadDir(PluginsDir)
@@ -93,26 +94,22 @@ func loadPlugins(r *gin.Engine) {
 		if _, err := os.Stat(binPath); err == nil {
 			cmd := exec.Command(binPath)
 			cmd.Dir = path
-			// Передаем путь к сокету через ENV
 			cmd.Env = append(os.Environ(), 
 				fmt.Sprintf("INTERMASQ_KEY=%s", os.Getenv("INTERMASQ_SECRET")),
 				fmt.Sprintf("PLUGIN_SOCKET=%s", sockPath),
 			)
 			
 			if err := cmd.Start(); err != nil {
-				fmt.Printf("[PLUGINS] Ошибка запуска %s: %v\n", p.Name, err)
+				fmt.Printf("[PLUGINS] Error starting %s: %v\n", p.Name, err)
 				continue
 			}
-			fmt.Printf("[PLUGINS] Запущен %s на сокете %s\n", p.Name, sockPath)
+			fmt.Printf("[PLUGINS] Started %s on socket %s\n", p.Name, sockPath)
 		}
 
-		// Настраиваем Прокси через Unix Socket
 		proxy := &httputil.ReverseProxy{
 			Director: func(req *http.Request) {
 				req.URL.Scheme = "http"
-				req.URL.Host = "dummy" // Для unix сокетов хост не важен, но поле должно быть
-				// Обрезаем префикс пути
-				// (gin делает это сам через r.Any, но на всякий случай можно тут)
+				req.URL.Host = "dummy"
 			},
 			Transport: &http.Transport{
 				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -122,7 +119,7 @@ func loadPlugins(r *gin.Engine) {
 		}
 
 		r.Any("/plugins/"+p.ID+"/*any", func(c *gin.Context) {
-			c.Request.URL.Path = c.Param("any") // Отрезаем /plugins/{id}
+			c.Request.URL.Path = c.Param("any")
 			proxy.ServeHTTP(c.Writer, c.Request)
 		})
 
@@ -133,6 +130,8 @@ func loadPlugins(r *gin.Engine) {
 func main() {
 	flag.Parse()
 	loadUsers()
+	initSystemCaller(*SystemdScope)
+
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
@@ -150,7 +149,9 @@ func main() {
 			auth.GET("/plugins", func(c *gin.Context) { c.JSON(200, loadedPlugins) })
 			auth.POST("/restart-self", func(c *gin.Context) {
 				c.JSON(200, gin.H{"status": "restarting"})
-				go func() { exec.Command("/usr/bin/systemctl", "restart", "intermasq").Run() }()
+				if !*CiMode {
+					go func() { exec.Command("/usr/bin/systemctl", "restart", "intermasq").Run() }()
+				}
 			})
 			auth.GET("/hosts", getHostsHandler)
 			auth.GET("/leases", getLeasesHandler)
@@ -168,6 +169,6 @@ func main() {
 	staticFS, _ := fs.Sub(staticFiles, "frontend/dist")
 	r.NoRoute(gin.WrapH(http.FileServer(http.FS(staticFS))))
 
-	fmt.Printf("Intermasq v3.0 (Socket Mode) Started on :%s\n", *Port)
+	fmt.Printf("Intermasq v3.0 Started on :%s\n", *Port)
 	r.Run(":" + *Port)
 }

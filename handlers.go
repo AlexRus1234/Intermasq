@@ -255,7 +255,6 @@ func backupHandler(c *gin.Context) {
 }
 
 func reloadHandler(c *gin.Context) {
-	_, err := reloadDnsmasq()
-	if err != nil { c.JSON(400, gin.H{"error": "reload_error"}); return }
+	if err := reloadDnsmasq(); err != nil { c.JSON(400, gin.H{"error": "reload_error"}); return }
 	c.JSON(200, gin.H{"status": "reloaded"})
 }

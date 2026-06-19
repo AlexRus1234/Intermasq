@@ -20,6 +20,7 @@ import (
 	"archive/zip"
 	"bufio"
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,35 +35,31 @@ func isSafePath(path string) bool {
 }
 
 func checkDnsmasqStatus() bool {
-	cmd := exec.Command("/usr/bin/sudo", "/usr/bin/systemctl", "is-active", "dnsmasq")
-	out, _ := cmd.Output()
-	return strings.TrimSpace(string(out)) == "active"
+	return sysCaller.IsActive("dnsmasq")
 }
 
-func reloadDnsmasq() ([]byte, error) {
+func reloadDnsmasq() error {
 	testCmd := exec.Command("/usr/bin/dnsmasq", "--test")
-	testOut, testErr := testCmd.CombinedOutput()
-	if testErr != nil {
-		return testOut, testErr
+	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
+		return fmt.Errorf("%s", testOut)
 	}
-	restartCmd := exec.Command("/usr/bin/sudo", "/usr/bin/systemctl", "restart", "dnsmasq")
-	return restartCmd.CombinedOutput()
+	return sysCaller.Restart("dnsmasq")
 }
 
-// НОВОЕ: Чтение ARP таблицы из ядра Linux
 func getArpTable() map[string]bool {
-	activeMacs := make(map[string]bool)
-	file, err := os.Open("/proc/net/arp")
-	if err != nil { return activeMacs }
-	defer file.Close()
+	content, err := os.ReadFile(*ArpPath)
+	if err != nil {
+		return make(map[string]bool)
+	}
+	return parseArpContent(string(content))
+}
 
-	scanner := bufio.NewScanner(file)
-	// Пропускаем первую строку (заголовки)
+func parseArpContent(content string) map[string]bool {
+	activeMacs := make(map[string]bool)
+	scanner := bufio.NewScanner(strings.NewReader(content))
 	scanner.Scan()
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
-		// Формат: IP HWType Flags HWAddress Mask Device
-		// Оставляем только те, у которых флаг 0x2 (Reachability) и нормальный MAC
 		if len(fields) >= 4 && fields[2] == "0x2" && fields[3] != "00:00:00:00:00:00" {
 			activeMacs[strings.ToLower(fields[3])] = true
 		}
@@ -70,27 +67,20 @@ func getArpTable() map[string]bool {
 	return activeMacs
 }
 
-// НОВОЕ: Создание .bak файла перед изменением
 func createLocalBackup(filePath string) {
 	if !isSafePath(filePath) { return }
 	content, err := os.ReadFile(filePath)
 	if err == nil {
-		// Пишем в файл с суффиксом .bak
 		os.WriteFile(filePath+".bak", content, 0644)
 	}
 }
 
-// НОВОЕ: Откат из .bak файла
 func rollbackFile(filePath string) error {
 	if !isSafePath(filePath) { return os.ErrPermission }
 	bakPath := filePath + ".bak"
 	content, err := os.ReadFile(bakPath)
 	if err != nil { return err }
-	
-	// Сохраняем текущий сломанный файл как .broken (на всякий случай)
-	createLocalBackup(filePath) 
-	
-	// Возвращаем старый
+	createLocalBackup(filePath)
 	return os.WriteFile(filePath, content, 0644)
 }
 
@@ -102,7 +92,6 @@ func createBackupZip() ([]byte, string, error) {
 	if err != nil { return nil, "", err }
 
 	for _, f := range files {
-		// Игнорируем .bak файлы в ZIP архиве
 		if f.IsDir() || filepath.Ext(f.Name()) != ".conf" { continue }
 		fullPath := filepath.Join(*ConfigDir, f.Name())
 		content, err := os.ReadFile(fullPath)
