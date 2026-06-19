@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 3.1.0)"
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: docker
+    container:
+      image: golang:1.25-alpine
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: apk add --no-cache nodejs npm
+
+      - name: Build frontend
+        run: cd frontend && npm ci && npm run build
+
+      - name: Build Go binary
+        run: CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${{ inputs.version }}" -o intermasq .
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Generate checksum
+        run: sha256sum intermasq > intermasq.sha256
+
+      - name: Upload to Forgejo Packages
+        run: |
+          curl -s -f -X PUT \
+            "https://git.yadr00.internal/api/packages/Build/generic/intermasq/${{ inputs.version }}/intermasq" \
+            -H "Authorization: token ${{ secrets.UPLOAD_TOKEN }}" \
+            --data-binary @intermasq
+
+          curl -s -f -X PUT \
+            "https://git.yadr00.internal/api/packages/Build/generic/intermasq/${{ inputs.version }}/intermasq.sha256" \
+            -H "Authorization: token ${{ secrets.UPLOAD_TOKEN }}" \
+            --data-binary @intermasq.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: intermasq-${{ inputs.version }}-linux-amd64
+          path: |
+            intermasq
+            intermasq.sha256

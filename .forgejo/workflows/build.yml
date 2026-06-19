@@ -1,0 +1,45 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: docker
+    container:
+      image: golang:1.25-alpine
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: apk add --no-cache nodejs npm
+
+      - name: Build frontend
+        run: cd frontend && npm ci && npm run build
+
+      - name: Build Go binary
+        run: go build -o intermasq .
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Format check
+        run: test -z "$(gofmt -l .)"
+
+      - name: Test
+        run: go test ./...
+
+      - name: Smoke test
+        run: ./intermasq --ci-mode --systemd-scope none --port 0 &
+          sleep 2
+          kill %1 2>/dev/null || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: intermasq-linux-amd64
+          path: intermasq
