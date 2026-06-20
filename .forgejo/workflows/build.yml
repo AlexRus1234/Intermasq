@@ -11,6 +11,9 @@ jobs:
     runs-on: docker
     container:
       image: node:22-bookworm
+    env:
+      NODE_EXTRA_CA_CERTS: /tmp/step-ca.crt
+      SSL_CERT_FILE: /tmp/step-ca.crt
     steps:
       - name: Trust Local CA & Configure Git
         run: |
