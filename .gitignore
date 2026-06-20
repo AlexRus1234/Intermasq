@@ -34,3 +34,6 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Plans (local only)
+планы/

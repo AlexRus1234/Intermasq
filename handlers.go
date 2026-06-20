@@ -41,9 +41,14 @@ func statusHandler(c *gin.Context) {
 func setupHandler(c *gin.Context) {
 	mu.Lock()
 	defer mu.Unlock()
-	if len(users) > 0 { c.JSON(403, gin.H{"error": "already_setup"}); return }
+	if len(users) > 0 {
+		c.JSON(403, gin.H{"error": "already_setup"})
+		return
+	}
 	var req AuthReq
-	if err := c.BindJSON(&req); err != nil { return }
+	if err := c.BindJSON(&req); err != nil {
+		return
+	}
 	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	users[req.Username] = string(hash)
 	saveUsers()
@@ -52,12 +57,15 @@ func setupHandler(c *gin.Context) {
 
 func loginHandler(c *gin.Context) {
 	var req AuthReq
-	if err := c.BindJSON(&req); err != nil { return }
+	if err := c.BindJSON(&req); err != nil {
+		return
+	}
 	mu.Lock()
 	hash, ok := users[req.Username]
 	mu.Unlock()
 	if !ok || bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil {
-		c.JSON(401, gin.H{"error": "invalid_credentials"}); return
+		c.JSON(401, gin.H{"error": "invalid_credentials"})
+		return
 	}
 	c.JSON(200, gin.H{"token": makeToken(req.Username)})
 }
@@ -70,19 +78,26 @@ func getArpHandler(c *gin.Context) {
 func getHostsHandler(c *gin.Context) {
 	hosts := []HostEntry{}
 	files, err := os.ReadDir(*ConfigDir)
-	if err != nil { c.JSON(500, gin.H{"error": "dir_read_error"}); return }
+	if err != nil {
+		c.JSON(500, gin.H{"error": "dir_read_error"})
+		return
+	}
 
 	for _, f := range files {
-		if filepath.Ext(f.Name()) != ".conf" { continue }
+		if filepath.Ext(f.Name()) != ".conf" {
+			continue
+		}
 		fullPath := filepath.Join(*ConfigDir, f.Name())
-		
+
 		// Проверяем наличие .bak файла для UI
 		hasBak := false
-		if _, err := os.Stat(fullPath + ".bak"); err == nil { hasBak = true }
+		if _, err := os.Stat(fullPath + ".bak"); err == nil {
+			hasBak = true
+		}
 
 		content, _ := os.ReadFile(fullPath)
 		lines := strings.Split(string(content), "\n")
-		
+
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "dhcp-host=") {
@@ -90,13 +105,20 @@ func getHostsHandler(c *gin.Context) {
 				entry := HostEntry{File: fullPath}
 				for _, p := range parts {
 					p = strings.TrimSpace(p)
-					if macRegex.MatchString(p) { entry.Mac = p } else 
-					if net.ParseIP(p) != nil { entry.Ip = p } else { entry.Hostname = p }
+					if macRegex.MatchString(p) {
+						entry.Mac = p
+					} else if net.ParseIP(p) != nil {
+						entry.Ip = p
+					} else {
+						entry.Hostname = p
+					}
 				}
 				if entry.Mac != "" {
 					// Костыль: добавляем флаг hasBak в поле File через разделитель |
 					// (Чтобы не ломать структуру данных на фронте)
-					if hasBak { entry.File = fullPath + "|has_bak" }
+					if hasBak {
+						entry.File = fullPath + "|has_bak"
+					}
 					hosts = append(hosts, entry)
 				}
 			}
@@ -111,9 +133,12 @@ func getLeasesHandler(c *gin.Context) {
 
 func addHostHandler(c *gin.Context) {
 	var req HostEntry
-	if err := c.BindJSON(&req); err != nil { return }
+	if err := c.BindJSON(&req); err != nil {
+		return
+	}
 	if !macRegex.MatchString(req.Mac) || net.ParseIP(req.Ip) == nil || !hostnameRegex.MatchString(req.Hostname) || !isSafePath(req.File) {
-		c.JSON(400, gin.H{"error": "invalid_data"}); return
+		c.JSON(400, gin.H{"error": "invalid_data"})
+		return
 	}
 
 	mu.Lock()
@@ -122,18 +147,26 @@ func addHostHandler(c *gin.Context) {
 	createLocalBackup(req.File) // БЭКАП ПЕРЕД ИЗМЕНЕНИЕМ
 
 	content, err := os.ReadFile(req.File)
-	if err != nil && !os.IsNotExist(err) { c.JSON(500, gin.H{"error": "file_read_error"}); return }
+	if err != nil && !os.IsNotExist(err) {
+		c.JSON(500, gin.H{"error": "file_read_error"})
+		return
+	}
 
 	lines := strings.Split(string(content), "\n")
 	newLines := []string{}
 	for _, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "dhcp-host=") && strings.Contains(line, req.Mac) { continue }
-		if strings.TrimSpace(line) != "" { newLines = append(newLines, line) }
+		if strings.HasPrefix(strings.TrimSpace(line), "dhcp-host=") && strings.Contains(line, req.Mac) {
+			continue
+		}
+		if strings.TrimSpace(line) != "" {
+			newLines = append(newLines, line)
+		}
 	}
 	newLines = append(newLines, fmt.Sprintf("dhcp-host=%s,%s,%s", req.Mac, req.Hostname, req.Ip))
 
 	if err := os.WriteFile(req.File, []byte(strings.Join(newLines, "\n")+"\n"), 0644); err != nil {
-		c.JSON(500, gin.H{"error": "file_write_error"}); return
+		c.JSON(500, gin.H{"error": "file_write_error"})
+		return
 	}
 	c.JSON(200, gin.H{"status": "ok"})
 }
@@ -141,8 +174,14 @@ func addHostHandler(c *gin.Context) {
 // НОВОЕ: Массовый импорт
 func bulkAddHostsHandler(c *gin.Context) {
 	var req BulkHostReq
-	if err := c.BindJSON(&req); err != nil { c.JSON(400, gin.H{"error": "invalid_data"}); return }
-	if !isSafePath(req.File) { c.JSON(403, gin.H{"error": "access_denied"}); return }
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid_data"})
+		return
+	}
+	if !isSafePath(req.File) {
+		c.JSON(403, gin.H{"error": "access_denied"})
+		return
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -150,11 +189,14 @@ func bulkAddHostsHandler(c *gin.Context) {
 	createLocalBackup(req.File) // БЭКАП ПЕРЕД ИЗМЕНЕНИЕМ
 
 	content, err := os.ReadFile(req.File)
-	if err != nil && !os.IsNotExist(err) { c.JSON(500, gin.H{"error": "read_error"}); return }
+	if err != nil && !os.IsNotExist(err) {
+		c.JSON(500, gin.H{"error": "read_error"})
+		return
+	}
 
 	lines := strings.Split(string(content), "\n")
 	newLines := []string{}
-	
+
 	// Собираем все MAC из нового списка для фильтрации старых
 	newMacs := make(map[string]bool)
 	for _, h := range req.Hosts {
@@ -168,11 +210,18 @@ func bulkAddHostsHandler(c *gin.Context) {
 			parts := strings.Split(line, ",")
 			skip := false
 			for _, p := range parts {
-				if newMacs[strings.ToLower(strings.TrimSpace(p))] { skip = true; break }
+				if newMacs[strings.ToLower(strings.TrimSpace(p))] {
+					skip = true
+					break
+				}
 			}
-			if skip { continue }
+			if skip {
+				continue
+			}
 		}
-		if strings.TrimSpace(line) != "" { newLines = append(newLines, line) }
+		if strings.TrimSpace(line) != "" {
+			newLines = append(newLines, line)
+		}
 	}
 
 	// Добавляем новые
@@ -183,7 +232,8 @@ func bulkAddHostsHandler(c *gin.Context) {
 	}
 
 	if err := os.WriteFile(req.File, []byte(strings.Join(newLines, "\n")+"\n"), 0644); err != nil {
-		c.JSON(500, gin.H{"error": "write_error"}); return
+		c.JSON(500, gin.H{"error": "write_error"})
+		return
 	}
 	c.JSON(200, gin.H{"status": "ok"})
 }
@@ -201,7 +251,7 @@ func deleteHostHandler(c *gin.Context) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	
+
 	createLocalBackup(file)
 
 	content, err := os.ReadFile(file)
@@ -213,7 +263,7 @@ func deleteHostHandler(c *gin.Context) {
 	lines := strings.Split(string(content), "\n")
 	newLines := []string{}
 	found := false
-	
+
 	for _, line := range lines {
 		cleanLine := strings.TrimSpace(line)
 		// === ИСПРАВЛЕНИЕ: ПРИВОДИМ СТРОКУ К НИЖНЕМУ РЕГИСТРУ ДЛЯ ПОИСКА ===
@@ -221,7 +271,9 @@ func deleteHostHandler(c *gin.Context) {
 			found = true
 			continue // Пропускаем (удаляем)
 		}
-		if cleanLine != "" { newLines = append(newLines, line) }
+		if cleanLine != "" {
+			newLines = append(newLines, line)
+		}
 	}
 
 	if found {
@@ -234,8 +286,12 @@ func deleteHostHandler(c *gin.Context) {
 
 // НОВОЕ: Откат файла
 func rollbackHandler(c *gin.Context) {
-	var req struct { File string `json:"file"` }
-	if err := c.BindJSON(&req); err != nil { return }
+	var req struct {
+		File string `json:"file"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		return
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -249,12 +305,18 @@ func rollbackHandler(c *gin.Context) {
 
 func backupHandler(c *gin.Context) {
 	zipBytes, fileName, err := createBackupZip()
-	if err != nil { c.JSON(500, gin.H{"error": "backup_error"}); return }
+	if err != nil {
+		c.JSON(500, gin.H{"error": "backup_error"})
+		return
+	}
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))
 	c.Data(200, "application/zip", zipBytes)
 }
 
 func reloadHandler(c *gin.Context) {
-	if err := reloadDnsmasq(); err != nil { c.JSON(400, gin.H{"error": "reload_error"}); return }
+	if err := reloadDnsmasq(); err != nil {
+		c.JSON(400, gin.H{"error": "reload_error"})
+		return
+	}
 	c.JSON(200, gin.H{"status": "reloaded"})
 }

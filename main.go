@@ -42,16 +42,16 @@ import (
 var staticFiles embed.FS
 
 var (
-	Port          = flag.String("port", "8080", "Port to listen on")
-	DBPath        = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
-	ConfigDir     = flag.String("conf-dir", "/etc/dnsmasq.d", "Directory with dnsmasq configs")
-	LeasesPath    = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
-	ArpPath       = flag.String("arp-file", "/proc/net/arp", "Path to ARP table file")
-	SystemdScope  = flag.String("systemd-scope", "auto", "Systemd scope: auto, system, user, none")
-	CiMode        = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
-	PluginsDir    = "/etc/intermasq/plugins"
-	SocketsDir    = "/run/intermasq/sockets"
-	SecretKey     = []byte(os.Getenv("INTERMASQ_SECRET"))
+	Port         = flag.String("port", "8080", "Port to listen on")
+	DBPath       = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
+	ConfigDir    = flag.String("conf-dir", "/etc/dnsmasq.d", "Directory with dnsmasq configs")
+	LeasesPath   = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
+	ArpPath      = flag.String("arp-file", "/proc/net/arp", "Path to ARP table file")
+	SystemdScope = flag.String("systemd-scope", "auto", "Systemd scope: auto, system, user, none")
+	CiMode       = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
+	PluginsDir   = "/etc/intermasq/plugins"
+	SocketsDir   = "/run/intermasq/sockets"
+	SecretKey    = []byte(os.Getenv("INTERMASQ_SECRET"))
 )
 
 var (
@@ -68,25 +68,35 @@ type PluginManifest struct {
 }
 
 func init() {
-	if len(SecretKey) == 0 { SecretKey = []byte("default-secret") }
+	if len(SecretKey) == 0 {
+		SecretKey = []byte("default-secret")
+	}
 }
 
 func loadPlugins(r *gin.Engine) {
 	os.MkdirAll(SocketsDir, 0770)
 
 	entries, err := os.ReadDir(PluginsDir)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 
 	for _, entry := range entries {
-		if !entry.IsDir() { continue }
-		
+		if !entry.IsDir() {
+			continue
+		}
+
 		path := filepath.Join(PluginsDir, entry.Name())
 		manifestPath := filepath.Join(path, "manifest.json")
 		data, err := os.ReadFile(manifestPath)
-		if err != nil { continue }
+		if err != nil {
+			continue
+		}
 
 		var p PluginManifest
-		if err := json.Unmarshal(data, &p); err != nil { continue }
+		if err := json.Unmarshal(data, &p); err != nil {
+			continue
+		}
 
 		binPath := filepath.Join(path, p.Bin)
 		sockPath := filepath.Join(SocketsDir, p.ID+".sock")
@@ -94,11 +104,11 @@ func loadPlugins(r *gin.Engine) {
 		if _, err := os.Stat(binPath); err == nil {
 			cmd := exec.Command(binPath)
 			cmd.Dir = path
-			cmd.Env = append(os.Environ(), 
+			cmd.Env = append(os.Environ(),
 				fmt.Sprintf("INTERMASQ_KEY=%s", os.Getenv("INTERMASQ_SECRET")),
 				fmt.Sprintf("PLUGIN_SOCKET=%s", sockPath),
 			)
-			
+
 			if err := cmd.Start(); err != nil {
 				fmt.Printf("[PLUGINS] Error starting %s: %v\n", p.Name, err)
 				continue
@@ -142,7 +152,7 @@ func main() {
 		api.GET("/status", statusHandler)
 		api.POST("/setup", setupHandler)
 		api.POST("/login", loginHandler)
-		
+
 		auth := api.Group("/")
 		auth.Use(authMiddleware)
 		{

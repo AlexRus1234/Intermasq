@@ -68,7 +68,7 @@ func authMiddleware(c *gin.Context) {
 	}
 	tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 	token, _ := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) { return SecretKey, nil })
-	
+
 	if token == nil || !token.Valid {
 		c.AbortWithStatus(401)
 		return

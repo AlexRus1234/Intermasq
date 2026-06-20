@@ -68,7 +68,9 @@ func parseArpContent(content string) map[string]bool {
 }
 
 func createLocalBackup(filePath string) {
-	if !isSafePath(filePath) { return }
+	if !isSafePath(filePath) {
+		return
+	}
 	content, err := os.ReadFile(filePath)
 	if err == nil {
 		os.WriteFile(filePath+".bak", content, 0644)
@@ -76,10 +78,14 @@ func createLocalBackup(filePath string) {
 }
 
 func rollbackFile(filePath string) error {
-	if !isSafePath(filePath) { return os.ErrPermission }
+	if !isSafePath(filePath) {
+		return os.ErrPermission
+	}
 	bakPath := filePath + ".bak"
 	content, err := os.ReadFile(bakPath)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	createLocalBackup(filePath)
 	return os.WriteFile(filePath, content, 0644)
 }
@@ -89,16 +95,24 @@ func createBackupZip() ([]byte, string, error) {
 	zipWriter := zip.NewWriter(buf)
 
 	files, err := os.ReadDir(*ConfigDir)
-	if err != nil { return nil, "", err }
+	if err != nil {
+		return nil, "", err
+	}
 
 	for _, f := range files {
-		if f.IsDir() || filepath.Ext(f.Name()) != ".conf" { continue }
+		if f.IsDir() || filepath.Ext(f.Name()) != ".conf" {
+			continue
+		}
 		fullPath := filepath.Join(*ConfigDir, f.Name())
 		content, err := os.ReadFile(fullPath)
-		if err != nil { continue }
+		if err != nil {
+			continue
+		}
 
 		fWriter, err := zipWriter.Create(f.Name())
-		if err != nil { continue }
+		if err != nil {
+			continue
+		}
 		fWriter.Write(content)
 	}
 	zipWriter.Close()
@@ -117,7 +131,9 @@ func parseLeases() []LeaseEntry {
 			fields := strings.Fields(scanner.Text())
 			if len(fields) >= 3 {
 				l := LeaseEntry{Ip: fields[2], Mac: fields[1]}
-				if len(fields) > 3 { l.Hostname = fields[3] }
+				if len(fields) > 3 {
+					l.Hostname = fields[3]
+				}
 				leases = append(leases, l)
 			}
 		}
