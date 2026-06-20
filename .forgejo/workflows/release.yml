@@ -55,12 +55,12 @@ jobs:
           curl -fSR --cacert /tmp/step-ca.crt \
                --user "alexrus:${{ secrets.UPLOAD_TOKEN }}" \
                --upload-file ./intermasq \
-               "https://git.yadr00.internal/api/packages/Build/generic/intermasq/v${VERSION}/intermasq"
+               "https://git.yadr00.internal/api/packages/AlexRus1234/generic/intermasq/v${VERSION}/intermasq"
 
           curl -fSR --cacert /tmp/step-ca.crt \
                --user "alexrus:${{ secrets.UPLOAD_TOKEN }}" \
                --upload-file ./intermasq.sha256 \
-               "https://git.yadr00.internal/api/packages/Build/generic/intermasq/v${VERSION}/intermasq.sha256"
+               "https://git.yadr00.internal/api/packages/AlexRus1234/generic/intermasq/v${VERSION}/intermasq.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v3
