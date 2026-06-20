@@ -42,17 +42,17 @@ import (
 var staticFiles embed.FS
 
 var (
-	Port            = flag.String("port", "8080", "Port to listen on")
-	DBPath          = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
-	ConfigDir       = flag.String("conf-dir", "/etc/dnsmasq.d", "Directory with dnsmasq configs")
-	LeasesPath      = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
-	ArpPath         = flag.String("arp-file", "/proc/net/arp", "Path to ARP table file")
-	InitSystem      = flag.String("init-system", "auto", "Init system: auto, systemd, systemd-user, openrc, runit, sysvinit, none")
-	SystemdScope    = flag.String("systemd-scope", "", "Legacy flag: auto, system, user, none (overrides -init-system if set)")
-	CiMode          = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
-	PluginsDir      = "/etc/intermasq/plugins"
-	SocketsDir      = "/run/intermasq/sockets"
-	SecretKey       = []byte(os.Getenv("INTERMASQ_SECRET"))
+	Port         = flag.String("port", "8080", "Port to listen on")
+	DBPath       = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
+	ConfigDir    = flag.String("conf-dir", "/etc/dnsmasq.d", "Directory with dnsmasq configs")
+	LeasesPath   = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
+	ArpPath      = flag.String("arp-file", "/proc/net/arp", "Path to ARP table file")
+	InitSystem   = flag.String("init-system", "auto", "Init system: auto, systemd, systemd-user, openrc, runit, sysvinit, none")
+	SystemdScope = flag.String("systemd-scope", "", "Legacy flag: auto, system, user, none (overrides -init-system if set)")
+	CiMode       = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
+	PluginsDir   = "/etc/intermasq/plugins"
+	SocketsDir   = "/run/intermasq/sockets"
+	SecretKey    = []byte(os.Getenv("INTERMASQ_SECRET"))
 )
 
 var (
