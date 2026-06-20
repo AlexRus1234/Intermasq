@@ -14,10 +14,18 @@ jobs:
     container:
       image: node:22-bookworm
     steps:
+      - name: Trust Local CA & Configure Git
+        run: |
+          curl -k https://172.20.0.1:9000/roots.pem -o /tmp/step-ca.crt
+          git config --global http.sslCAInfo /tmp/step-ca.crt
+
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install Go
+        env:
+          GOPRIVATE: "git.yadr00.internal/*"
+          GONOSUMDB: "git.yadr00.internal/*"
         run: |
           curl -sL https://go.dev/dl/go1.25.0.linux-amd64.tar.gz | tar -C /usr/local -xz
           echo "/usr/local/go/bin" >> $GITHUB_PATH
@@ -38,16 +46,18 @@ jobs:
         run: sha256sum intermasq > intermasq.sha256
 
       - name: Upload to Forgejo Packages
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          curl -s -f -X PUT \
-            "https://git.yadr00.internal/api/packages/Build/generic/intermasq/${{ inputs.version }}/intermasq" \
-            -H "Authorization: token ${{ secrets.UPLOAD_TOKEN }}" \
-            --data-binary @intermasq
+          curl -fSR --cacert /tmp/step-ca.crt \
+               --user "alexrus:${{ secrets.UPLOAD_TOKEN }}" \
+               --upload-file ./intermasq \
+               "https://git.yadr00.internal/api/packages/Build/generic/intermasq/v${VERSION}/intermasq"
 
-          curl -s -f -X PUT \
-            "https://git.yadr00.internal/api/packages/Build/generic/intermasq/${{ inputs.version }}/intermasq.sha256" \
-            -H "Authorization: token ${{ secrets.UPLOAD_TOKEN }}" \
-            --data-binary @intermasq.sha256
+          curl -fSR --cacert /tmp/step-ca.crt \
+               --user "alexrus:${{ secrets.UPLOAD_TOKEN }}" \
+               --upload-file ./intermasq.sha256 \
+               "https://git.yadr00.internal/api/packages/Build/generic/intermasq/v${VERSION}/intermasq.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v3

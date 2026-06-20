@@ -12,10 +12,18 @@ jobs:
     container:
       image: node:22-bookworm
     steps:
+      - name: Trust Local CA & Configure Git
+        run: |
+          curl -k https://172.20.0.1:9000/roots.pem -o /tmp/step-ca.crt
+          git config --global http.sslCAInfo /tmp/step-ca.crt
+
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install Go
+        env:
+          GOPRIVATE: "git.yadr00.internal/*"
+          GONOSUMDB: "git.yadr00.internal/*"
         run: |
           curl -sL https://go.dev/dl/go1.25.0.linux-amd64.tar.gz | tar -C /usr/local -xz
           echo "/usr/local/go/bin" >> $GITHUB_PATH
