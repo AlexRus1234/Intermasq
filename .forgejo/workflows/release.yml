@@ -12,13 +12,15 @@ jobs:
   release:
     runs-on: docker
     container:
-      image: golang:1.25-alpine
+      image: node:22-bookworm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: apk add --no-cache nodejs npm
+      - name: Install Go
+        run: |
+          curl -sL https://go.dev/dl/go1.25.0.linux-amd64.tar.gz | tar -C /usr/local -xz
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
 
       - name: Build frontend
         run: cd frontend && npm ci && npm run build
