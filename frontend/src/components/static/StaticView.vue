@@ -63,13 +63,6 @@ function cancelEdit() {
     editData.value = null
 }
 
-watch(() => store.transferData, (val) => {
-    if (val && val.mac) {
-        editData.value = null
-        store.transferData = null
-    }
-}, { deep: true })
-
 async function rollbackFile() {
     if(!confirm(t('confirm.rollback', { file: selectedFile.value.split('/').pop() }))) return
     try { 

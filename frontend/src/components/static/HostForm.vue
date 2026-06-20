@@ -88,8 +88,9 @@ watch(() => store.transferData, (data) => {
         form.value.mac = data.mac
         form.value.ip = data.ip
         form.value.hostname = data.hostname
+        store.transferData = null
     }
-})
+}, { immediate: true })
 
 async function saveHost() {
   const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/i;

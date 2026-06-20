@@ -35,7 +35,8 @@
                   </td>
                   
                   <td class="text-end">
-                      <button @click="copyToStatic(l)" class="btn btn-sm btn-outline-primary fw-bold" :title="$t('leases.toStaticTooltip')">
+                      <span v-if="knownMacs.has(l.mac.toLowerCase())" class="badge bg-success">✓ {{ $t('leases.inStatic') }}</span>
+                      <button v-else @click="copyToStatic(l)" class="btn btn-sm btn-outline-primary fw-bold" :title="$t('leases.toStaticTooltip')">
                           ➕ {{ $t('leases.toStatic') }}
                       </button>
                   </td>
@@ -64,6 +65,8 @@ import { ref, computed } from 'vue'
 import { store } from '../../store.js'
 
 const showOnlyNewLeases = ref(false)
+
+const knownMacs = computed(() => new Set(store.hosts.map(h => h.mac.toLowerCase())))
 
 function copyToStatic(lease) {
     store.transferData = {

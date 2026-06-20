@@ -73,6 +73,7 @@
     "unknown": "Unknown",
     "toStaticTooltip": "Make address static",
     "toStatic": "To static",
+    "inStatic": "In static",
     "searchEmpty": "Nothing found for query \"{query}\".",
     "allInStatic": "All connected devices are already in Static!",
     "noLeases": "No active DHCP leases."
