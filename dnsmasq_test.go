@@ -17,6 +17,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -93,19 +94,54 @@ func TestIsSafePath(t *testing.T) {
 }
 
 func TestResolveSystemCaller(t *testing.T) {
-	caller := resolveSystemCaller("none")
-	if _, ok := caller.(*NoneCaller); !ok {
-		t.Error("expected NoneCaller for scope 'none'")
+	tests := []struct {
+		input   string
+		wantStr string
+	}{
+		{"none", "none"},
+		{"systemd-user", "systemd-user"},
+		{"systemd", "systemd"},
+		{"openrc", "openrc"},
+		{"runit", "runit"},
+		{"sysvinit", "sysvinit"},
+	}
+
+	for _, tt := range tests {
+		caller := resolveSystemCaller(tt.input)
+		if !strings.Contains(caller.String(), tt.wantStr) {
+			t.Errorf("resolveSystemCaller(%q) = %q, want containing %q", tt.input, caller.String(), tt.wantStr)
+		}
+	}
+}
+
+func TestResolveSystemCallerLegacy(t *testing.T) {
+	caller := resolveSystemCaller("system")
+	if _, ok := caller.(*SystemdSystemCaller); !ok {
+		t.Error("expected SystemdSystemCaller for legacy scope 'system'")
 	}
 
 	caller = resolveSystemCaller("user")
 	if _, ok := caller.(*SystemdUserCaller); !ok {
-		t.Error("expected SystemdUserCaller for scope 'user'")
+		t.Error("expected SystemdUserCaller for legacy scope 'user'")
 	}
+}
 
-	caller = resolveSystemCaller("system")
-	if _, ok := caller.(*SystemdSystemCaller); !ok {
-		t.Error("expected SystemdSystemCaller for scope 'system'")
+func TestMapLegacyScope(t *testing.T) {
+	tests := []struct {
+		input  string
+		expect string
+	}{
+		{"system", "systemd"},
+		{"user", "systemd-user"},
+		{"none", "none"},
+		{"auto", "auto"},
+		{"openrc", "openrc"},
+	}
+	for _, tt := range tests {
+		result := mapLegacyScope(tt.input)
+		if result != tt.expect {
+			t.Errorf("mapLegacyScope(%q) = %q, want %q", tt.input, result, tt.expect)
+		}
 	}
 }
 
@@ -117,4 +153,46 @@ func TestNoneCaller(t *testing.T) {
 	if caller.Restart("anything") != nil {
 		t.Error("NoneCaller.Restart should always return nil")
 	}
+	if caller.RestartSelf() == nil {
+		t.Error("NoneCaller.RestartSelf should return error")
+	}
+}
+
+func TestOpenRCCaller(t *testing.T) {
+	caller := &OpenRCCaller{UseSudo: false}
+	if caller.String() != "openrc (root)" {
+		t.Errorf("OpenRC String() = %q", caller.String())
+	}
+	callerSudo := &OpenRCCaller{UseSudo: true}
+	if callerSudo.String() != "openrc (via sudo)" {
+		t.Errorf("OpenRC sudo String() = %q", callerSudo.String())
+	}
+}
+
+func TestRunitCaller(t *testing.T) {
+	caller := &RunitCaller{UseSudo: false, ServiceDir: "/etc/service"}
+	if !strings.Contains(caller.String(), "runit") {
+		t.Errorf("Runit String() = %q", caller.String())
+	}
+	if !strings.Contains(caller.String(), "/etc/service") {
+		t.Errorf("Runit String() should contain service dir, got %q", caller.String())
+	}
+}
+
+func TestSysVinitCaller(t *testing.T) {
+	caller := &SysVinitCaller{UseSudo: false}
+	if caller.String() != "sysvinit (root)" {
+		t.Errorf("SysVinit String() = %q", caller.String())
+	}
+	callerSudo := &SysVinitCaller{UseSudo: true}
+	if callerSudo.String() != "sysvinit (via sudo)" {
+		t.Errorf("SysVinit sudo String() = %q", callerSudo.String())
+	}
+}
+
+func TestSystemdCallerRestartSelf(t *testing.T) {
+	caller := &SystemdSystemCaller{UseSudo: false}
+	_ = caller
+	callerUser := &SystemdUserCaller{}
+	_ = callerUser
 }

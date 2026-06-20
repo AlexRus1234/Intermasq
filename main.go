@@ -42,16 +42,17 @@ import (
 var staticFiles embed.FS
 
 var (
-	Port         = flag.String("port", "8080", "Port to listen on")
-	DBPath       = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
-	ConfigDir    = flag.String("conf-dir", "/etc/dnsmasq.d", "Directory with dnsmasq configs")
-	LeasesPath   = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
-	ArpPath      = flag.String("arp-file", "/proc/net/arp", "Path to ARP table file")
-	SystemdScope = flag.String("systemd-scope", "auto", "Systemd scope: auto, system, user, none")
-	CiMode       = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
-	PluginsDir   = "/etc/intermasq/plugins"
-	SocketsDir   = "/run/intermasq/sockets"
-	SecretKey    = []byte(os.Getenv("INTERMASQ_SECRET"))
+	Port            = flag.String("port", "8080", "Port to listen on")
+	DBPath          = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
+	ConfigDir       = flag.String("conf-dir", "/etc/dnsmasq.d", "Directory with dnsmasq configs")
+	LeasesPath      = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
+	ArpPath         = flag.String("arp-file", "/proc/net/arp", "Path to ARP table file")
+	InitSystem      = flag.String("init-system", "auto", "Init system: auto, systemd, systemd-user, openrc, runit, sysvinit, none")
+	SystemdScope    = flag.String("systemd-scope", "", "Legacy flag: auto, system, user, none (overrides -init-system if set)")
+	CiMode          = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
+	PluginsDir      = "/etc/intermasq/plugins"
+	SocketsDir      = "/run/intermasq/sockets"
+	SecretKey       = []byte(os.Getenv("INTERMASQ_SECRET"))
 )
 
 var (
@@ -140,7 +141,19 @@ func loadPlugins(r *gin.Engine) {
 func main() {
 	flag.Parse()
 	loadUsers()
-	initSystemCaller(*SystemdScope)
+
+	initValue := *InitSystem
+	if *SystemdScope != "" {
+		mapped := mapLegacyScope(*SystemdScope)
+		if *SystemdScope != "auto" {
+			fmt.Printf("[INIT] Warning: -systemd-scope is deprecated, use -init-system=%s\n", mapped)
+		}
+		if mapped != "auto" {
+			initValue = mapped
+		}
+	}
+
+	initSystemCaller(initValue)
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
@@ -160,7 +173,11 @@ func main() {
 			auth.POST("/restart-self", func(c *gin.Context) {
 				c.JSON(200, gin.H{"status": "restarting"})
 				if !*CiMode {
-					go func() { exec.Command("/usr/bin/systemctl", "restart", "intermasq").Run() }()
+					go func() {
+						if err := sysCaller.RestartSelf(); err != nil {
+							fmt.Printf("[INIT] self-restart failed: %v\n", err)
+						}
+					}()
 				}
 			})
 			auth.GET("/hosts", getHostsHandler)

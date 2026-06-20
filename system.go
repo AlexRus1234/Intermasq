@@ -26,6 +26,8 @@ import (
 type SystemCaller interface {
 	IsActive(service string) bool
 	Restart(service string) error
+	RestartSelf() error
+	String() string
 }
 
 type SystemdSystemCaller struct {
@@ -53,11 +55,21 @@ func (s *SystemdSystemCaller) Restart(service string) error {
 	return cmd.Run()
 }
 
+func (s *SystemdSystemCaller) RestartSelf() error {
+	var cmd *exec.Cmd
+	if s.UseSudo {
+		cmd = exec.Command("/usr/bin/sudo", "/usr/bin/systemctl", "restart", "intermasq")
+	} else {
+		cmd = exec.Command("/usr/bin/systemctl", "restart", "intermasq")
+	}
+	return cmd.Run()
+}
+
 func (s *SystemdSystemCaller) String() string {
 	if s.UseSudo {
-		return "system (via sudo)"
+		return "systemd (via sudo)"
 	}
-	return "system (root)"
+	return "systemd (root)"
 }
 
 type SystemdUserCaller struct{}
@@ -73,8 +85,142 @@ func (s *SystemdUserCaller) Restart(service string) error {
 	return cmd.Run()
 }
 
+func (s *SystemdUserCaller) RestartSelf() error {
+	cmd := exec.Command("/usr/bin/systemctl", "--user", "restart", "intermasq")
+	return cmd.Run()
+}
+
 func (s *SystemdUserCaller) String() string {
-	return "user"
+	return "systemd-user"
+}
+
+type OpenRCCaller struct {
+	UseSudo bool
+}
+
+func (s *OpenRCCaller) IsActive(service string) bool {
+	var cmd *exec.Cmd
+	if s.UseSudo {
+		cmd = exec.Command("/usr/bin/sudo", "-n", "/usr/bin/rc-service", service, "status")
+	} else {
+		cmd = exec.Command("/usr/bin/rc-service", service, "status")
+	}
+	out, _ := cmd.Output()
+	return strings.Contains(strings.TrimSpace(string(out)), "started")
+}
+
+func (s *OpenRCCaller) Restart(service string) error {
+	var cmd *exec.Cmd
+	if s.UseSudo {
+		cmd = exec.Command("/usr/bin/sudo", "/usr/bin/rc-service", service, "restart")
+	} else {
+		cmd = exec.Command("/usr/bin/rc-service", service, "restart")
+	}
+	return cmd.Run()
+}
+
+func (s *OpenRCCaller) RestartSelf() error {
+	var cmd *exec.Cmd
+	if s.UseSudo {
+		cmd = exec.Command("/usr/bin/sudo", "/usr/bin/rc-service", "intermasq", "restart")
+	} else {
+		cmd = exec.Command("/usr/bin/rc-service", "intermasq", "restart")
+	}
+	return cmd.Run()
+}
+
+func (s *OpenRCCaller) String() string {
+	if s.UseSudo {
+		return "openrc (via sudo)"
+	}
+	return "openrc (root)"
+}
+
+type RunitCaller struct {
+	UseSudo    bool
+	ServiceDir string
+}
+
+func (s *RunitCaller) IsActive(service string) bool {
+	var cmd *exec.Cmd
+	svcPath := s.ServiceDir + "/" + service
+	if s.UseSudo {
+		cmd = exec.Command("/usr/bin/sudo", "-n", "/usr/bin/sv", "status", svcPath)
+	} else {
+		cmd = exec.Command("/usr/bin/sv", "status", svcPath)
+	}
+	out, _ := cmd.Output()
+	return strings.Contains(strings.TrimSpace(string(out)), "run")
+}
+
+func (s *RunitCaller) Restart(service string) error {
+	var cmd *exec.Cmd
+	svcPath := s.ServiceDir + "/" + service
+	if s.UseSudo {
+		cmd = exec.Command("/usr/bin/sudo", "/usr/bin/sv", "restart", svcPath)
+	} else {
+		cmd = exec.Command("/usr/bin/sv", "restart", svcPath)
+	}
+	return cmd.Run()
+}
+
+func (s *RunitCaller) RestartSelf() error {
+	var cmd *exec.Cmd
+	svcPath := s.ServiceDir + "/intermasq"
+	if s.UseSudo {
+		cmd = exec.Command("/usr/bin/sudo", "/usr/bin/sv", "restart", svcPath)
+	} else {
+		cmd = exec.Command("/usr/bin/sv", "restart", svcPath)
+	}
+	return cmd.Run()
+}
+
+func (s *RunitCaller) String() string {
+	if s.UseSudo {
+		return fmt.Sprintf("runit (via sudo, dir=%s)", s.ServiceDir)
+	}
+	return fmt.Sprintf("runit (dir=%s)", s.ServiceDir)
+}
+
+type SysVinitCaller struct {
+	UseSudo bool
+}
+
+func (s *SysVinitCaller) IsActive(service string) bool {
+	var cmd *exec.Cmd
+	if s.UseSudo {
+		cmd = exec.Command("/usr/bin/sudo", "-n", "/usr/sbin/service", service, "status")
+	} else {
+		cmd = exec.Command("/usr/sbin/service", service, "status")
+	}
+	return cmd.Run() == nil
+}
+
+func (s *SysVinitCaller) Restart(service string) error {
+	var cmd *exec.Cmd
+	if s.UseSudo {
+		cmd = exec.Command("/usr/bin/sudo", "/usr/sbin/service", service, "restart")
+	} else {
+		cmd = exec.Command("/usr/sbin/service", service, "restart")
+	}
+	return cmd.Run()
+}
+
+func (s *SysVinitCaller) RestartSelf() error {
+	var cmd *exec.Cmd
+	if s.UseSudo {
+		cmd = exec.Command("/usr/bin/sudo", "/usr/sbin/service", "intermasq", "restart")
+	} else {
+		cmd = exec.Command("/usr/sbin/service", "intermasq", "restart")
+	}
+	return cmd.Run()
+}
+
+func (s *SysVinitCaller) String() string {
+	if s.UseSudo {
+		return "sysvinit (via sudo)"
+	}
+	return "sysvinit (root)"
 }
 
 type NoneCaller struct{}
@@ -87,34 +233,95 @@ func (s *NoneCaller) Restart(service string) error {
 	return nil
 }
 
+func (s *NoneCaller) RestartSelf() error {
+	return fmt.Errorf("self-restart not supported without init system")
+}
+
 func (s *NoneCaller) String() string {
 	return "none"
 }
 
-func detectSystemCaller() SystemCaller {
-	if os.Getuid() == 0 {
-		return &SystemdSystemCaller{UseSudo: false}
-	}
-
-	cmd := exec.Command("/usr/bin/sudo", "-n", "/usr/bin/systemctl", "is-active", "dnsmasq")
-	if err := cmd.Run(); err == nil {
-		return &SystemdSystemCaller{UseSudo: true}
-	}
-
-	cmd = exec.Command("/usr/bin/systemctl", "--user", "is-active", "default.target")
-	if err := cmd.Run(); err == nil {
-		return &SystemdUserCaller{}
-	}
-
-	return &NoneCaller{}
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
-func resolveSystemCaller(scope string) SystemCaller {
-	switch scope {
-	case "system":
+func detectInitSystem() string {
+	comm, err := os.ReadFile("/proc/1/comm")
+	if err == nil {
+		name := strings.TrimSpace(string(comm))
+		switch name {
+		case "systemd":
+			return "systemd"
+		case "runit":
+			return "runit"
+		case "init":
+			if fileExists("/usr/bin/rc-service") {
+				return "openrc"
+			}
+			return "sysvinit"
+		}
+	}
+
+	if fileExists("/usr/bin/systemctl") {
+		return "systemd"
+	}
+	if fileExists("/usr/bin/rc-service") {
+		return "openrc"
+	}
+	if fileExists("/usr/bin/sv") {
+		return "runit"
+	}
+	if fileExists("/usr/sbin/service") {
+		return "sysvinit"
+	}
+
+	return "none"
+}
+
+func detectSystemCaller() SystemCaller {
+	initSystem := detectInitSystem()
+
+	switch initSystem {
+	case "systemd":
+		if os.Getuid() == 0 {
+			return &SystemdSystemCaller{UseSudo: false}
+		}
+		cmd := exec.Command("/usr/bin/sudo", "-n", "/usr/bin/systemctl", "is-active", "dnsmasq")
+		if err := cmd.Run(); err == nil {
+			return &SystemdSystemCaller{UseSudo: true}
+		}
+		cmd = exec.Command("/usr/bin/systemctl", "--user", "is-active", "default.target")
+		if err := cmd.Run(); err == nil {
+			return &SystemdUserCaller{}
+		}
 		return &SystemdSystemCaller{UseSudo: os.Getuid() != 0}
-	case "user":
+	case "openrc":
+		return &OpenRCCaller{UseSudo: os.Getuid() != 0}
+	case "runit":
+		return &RunitCaller{UseSudo: os.Getuid() != 0, ServiceDir: "/etc/service"}
+	case "sysvinit":
+		return &SysVinitCaller{UseSudo: os.Getuid() != 0}
+	default:
+		return &NoneCaller{}
+	}
+}
+
+func resolveSystemCaller(initSystem string) SystemCaller {
+	initSystem = mapLegacyScope(initSystem)
+	useSudo := os.Getuid() != 0
+
+	switch initSystem {
+	case "systemd":
+		return &SystemdSystemCaller{UseSudo: useSudo}
+	case "systemd-user":
 		return &SystemdUserCaller{}
+	case "openrc":
+		return &OpenRCCaller{UseSudo: useSudo}
+	case "runit":
+		return &RunitCaller{UseSudo: useSudo, ServiceDir: "/etc/service"}
+	case "sysvinit":
+		return &SysVinitCaller{UseSudo: useSudo}
 	case "none":
 		return &NoneCaller{}
 	default:
@@ -122,9 +329,22 @@ func resolveSystemCaller(scope string) SystemCaller {
 	}
 }
 
+func mapLegacyScope(scope string) string {
+	switch scope {
+	case "system":
+		return "systemd"
+	case "user":
+		return "systemd-user"
+	case "none":
+		return "none"
+	default:
+		return scope
+	}
+}
+
 var sysCaller SystemCaller
 
-func initSystemCaller(scope string) {
-	sysCaller = resolveSystemCaller(scope)
-	fmt.Printf("[SYSTEMD] Scope: %s\n", sysCaller)
+func initSystemCaller(initSystem string) {
+	sysCaller = resolveSystemCaller(initSystem)
+	fmt.Printf("[INIT] System: %s\n", sysCaller)
 }
