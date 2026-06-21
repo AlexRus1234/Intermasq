@@ -27,6 +27,8 @@ jobs:
         env:
           GOPRIVATE: "git.yadr00.internal/*"
           GONOSUMDB: "git.yadr00.internal/*"
+          GOPROXY: "http://172.20.5.17:10001,direct"
+          GOSUMDB: "off"
         run: |
           curl -sL https://go.dev/dl/go1.25.0.linux-amd64.tar.gz | tar -C /usr/local -xz
           echo "/usr/local/go/bin" >> $GITHUB_PATH
