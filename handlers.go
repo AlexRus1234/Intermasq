@@ -1,19 +1,3 @@
-// Intermasq - Web panel for dnsmasq
-// Copyright (C) 2026 AlexRus1234
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program. If not, see <https://www.gnu.org/licenses/>.
-
 package main
 
 import (
@@ -33,7 +17,7 @@ func statusHandler(c *gin.Context) {
 	defer mu.Unlock()
 	c.JSON(200, gin.H{
 		"setup_required": len(users) == 0,
-		"version":        "2.0",
+		"version":        "3.0",
 		"dnsmasq_active": isActive,
 	})
 }
@@ -70,7 +54,6 @@ func loginHandler(c *gin.Context) {
 	c.JSON(200, gin.H{"token": makeToken(req.Username)})
 }
 
-// НОВОЕ: Возвращает список активных MAC из ARP
 func getArpHandler(c *gin.Context) {
 	c.JSON(200, getArpTable())
 }
@@ -89,7 +72,6 @@ func getHostsHandler(c *gin.Context) {
 		}
 		fullPath := filepath.Join(*ConfigDir, f.Name())
 
-		// Проверяем наличие .bak файла для UI
 		hasBak := false
 		if _, err := os.Stat(fullPath + ".bak"); err == nil {
 			hasBak = true
@@ -114,8 +96,6 @@ func getHostsHandler(c *gin.Context) {
 					}
 				}
 				if entry.Mac != "" {
-					// Костыль: добавляем флаг hasBak в поле File через разделитель |
-					// (Чтобы не ломать структуру данных на фронте)
 					if hasBak {
 						entry.File = fullPath + "|has_bak"
 					}
@@ -131,6 +111,12 @@ func getLeasesHandler(c *gin.Context) {
 	c.JSON(200, parseLeases())
 }
 
+func getUser(c *gin.Context) string {
+	u, _ := c.Get("user")
+	user, _ := u.(string)
+	return user
+}
+
 func addHostHandler(c *gin.Context) {
 	var req HostEntry
 	if err := c.BindJSON(&req); err != nil {
@@ -141,10 +127,25 @@ func addHostHandler(c *gin.Context) {
 		return
 	}
 
+	conflicts := findHostsByIP(req.Ip, req.Mac)
+	if len(conflicts) > 0 {
+		fmt.Printf("[VALIDATION] IP duplicate detected: %s conflicts for IP %s\n", len(conflicts), req.Ip)
+		c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
+		return
+	}
+
+	macConflicts := findHostsByMac(req.Mac)
+	if len(macConflicts) > 0 {
+		fmt.Printf("[VALIDATION] MAC duplicate detected: %s for MAC %s\n", len(macConflicts), req.Mac)
+		c.JSON(409, gin.H{"error": "mac_duplicate", "conflicts": macConflicts})
+		return
+	}
+	fmt.Printf("[VALIDATION] IP %s and MAC %s are unique, proceeding\n", req.Ip, req.Mac)
+
 	mu.Lock()
 	defer mu.Unlock()
 
-	createLocalBackup(req.File) // БЭКАП ПЕРЕД ИЗМЕНЕНИЕМ
+	createLocalBackup(req.File)
 
 	content, err := os.ReadFile(req.File)
 	if err != nil && !os.IsNotExist(err) {
@@ -168,10 +169,19 @@ func addHostHandler(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "file_write_error"})
 		return
 	}
+
+	writeAudit(AuditEntry{
+		User:     getUser(c),
+		Action:   "add",
+		Mac:      req.Mac,
+		Hostname: req.Hostname,
+		Ip:       req.Ip,
+		File:     req.File,
+	})
+
 	c.JSON(200, gin.H{"status": "ok"})
 }
 
-// НОВОЕ: Массовый импорт
 func bulkAddHostsHandler(c *gin.Context) {
 	var req BulkHostReq
 	if err := c.BindJSON(&req); err != nil {
@@ -183,10 +193,38 @@ func bulkAddHostsHandler(c *gin.Context) {
 		return
 	}
 
+	for i, h1 := range req.Hosts {
+		if !macRegex.MatchString(h1.Mac) || net.ParseIP(h1.Ip) == nil || !hostnameRegex.MatchString(h1.Hostname) {
+			continue
+		}
+		for j, h2 := range req.Hosts {
+			if i != j && h2.Ip == h1.Ip && strings.ToLower(h2.Mac) != strings.ToLower(h1.Mac) {
+				c.JSON(409, gin.H{"error": "ip_duplicate_bulk", "ip": h1.Ip, "mac1": h1.Mac, "mac2": h2.Mac})
+				return
+			}
+		}
+	}
+
+	for _, h := range req.Hosts {
+		if !macRegex.MatchString(h.Mac) || net.ParseIP(h.Ip) == nil || !hostnameRegex.MatchString(h.Hostname) {
+			continue
+		}
+		conflicts := findHostsByIP(h.Ip, h.Mac)
+		if len(conflicts) > 0 {
+			c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
+			return
+		}
+		macConflicts := findHostsByMac(h.Mac)
+		if len(macConflicts) > 0 {
+			c.JSON(409, gin.H{"error": "mac_duplicate", "conflicts": macConflicts})
+			return
+		}
+	}
+
 	mu.Lock()
 	defer mu.Unlock()
 
-	createLocalBackup(req.File) // БЭКАП ПЕРЕД ИЗМЕНЕНИЕМ
+	createLocalBackup(req.File)
 
 	content, err := os.ReadFile(req.File)
 	if err != nil && !os.IsNotExist(err) {
@@ -197,7 +235,6 @@ func bulkAddHostsHandler(c *gin.Context) {
 	lines := strings.Split(string(content), "\n")
 	newLines := []string{}
 
-	// Собираем все MAC из нового списка для фильтрации старых
 	newMacs := make(map[string]bool)
 	for _, h := range req.Hosts {
 		if macRegex.MatchString(h.Mac) && net.ParseIP(h.Ip) != nil && hostnameRegex.MatchString(h.Hostname) {
@@ -224,7 +261,6 @@ func bulkAddHostsHandler(c *gin.Context) {
 		}
 	}
 
-	// Добавляем новые
 	for _, h := range req.Hosts {
 		if newMacs[strings.ToLower(h.Mac)] {
 			newLines = append(newLines, fmt.Sprintf("dhcp-host=%s,%s,%s", h.Mac, h.Hostname, h.Ip))
@@ -235,6 +271,14 @@ func bulkAddHostsHandler(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "write_error"})
 		return
 	}
+
+	writeAudit(AuditEntry{
+		User:   getUser(c),
+		Action: "bulk_add",
+		File:   req.File,
+		Mac:    fmt.Sprintf("%d hosts", len(req.Hosts)),
+	})
+
 	c.JSON(200, gin.H{"status": "ok"})
 }
 
@@ -246,7 +290,6 @@ func deleteHostHandler(c *gin.Context) {
 		return
 	}
 
-	// === ИСПРАВЛЕНИЕ: ПРИВОДИМ MAC К НИЖНЕМУ РЕГИСТРУ ===
 	macLower := strings.ToLower(mac)
 
 	mu.Lock()
@@ -263,13 +306,22 @@ func deleteHostHandler(c *gin.Context) {
 	lines := strings.Split(string(content), "\n")
 	newLines := []string{}
 	found := false
+	var deletedHostname, deletedIP string
 
 	for _, line := range lines {
 		cleanLine := strings.TrimSpace(line)
-		// === ИСПРАВЛЕНИЕ: ПРИВОДИМ СТРОКУ К НИЖНЕМУ РЕГИСТРУ ДЛЯ ПОИСКА ===
 		if strings.HasPrefix(cleanLine, "dhcp-host=") && strings.Contains(strings.ToLower(cleanLine), macLower) {
 			found = true
-			continue // Пропускаем (удаляем)
+			parts := strings.Split(strings.TrimPrefix(cleanLine, "dhcp-host="), ",")
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if net.ParseIP(p) != nil {
+					deletedIP = p
+				} else if !macRegex.MatchString(p) && p != "" {
+					deletedHostname = p
+				}
+			}
+			continue
 		}
 		if cleanLine != "" {
 			newLines = append(newLines, line)
@@ -277,14 +329,26 @@ func deleteHostHandler(c *gin.Context) {
 	}
 
 	if found {
-		os.WriteFile(file, []byte(strings.Join(newLines, "\n")+"\n"), 0644)
+		if err := os.WriteFile(file, []byte(strings.Join(newLines, "\n")+"\n"), 0644); err != nil {
+			c.JSON(500, gin.H{"error": "file_write_error"})
+			return
+		}
+
+		writeAudit(AuditEntry{
+			User:     getUser(c),
+			Action:   "delete",
+			Mac:      mac,
+			Hostname: deletedHostname,
+			Ip:       deletedIP,
+			File:     file,
+		})
+
 		c.JSON(200, gin.H{"status": "deleted"})
 	} else {
 		c.JSON(404, gin.H{"error": "host_not_found"})
 	}
 }
 
-// НОВОЕ: Откат файла
 func rollbackHandler(c *gin.Context) {
 	var req struct {
 		File string `json:"file"`
@@ -300,6 +364,13 @@ func rollbackHandler(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "rollback_error"})
 		return
 	}
+
+	writeAudit(AuditEntry{
+		User:   getUser(c),
+		Action: "rollback",
+		File:   req.File,
+	})
+
 	c.JSON(200, gin.H{"status": "rollback_ok"})
 }
 
@@ -318,5 +389,128 @@ func reloadHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "reload_error"})
 		return
 	}
+
+	writeAudit(AuditEntry{
+		User:   getUser(c),
+		Action: "reload",
+	})
+
 	c.JSON(200, gin.H{"status": "reloaded"})
+}
+
+func exportCSVHandler(c *gin.Context) {
+	hosts := readAllHosts()
+	csvData := hostsToCSV(hosts)
+	c.Header("Content-Disposition", "attachment; filename=intermasq_hosts.csv")
+	c.Data(200, "text/csv", csvData)
+}
+
+func importCSVHandler(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(400, gin.H{"error": "no_file"})
+		return
+	}
+
+	targetFile := c.PostForm("target_file")
+	if !isSafePath(targetFile) {
+		c.JSON(403, gin.H{"error": "access_denied"})
+		return
+	}
+
+	f, err := file.Open()
+	if err != nil {
+		c.JSON(500, gin.H{"error": "read_error"})
+		return
+	}
+	defer f.Close()
+
+	hosts, err := parseCSVHosts(f, targetFile)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "invalid_csv"})
+		return
+	}
+
+	if len(hosts) == 0 {
+		c.JSON(400, gin.H{"error": "csv_empty"})
+		return
+	}
+
+	for i, h1 := range hosts {
+		for j, h2 := range hosts {
+			if i != j && h2.Ip == h1.Ip && strings.ToLower(h2.Mac) != strings.ToLower(h1.Mac) {
+				c.JSON(409, gin.H{"error": "ip_duplicate_bulk", "ip": h1.Ip, "mac1": h1.Mac, "mac2": h2.Mac})
+				return
+			}
+		}
+	}
+
+	for _, h := range hosts {
+		conflicts := findHostsByIP(h.Ip, h.Mac)
+		if len(conflicts) > 0 {
+			c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
+			return
+		}
+		macConflicts := findHostsByMac(h.Mac)
+		if len(macConflicts) > 0 {
+			c.JSON(409, gin.H{"error": "mac_duplicate", "conflicts": macConflicts})
+			return
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	createLocalBackup(targetFile)
+
+	content, err := os.ReadFile(targetFile)
+	if err != nil && !os.IsNotExist(err) {
+		c.JSON(500, gin.H{"error": "read_error"})
+		return
+	}
+
+	lines := strings.Split(string(content), "\n")
+	newLines := []string{}
+
+	newMacs := make(map[string]bool)
+	for _, h := range hosts {
+		newMacs[strings.ToLower(h.Mac)] = true
+	}
+
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "dhcp-host=") {
+			parts := strings.Split(line, ",")
+			skip := false
+			for _, p := range parts {
+				if newMacs[strings.ToLower(strings.TrimSpace(p))] {
+					skip = true
+					break
+				}
+			}
+			if skip {
+				continue
+			}
+		}
+		if strings.TrimSpace(line) != "" {
+			newLines = append(newLines, line)
+		}
+	}
+
+	for _, h := range hosts {
+		newLines = append(newLines, fmt.Sprintf("dhcp-host=%s,%s,%s", h.Mac, h.Hostname, h.Ip))
+	}
+
+	if err := os.WriteFile(targetFile, []byte(strings.Join(newLines, "\n")+"\n"), 0644); err != nil {
+		c.JSON(500, gin.H{"error": "write_error"})
+		return
+	}
+
+	writeAudit(AuditEntry{
+		User:   getUser(c),
+		Action: "bulk_add",
+		File:   targetFile,
+		Mac:    fmt.Sprintf("%d hosts (csv)", len(hosts)),
+	})
+
+	c.JSON(200, gin.H{"status": "ok", "count": len(hosts)})
 }

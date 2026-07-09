@@ -50,6 +50,7 @@ var (
 	InitSystem   = flag.String("init-system", "auto", "Init system: auto, systemd, systemd-user, openrc, runit, sysvinit, none")
 	SystemdScope = flag.String("systemd-scope", "", "Legacy flag: auto, system, user, none (overrides -init-system if set)")
 	CiMode       = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
+	AuditLogPath = flag.String("audit-log", "/etc/intermasq/audit.log", "Path to audit log file")
 	PluginsDir   = "/etc/intermasq/plugins"
 	SocketsDir   = "/run/intermasq/sockets"
 	SecretKey    = []byte(os.Getenv("INTERMASQ_SECRET"))
@@ -183,6 +184,9 @@ func main() {
 			auth.GET("/hosts", getHostsHandler)
 			auth.GET("/leases", getLeasesHandler)
 			auth.GET("/arp", getArpHandler)
+			auth.GET("/audit", auditHandler)
+			auth.GET("/hosts/csv", exportCSVHandler)
+			auth.POST("/hosts/csv", importCSVHandler)
 			auth.POST("/hosts", addHostHandler)
 			auth.POST("/hosts/bulk", bulkAddHostsHandler)
 			auth.DELETE("/hosts/:mac", deleteHostHandler)

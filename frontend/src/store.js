@@ -15,6 +15,7 @@ export const store = reactive({
     leases: [],
     arpTable: {},
     plugins: [],
+    auditLog: [],
     
     transferData: null 
 })
@@ -49,16 +50,18 @@ export const actions = {
 
     async loadData() {
         try {
-            const [hRes, lRes, aRes, pRes] = await Promise.all([
+            const [hRes, lRes, aRes, pRes, auditRes] = await Promise.all([
                 api.get('/hosts'), 
                 api.get('/leases'), 
                 api.get('/arp'),
-                api.get('/plugins').catch(() => ({ data: [] }))
+                api.get('/plugins').catch(() => ({ data: [] })),
+                api.get('/audit').catch(() => ({ data: [] }))
             ])
             store.hosts = hRes.data
             store.leases = lRes.data
             store.arpTable = aRes.data
             store.plugins = pRes.data
+            store.auditLog = auditRes.data.reverse()
         } catch (e) {
             if (e.response?.status === 401) this.logout()
             else store.view = 'error'
@@ -100,5 +103,39 @@ export const actions = {
             alert(t('alert.restartInProgress'))
             setTimeout(() => location.reload(), 5000)
         } catch (e) { alert(t('alert.restartError')) }
+    },
+
+    async loadAudit() {
+        try {
+            const res = await api.get('/audit')
+            store.auditLog = res.data.reverse()
+        } catch (e) {}
+    },
+
+    async downloadCSV() {
+        try {
+            const res = await api.get('/hosts/csv', { responseType: 'blob' })
+            const url = window.URL.createObjectURL(new Blob([res.data]))
+            const link = document.createElement('a')
+            link.href = url
+            link.setAttribute('download', 'intermasq_hosts.csv')
+            document.body.appendChild(link); link.click(); document.body.removeChild(link)
+        } catch (e) { alert(t('alert.csvExportError')) }
+    },
+
+    async importCSV(file, targetFile) {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('target_file', targetFile)
+        try {
+            const res = await api.post('/hosts/csv', formData)
+            alert(t('alert.csvImportSuccess', { count: res.data.count }))
+            this.loadData()
+            return true
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.csvImportError')
+            alert(msg)
+            return false
+        }
     }
 }

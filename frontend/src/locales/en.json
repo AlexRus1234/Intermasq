@@ -14,9 +14,12 @@
     "retryConnection": "Retry connection",
     "tabStatic": "Static",
     "tabLeases": "Leases",
+    "tabAudit": "History",
     "searchPlaceholder": "Search by MAC, IP, Hostname...",
     "backup": "Backup",
     "downloadArchive": "Download archive",
+    "csvExport": "CSV",
+    "csvExportTooltip": "Export to CSV",
     "apply": "Apply",
     "plugin": "Plugin",
     "close": "Close"
@@ -46,6 +49,7 @@
     "devices": "devices",
     "destFile": "Destination file",
     "importBtn": "Import",
+    "csvMode": "CSV file",
     "allFiles": "All files",
     "rollback": "Rollback",
     "rollbackTooltip": "Undo last change to file",
@@ -99,7 +103,12 @@
     "bulkDeleteError": "Bulk delete error",
     "rollbackSuccess": "Rollback completed successfully!",
     "rollbackError": "Rollback error",
-    "destFileRequired": "Destination file is required"
+    "destFileRequired": "Destination file is required",
+    "csvExportError": "CSV export error",
+    "csvImportError": "CSV import error",
+    "csvImportSuccess": "Successfully imported {count} devices from CSV!",
+    "ipDuplicate": "IP {ip} already used by {hostname} ({mac}) in {file}",
+    "ipDuplicateBulk": "IP {ip} assigned to multiple devices in import"
   },
   "api": {
     "already_setup": "Already set up",
@@ -115,6 +124,23 @@
     "backup_error": "Backup error",
     "reload_error": "Reload error!",
     "access_denied": "Access denied",
-    "bad_request": "Bad request"
+    "bad_request": "Bad request",
+    "ip_duplicate": "This IP is already in use",
+    "ip_duplicate_bulk": "Duplicate IP in import",
+    "mac_duplicate": "This MAC is already used in another file",
+    "no_file": "No file uploaded",
+    "invalid_csv": "Invalid CSV format",
+    "csv_empty": "CSV file is empty or contains no valid entries"
+  },
+  "audit": {
+    "title": "Change history",
+    "empty": "Change history is empty",
+    "time": "Time",
+    "user": "User",
+    "action": "Action",
+    "mac": "MAC",
+    "ip": "IP",
+    "hostname": "Hostname",
+    "file": "File"
   }
 }

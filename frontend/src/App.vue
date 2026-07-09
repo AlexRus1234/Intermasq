@@ -6,6 +6,7 @@ import { store, actions } from './store.js'
 import AuthScreen from './components/AuthScreen.vue'
 import StaticView from './components/static/StaticView.vue'
 import LeasesTab from './components/leases/LeasesTab.vue'
+import AuditTab from './components/audit/AuditTab.vue'
 
 const { locale } = useI18n()
 
@@ -35,7 +36,7 @@ onUnmounted(() => { clearInterval(arpInterval) })
 </script>
 
 <template>
-  <div class="container mt-4">
+  <div class="container-fluid mt-4 px-4 px-lg-5">
     
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="fw-bold d-flex align-items-center mb-0">
@@ -86,6 +87,7 @@ onUnmounted(() => { clearInterval(arpInterval) })
                     <div class="btn-group w-100">
                         <button @click="store.tab='static'" :class="['btn', store.tab==='static' ? 'btn-primary' : 'btn-outline-primary']">{{ $t('app.tabStatic') }}</button>
                         <button @click="store.tab='leases'" :class="['btn', store.tab==='leases' ? 'btn-primary' : 'btn-outline-primary']">{{ $t('app.tabLeases') }}</button>
+                        <button @click="store.tab='audit'" :class="['btn', store.tab==='audit' ? 'btn-primary' : 'btn-outline-primary']">{{ $t('app.tabAudit') }}</button>
                     </div>
                 </div>
                 <div class="col-12 col-md">
@@ -93,21 +95,29 @@ onUnmounted(() => { clearInterval(arpInterval) })
                 </div>
                 <div class="col-12 col-md-auto text-md-end d-flex gap-2 justify-content-end">
                     <button @click="actions.downloadBackup()" class="btn btn-outline-info fw-bold" :title="$t('app.downloadArchive')">💾 {{ $t('app.backup') }}</button>
+                    <button @click="actions.downloadCSV()" class="btn btn-outline-success fw-bold" :title="$t('app.csvExportTooltip')">📥 {{ $t('app.csvExport') }}</button>
                     <button @click="actions.applyConfig()" class="btn btn-warning fw-bold text-dark">🔄 {{ $t('app.apply') }}</button>
                 </div>
             </div>
 
             <StaticView v-if="store.tab === 'static'" />
             <LeasesTab v-if="store.tab === 'leases'" />
+            <AuditTab v-if="store.tab === 'audit'" />
         </div>
 
-        <div v-if="store.tab.startsWith('plugin-')" class="card shadow-sm h-100 fade-in">
-            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-                <span>🧩 {{ $t('app.plugin') }}</span>
-                <button class="btn btn-sm btn-outline-light" @click="store.tab='static'">✕ {{ $t('app.close') }}</button>
-            </div>
-            <div class="card-body p-0" style="height: 80vh;">
-                <iframe :src="'/plugins/' + store.tab.replace('plugin-', '') + '/'" style="width: 100%; height: 100%; border: none;"></iframe>
+        <!-- 2. ОКНО ПЛАГИНА (полная ширина viewport, поверх приложения) -->
+        <div v-if="store.tab.startsWith('plugin-')" class="plugin-overlay fade-in">
+            <div class="card shadow-sm w-100 border-0">
+                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center py-3">
+                    <span class="fw-bold fs-5">🧩 {{ $t('app.plugin') }}</span>
+                    <button class="btn btn-sm btn-outline-light px-3" @click="store.tab='static'">✕ {{ $t('app.close') }}</button>
+                </div>
+                <div class="card-body p-0 w-100" style="height: calc(100vh - 120px); min-height: 600px;">
+                    <iframe
+                        :src="'/plugins/' + store.tab.replace('plugin-', '') + '/'"
+                        style="width: 100%; height: 100%; border: none; display: block;">
+                    </iframe>
+                </div>
             </div>
         </div>
         
@@ -118,4 +128,15 @@ onUnmounted(() => { clearInterval(arpInterval) })
 <style>
 .fade-in { animation: fadeIn 0.3s ease-in-out; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-</style>
+
+.plugin-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1050;
+    background: var(--bs-body-bg, #fff);
+    padding: 1rem;
+    overflow: auto;
+}</style>

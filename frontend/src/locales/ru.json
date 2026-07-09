@@ -14,9 +14,12 @@
     "retryConnection": "Повторить подключение",
     "tabStatic": "Статика",
     "tabLeases": "Аренды",
+    "tabAudit": "История",
     "searchPlaceholder": "Поиск по MAC, IP, Имени...",
     "backup": "Бэкап",
     "downloadArchive": "Скачать архив",
+    "csvExport": "CSV",
+    "csvExportTooltip": "Экспорт в CSV",
     "apply": "Применить",
     "plugin": "Плагин",
     "close": "Закрыть"
@@ -46,6 +49,7 @@
     "devices": "устройств",
     "destFile": "Файл назначения",
     "importBtn": "Импортировать",
+    "csvMode": "CSV файл",
     "allFiles": "Все файлы",
     "rollback": "Откат",
     "rollbackTooltip": "Отменить последнее изменение файла",
@@ -99,7 +103,12 @@
     "bulkDeleteError": "Ошибка массового удаления",
     "rollbackSuccess": "Откат выполнен успешно!",
     "rollbackError": "Ошибка отката",
-    "destFileRequired": "Укажите файл назначения"
+    "destFileRequired": "Укажите файл назначения",
+    "csvExportError": "Ошибка экспорта CSV",
+    "csvImportError": "Ошибка импорта CSV",
+    "csvImportSuccess": "Успешно импортировано {count} устройств из CSV!",
+    "ipDuplicate": "IP {ip} уже используется хостом {hostname} ({mac}) в файле {file}",
+    "ipDuplicateBulk": "IP {ip} указан для нескольких устройств в импорте"
   },
   "api": {
     "already_setup": "Уже настроено",
@@ -115,6 +124,23 @@
     "backup_error": "Ошибка бэкапа",
     "reload_error": "Ошибка перезапуска!",
     "access_denied": "Доступ запрещён",
-    "bad_request": "Некорректный запрос"
+    "bad_request": "Некорректный запрос",
+    "ip_duplicate": "Этот IP уже используется",
+    "ip_duplicate_bulk": "Дубликат IP в импорте",
+    "mac_duplicate": "Этот MAC уже используется в другом файле",
+    "no_file": "Файл не загружен",
+    "invalid_csv": "Неверный формат CSV",
+    "csv_empty": "CSV файл пуст или не содержит валидных записей"
+  },
+  "audit": {
+    "title": "История изменений",
+    "empty": "История изменений пуста",
+    "time": "Время",
+    "user": "Пользователь",
+    "action": "Действие",
+    "mac": "MAC",
+    "ip": "IP",
+    "hostname": "Имя",
+    "file": "Файл"
   }
 }

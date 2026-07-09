@@ -20,7 +20,10 @@ import (
 	"archive/zip"
 	"bufio"
 	"bytes"
+	"encoding/csv"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -139,4 +142,174 @@ func parseLeases() []LeaseEntry {
 		}
 	}
 	return leases
+}
+
+func findHostsByIP(ip, excludeMac string) []HostEntry {
+	result := []HostEntry{}
+	excludeMacLower := strings.ToLower(excludeMac)
+
+	files, err := os.ReadDir(*ConfigDir)
+	if err != nil {
+		return result
+	}
+
+	for _, f := range files {
+		if filepath.Ext(f.Name()) != ".conf" {
+			continue
+		}
+		fullPath := filepath.Join(*ConfigDir, f.Name())
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "dhcp-host=") {
+				continue
+			}
+			parts := strings.Split(strings.TrimPrefix(line, "dhcp-host="), ",")
+			entry := HostEntry{File: fullPath}
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if macRegex.MatchString(p) {
+					entry.Mac = p
+				} else if net.ParseIP(p) != nil {
+					entry.Ip = p
+				} else {
+					entry.Hostname = p
+				}
+			}
+			if entry.Ip == ip && strings.ToLower(entry.Mac) != excludeMacLower {
+				result = append(result, entry)
+			}
+		}
+	}
+	return result
+}
+
+func findHostsByMac(mac string) []HostEntry {
+	result := []HostEntry{}
+	macLower := strings.ToLower(mac)
+
+	files, err := os.ReadDir(*ConfigDir)
+	if err != nil {
+		return result
+	}
+
+	for _, f := range files {
+		if filepath.Ext(f.Name()) != ".conf" {
+			continue
+		}
+		fullPath := filepath.Join(*ConfigDir, f.Name())
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "dhcp-host=") {
+				continue
+			}
+			parts := strings.Split(strings.TrimPrefix(line, "dhcp-host="), ",")
+			entry := HostEntry{File: fullPath}
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if macRegex.MatchString(p) {
+					entry.Mac = p
+				} else if net.ParseIP(p) != nil {
+					entry.Ip = p
+				} else {
+					entry.Hostname = p
+				}
+			}
+			if strings.ToLower(entry.Mac) == macLower {
+				result = append(result, entry)
+			}
+		}
+	}
+	return result
+}
+
+func readAllHosts() []HostEntry {
+	hosts := []HostEntry{}
+	files, err := os.ReadDir(*ConfigDir)
+	if err != nil {
+		return hosts
+	}
+
+	for _, f := range files {
+		if filepath.Ext(f.Name()) != ".conf" {
+			continue
+		}
+		fullPath := filepath.Join(*ConfigDir, f.Name())
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "dhcp-host=") {
+				continue
+			}
+			parts := strings.Split(strings.TrimPrefix(line, "dhcp-host="), ",")
+			entry := HostEntry{File: fullPath}
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if macRegex.MatchString(p) {
+					entry.Mac = p
+				} else if net.ParseIP(p) != nil {
+					entry.Ip = p
+				} else {
+					entry.Hostname = p
+				}
+			}
+			if entry.Mac != "" {
+				hosts = append(hosts, entry)
+			}
+		}
+	}
+	return hosts
+}
+
+func hostsToCSV(hosts []HostEntry) []byte {
+	buf := new(bytes.Buffer)
+	w := csv.NewWriter(buf)
+	w.Write([]string{"mac", "ip", "hostname"})
+	for _, h := range hosts {
+		w.Write([]string{h.Mac, h.Ip, h.Hostname})
+	}
+	w.Flush()
+	return buf.Bytes()
+}
+
+func parseCSVHosts(r io.Reader, targetFile string) ([]HostEntry, error) {
+	reader := csv.NewReader(r)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+
+	hosts := []HostEntry{}
+	for i, row := range records {
+		if i == 0 {
+			continue
+		}
+		if len(row) < 3 {
+			continue
+		}
+		mac := strings.TrimSpace(row[0])
+		ip := strings.TrimSpace(row[1])
+		hostname := strings.TrimSpace(row[2])
+
+		if macRegex.MatchString(mac) && net.ParseIP(ip) != nil && hostnameRegex.MatchString(hostname) {
+			hosts = append(hosts, HostEntry{Mac: mac, Ip: ip, Hostname: hostname, File: targetFile})
+		}
+	}
+	return hosts, nil
 }

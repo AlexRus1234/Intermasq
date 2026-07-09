@@ -52,15 +52,13 @@ func makeToken(user string) string {
 }
 
 func authMiddleware(c *gin.Context) {
-	// 1. ПРОВЕРКА STATIC API KEY (Для скриптов и плагинов)
-	// Если пришел правильный X-API-Key, пропускаем без JWT
 	apiKey := c.GetHeader("X-API-Key")
 	if apiKey != "" && apiKey == string(SecretKey) {
+		c.Set("user", "api-key")
 		c.Next()
 		return
 	}
 
-	// 2. ПРОВЕРКА JWT (Для браузера)
 	authHeader := c.GetHeader("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
 		c.AbortWithStatus(401)
@@ -72,6 +70,12 @@ func authMiddleware(c *gin.Context) {
 	if token == nil || !token.Valid {
 		c.AbortWithStatus(401)
 		return
+	}
+
+	if claims, ok := token.Claims.(jwt.MapClaims); ok {
+		if sub, ok := claims["sub"].(string); ok {
+			c.Set("user", sub)
+		}
 	}
 	c.Next()
 }

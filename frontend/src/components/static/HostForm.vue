@@ -5,29 +5,32 @@
               {{ isEditing ? '✏️ ' + $t('hosts.editing') : (selectedFile === 'all' ? '➕ ' + $t('hosts.newDevice') : '➕ ' + $t('hosts.addTo') + ' ' + selectedFile.split('/').pop()) }}
           </h6>
           
-          <div v-if="!isEditing" class="form-check form-switch mb-0">
-              <input class="form-check-input" type="checkbox" id="importMode" v-model="isImportMode">
-              <label class="form-check-label small text-muted" for="importMode">{{ $t('hosts.importList') }}</label>
+          <div v-if="!isEditing">
+              <select v-model="importMode" class="form-select form-select-sm" style="width: auto;">
+                  <option value="single">{{ $t('hosts.add') }}</option>
+                  <option value="text">{{ $t('hosts.importList') }}</option>
+                  <option value="csv">{{ $t('hosts.csvMode') }}</option>
+              </select>
           </div>
           
           <button v-if="isEditing" @click="$emit('cancel-edit')" class="btn btn-sm btn-outline-secondary">✕ {{ $t('hosts.cancel') }}</button>
       </div>
       
-      <div v-if="!isImportMode" class="row g-2">
-        <div class="col-md-3"><input v-model="form.mac" :placeholder="'MAC (aa:bb...)'" class="form-control"></div>
-        <div class="col-md-3"><input v-model="form.ip" placeholder="IP (172.20...)" class="form-control"></div>
-        <div class="col-md-3"><input v-model="form.hostname" placeholder="Hostname" class="form-control"></div>
-        <div class="col-md-3">
-            <div class="input-group">
-                <input v-model="form.file" :readonly="selectedFile !== 'all' && !isEditing" :class="['form-control', (selectedFile !== 'all' && !isEditing) ? 'bg-light' : '']" :placeholder="$t('hosts.filePlaceholder')">
-                <button @click="saveHost" class="btn fw-bold" :class="isEditing ? 'btn-warning' : 'btn-success'">
-                    {{ isEditing ? $t('hosts.save') : $t('hosts.add') }}
-                </button>
-            </div>
-        </div>
+      <div v-if="importMode === 'single'" class="row g-2">
+          <div class="col-md-3"><input v-model="form.mac" :placeholder="'MAC (aa:bb...)'" class="form-control"></div>
+          <div class="col-md-3"><input v-model="form.ip" placeholder="IP (172.20...)" class="form-control"></div>
+          <div class="col-md-3"><input v-model="form.hostname" placeholder="Hostname" class="form-control"></div>
+          <div class="col-md-3">
+              <div class="input-group">
+                  <input v-model="form.file" :readonly="selectedFile !== 'all' && !isEditing" :class="['form-control', (selectedFile !== 'all' && !isEditing) ? 'bg-light' : '']" :placeholder="$t('hosts.filePlaceholder')">
+                  <button @click="saveHost" class="btn fw-bold" :class="isEditing ? 'btn-warning' : 'btn-success'">
+                      {{ isEditing ? $t('hosts.save') : $t('hosts.add') }}
+                  </button>
+              </div>
+          </div>
       </div>
 
-      <div v-if="isImportMode" class="row g-2 fade-in">
+      <div v-if="importMode === 'text'" class="row g-2 fade-in">
           <div class="col-12">
               <textarea v-model="bulkText" class="form-control font-monospace" rows="4" :placeholder="$t('hosts.bulkPlaceholder')"></textarea>
           </div>
@@ -36,6 +39,19 @@
               <div class="input-group" style="width: auto;">
                   <input v-model="form.file" :readonly="selectedFile !== 'all'" :class="['form-control', selectedFile !== 'all' ? 'bg-light' : '']" :placeholder="$t('hosts.destFile')">
                   <button @click="saveBulkHosts" class="btn btn-success fw-bold" :disabled="parsedBulkHosts.length === 0">{{ $t('hosts.importBtn') }}</button>
+              </div>
+          </div>
+      </div>
+
+      <div v-if="importMode === 'csv'" class="row g-2 fade-in">
+          <div class="col-12">
+              <input type="file" accept=".csv" @change="onCsvFileSelected" class="form-control" ref="csvInput">
+          </div>
+          <div class="col-12 d-flex justify-content-between align-items-center">
+              <span class="text-muted small">{{ csvFileName || $t('hosts.csvMode') }}</span>
+              <div class="input-group" style="width: auto;">
+                  <input v-model="form.file" :readonly="selectedFile !== 'all'" :class="['form-control', selectedFile !== 'all' ? 'bg-light' : '']" :placeholder="$t('hosts.destFile')">
+                  <button @click="importCSV" class="btn btn-success fw-bold" :disabled="!csvFile">{{ $t('hosts.importBtn') }}</button>
               </div>
           </div>
       </div>
@@ -53,7 +69,10 @@ const { t } = useI18n()
 const props = defineProps(['selectedFile', 'editData'])
 const emit = defineEmits(['cancel-edit'])
 
-const isImportMode = ref(false)
+const importMode = ref('single')
+const csvFile = ref(null)
+const csvFileName = ref('')
+const csvInput = ref(null)
 const bulkText = ref('')
 const originalMac = ref('')
 const originalFile = ref('')
@@ -69,7 +88,7 @@ watch(() => props.selectedFile, (newFile) => {
 
 watch(() => props.editData, (newData) => {
     if (newData) {
-        isImportMode.value = false
+        importMode.value = 'single'
         originalMac.value = newData.mac
         originalFile.value = newData.file
         form.value = { mac: newData.mac, ip: newData.ip, hostname: newData.hostname, file: newData.file }
@@ -83,7 +102,7 @@ watch(() => props.editData, (newData) => {
 
 watch(() => store.transferData, (data) => {
     if (data) {
-        isImportMode.value = false
+        importMode.value = 'single'
         emit('cancel-edit')
         form.value.mac = data.mac
         form.value.ip = data.ip
@@ -137,5 +156,18 @@ async function saveBulkHosts() {
         const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.importError')
         alert(msg)
     }
+}
+
+function onCsvFileSelected(e) {
+    csvFile.value = e.target.files[0]
+    csvFileName.value = csvFile.value ? csvFile.value.name : ''
+}
+
+async function importCSV() {
+    if (!csvFile.value || !form.value.file) return
+    await actions.importCSV(csvFile.value, form.value.file)
+    csvFile.value = null
+    csvFileName.value = ''
+    if (csvInput.value) csvInput.value.value = ''
 }
 </script>
