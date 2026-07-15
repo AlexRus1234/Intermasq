@@ -210,5 +210,8 @@ func main() {
 	r.NoRoute(gin.WrapH(http.FileServer(http.FS(staticFS))))
 
 	fmt.Printf("Intermasq v3.0 Started on :%s\n", *Port)
-	r.Run(":" + *Port)
+	if err := r.Run(":" + *Port); err != nil {
+		fmt.Printf("[FATAL] Server failed: %v\n", err)
+		os.Exit(1)
+	}
 }
