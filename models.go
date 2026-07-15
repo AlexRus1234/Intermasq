@@ -120,3 +120,25 @@ type ConfigUpdateReq struct {
 type CreateConfigFileReq struct {
 	Name string `json:"name"`
 }
+
+// DnsAliasEntry represents a dnsmasq address= or cname= directive.
+// Type is "A" for address=/domain/IP, "CNAME" for cname=alias,target.
+type DnsAliasEntry struct {
+	Type   string `json:"type"`
+	Domain string `json:"domain"`
+	Target string `json:"target"`
+	File   string `json:"file"`
+}
+
+// BulkAliasReq is the body of POST /api/aliases/bulk.
+type BulkAliasReq struct {
+	Aliases []DnsAliasEntry `json:"aliases"`
+	File    string          `json:"file"`
+}
+
+// DeleteAliasReq is the body of POST /api/aliases/delete.
+type DeleteAliasReq struct {
+	Type   string `json:"type"`
+	Domain string `json:"domain"`
+	File   string `json:"file"`
+}

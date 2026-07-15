@@ -406,3 +406,201 @@ func TestSerializeConfigFileGroupOrder(t *testing.T) {
 		t.Errorf("directives not grouped in dns<dhcp<log order:\n%s", s)
 	}
 }
+
+func TestParseAliasLineA(t *testing.T) {
+	e, ok := parseAliasLine("address=/nas.lan/192.168.1.10", "/etc/dnsmasq.d/x.conf", false)
+	if !ok {
+		t.Fatal("expected parse success")
+	}
+	if e.Type != "A" || e.Domain != "nas.lan" || e.Target != "192.168.1.10" {
+		t.Errorf("unexpected entry: %+v", e)
+	}
+}
+
+func TestParseAliasLineCNAME(t *testing.T) {
+	e, ok := parseAliasLine("cname=wiki,nas.lan", "/etc/dnsmasq.d/x.conf", false)
+	if !ok {
+		t.Fatal("expected parse success")
+	}
+	if e.Type != "CNAME" || e.Domain != "wiki" || e.Target != "nas.lan" {
+		t.Errorf("unexpected entry: %+v", e)
+	}
+}
+
+func TestParseAliasLineCNAMEWithTag(t *testing.T) {
+	e, ok := parseAliasLine("cname=wiki,nas.lan,tag:lan", "/etc/dnsmasq.d/x.conf", false)
+	if !ok {
+		t.Fatal("expected parse success for tagged cname")
+	}
+	if e.Type != "CNAME" || e.Domain != "wiki" || e.Target != "nas.lan" {
+		t.Errorf("unexpected entry: %+v", e)
+	}
+}
+
+func TestParseAliasLineRejectsWildcard(t *testing.T) {
+	if _, ok := parseAliasLine("address=/#/10.0.0.1", "", false); ok {
+		t.Error("wildcard # should be rejected")
+	}
+	if _, ok := parseAliasLine("address=/*.evil/10.0.0.1", "", false); ok {
+		t.Error("wildcard *.evil should be rejected")
+	}
+}
+
+func TestParseAliasLineRejectsMalformed(t *testing.T) {
+	if _, ok := parseAliasLine("address=/nas.lan", "", false); ok {
+		t.Error("missing closing slash should fail")
+	}
+	if _, ok := parseAliasLine("address=/nas.lan/", "", false); ok {
+		t.Error("empty target should fail")
+	}
+	if _, ok := parseAliasLine("cname=onlyalias", "", false); ok {
+		t.Error("cname without target should fail")
+	}
+}
+
+func TestAliasToLineRoundTrip(t *testing.T) {
+	cases := []DnsAliasEntry{
+		{Type: "A", Domain: "nas.lan", Target: "192.168.1.10"},
+		{Type: "CNAME", Domain: "wiki", Target: "nas.lan"},
+	}
+	for _, in := range cases {
+		line := aliasToLine(in)
+		out, ok := parseAliasLine(line, "", false)
+		if !ok {
+			t.Errorf("round-trip failed for %+v: line=%q", in, line)
+			continue
+		}
+		out.File = in.File
+		if out != in {
+			t.Errorf("round-trip mismatch:\n in=%+v\nout=%+v", in, out)
+		}
+	}
+}
+
+func TestReadAllAliases(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	path := filepath.Join(dir, "dns.conf")
+	content := []byte("address=/nas.lan/192.168.1.10\ncname=wiki,nas.lan\nserver=8.8.8.8\n")
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	aliases := readAllAliases()
+	if len(aliases) != 2 {
+		t.Fatalf("expected 2 aliases, got %d: %+v", len(aliases), aliases)
+	}
+	if aliases[0].Type != "A" || aliases[0].Domain != "nas.lan" {
+		t.Errorf("first alias wrong: %+v", aliases[0])
+	}
+	if aliases[1].Type != "CNAME" || aliases[1].Domain != "wiki" {
+		t.Errorf("second alias wrong: %+v", aliases[1])
+	}
+}
+
+func TestReadAllAliasesHasBakMarker(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	path := filepath.Join(dir, "dns.conf")
+	if err := os.WriteFile(path, []byte("address=/a.b/1.2.3.4\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".bak", []byte("old\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	aliases := readAllAliases()
+	if len(aliases) != 1 {
+		t.Fatalf("expected 1 alias, got %d", len(aliases))
+	}
+	if !strings.HasSuffix(aliases[0].File, "|has_bak") {
+		t.Errorf("expected |has_bak marker, got %q", aliases[0].File)
+	}
+	if cleanAliasFile(aliases[0].File) != path {
+		t.Errorf("cleanAliasFile wrong: got %q want %q", cleanAliasFile(aliases[0].File), path)
+	}
+}
+
+func TestRemoveAliasLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dns.conf")
+	content := []byte("address=/nas.lan/192.168.1.10\ncname=wiki,nas.lan\naddress=/other/10.0.0.1\n")
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := removeAliasLine(path, "A", "nas.lan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !removed {
+		t.Fatal("expected removal")
+	}
+	out, _ := os.ReadFile(path)
+	s := string(out)
+	if strings.Contains(s, "address=/nas.lan/") {
+		t.Errorf("nas.lan not removed:\n%s", s)
+	}
+	if !strings.Contains(s, "cname=wiki,nas.lan") {
+		t.Errorf("cname should be preserved:\n%s", s)
+	}
+	if !strings.Contains(s, "address=/other/10.0.0.1") {
+		t.Errorf("other A should be preserved:\n%s", s)
+	}
+}
+
+func TestRemoveAliasLineNotFound(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dns.conf")
+	if err := os.WriteFile(path, []byte("address=/nas.lan/192.168.1.10\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := removeAliasLine(path, "A", "missing.lan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed {
+		t.Fatal("expected no removal for missing domain")
+	}
+}
+
+func TestSerializeConfigFilePreservesAliases(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.conf")
+	initial := []byte("# header\n\naddress=/nas.lan/192.168.1.10\ncname=wiki,nas.lan\nserver=8.8.8.8\n")
+	if err := os.WriteFile(path, initial, 0644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := serializeConfigFile(path, []Directive{
+		{Key: "domain", Value: "lan", Active: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "address=/nas.lan/192.168.1.10") {
+		t.Errorf("alias A lost:\n%s", s)
+	}
+	if !strings.Contains(s, "cname=wiki,nas.lan") {
+		t.Errorf("cname lost:\n%s", s)
+	}
+	if !strings.Contains(s, "domain=lan") {
+		t.Errorf("new directive missing:\n%s", s)
+	}
+}
+
+func TestReadConfigSnapshotFiltersAliases(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	path := filepath.Join(dir, "net.conf")
+	content := []byte("address=/nas.lan/192.168.1.10\ncname=wiki,nas.lan\nserver=8.8.8.8\n")
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	snap := readConfigSnapshot()
+	if len(snap.Files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(snap.Files))
+	}
+	for _, d := range snap.Files[0].Directives {
+		if d.Key == "address" || d.Key == "cname" {
+			t.Errorf("alias directive should be filtered out: %+v", d)
+		}
+	}
+}

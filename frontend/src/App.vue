@@ -8,6 +8,7 @@ import StaticView from './components/static/StaticView.vue'
 import LeasesTab from './components/leases/LeasesTab.vue'
 import AuditTab from './components/audit/AuditTab.vue'
 import DnsmasqConfig from './components/config/DnsmasqConfig.vue'
+import DnsAliasesView from './components/dns/DnsAliasesView.vue'
 
 const { locale } = useI18n()
 
@@ -23,6 +24,11 @@ function switchLocale() {
   const next = locale.value === 'ru' ? 'en' : 'ru'
   locale.value = next
   localStorage.setItem('locale', next)
+}
+
+function downloadCSV() {
+  if (store.tab === 'dns') actions.downloadAliasesCSV()
+  else actions.downloadCSV()
 }
 
 onMounted(() => {
@@ -87,6 +93,7 @@ onUnmounted(() => { clearInterval(arpInterval) })
                 <div class="col-12 col-md-auto">
                     <div class="btn-group w-100">
                         <button @click="store.tab='static'" :class="['btn', store.tab==='static' ? 'btn-primary' : 'btn-outline-primary']">{{ $t('app.tabStatic') }}</button>
+                        <button @click="store.tab='dns'" :class="['btn', store.tab==='dns' ? 'btn-primary' : 'btn-outline-primary']">🌐 {{ $t('app.tabDns') }}</button>
                         <button @click="store.tab='leases'" :class="['btn', store.tab==='leases' ? 'btn-primary' : 'btn-outline-primary']">{{ $t('app.tabLeases') }}</button>
                         <button @click="store.tab='config'" :class="['btn', store.tab==='config' ? 'btn-primary' : 'btn-outline-primary']">⚙️ {{ $t('app.tabConfig') }}</button>
                         <button @click="store.tab='audit'" :class="['btn', store.tab==='audit' ? 'btn-primary' : 'btn-outline-primary']">{{ $t('app.tabAudit') }}</button>
@@ -97,12 +104,13 @@ onUnmounted(() => { clearInterval(arpInterval) })
                 </div>
                 <div class="col-12 col-md-auto text-md-end d-flex gap-2 justify-content-end">
                     <button @click="actions.downloadBackup()" class="btn btn-outline-info fw-bold" :title="$t('app.downloadArchive')">💾 {{ $t('app.backup') }}</button>
-                    <button @click="actions.downloadCSV()" class="btn btn-outline-success fw-bold" :title="$t('app.csvExportTooltip')">📥 {{ $t('app.csvExport') }}</button>
+                    <button @click="downloadCSV()" class="btn btn-outline-success fw-bold" :title="$t('app.csvExportTooltip')">📥 {{ $t('app.csvExport') }}</button>
                     <button @click="actions.applyConfig()" class="btn btn-warning fw-bold text-dark">🔄 {{ $t('app.apply') }}</button>
                 </div>
             </div>
 
             <StaticView v-if="store.tab === 'static'" />
+            <DnsAliasesView v-if="store.tab === 'dns'" />
             <LeasesTab v-if="store.tab === 'leases'" />
             <DnsmasqConfig v-if="store.tab === 'config'" />
             <AuditTab v-if="store.tab === 'audit'" />

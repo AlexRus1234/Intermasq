@@ -16,6 +16,7 @@
     "tabLeases": "Leases",
     "tabConfig": "dnsmasq Settings",
     "tabAudit": "History",
+    "tabDns": "DNS",
     "searchPlaceholder": "Search by MAC, IP, Hostname...",
     "backup": "Backup",
     "downloadArchive": "Download archive",
@@ -85,6 +86,7 @@
   },
   "confirm": {
     "deleteHost": "Delete entry {mac}?",
+    "deleteAlias": "Delete DNS entry {domain}?",
     "deleteCount": "Delete {count} entries?",
     "rollback": "Undo last change in file {file}?",
     "restartSystem": "Restart Intermasq service? (Required to activate new plugins)",
@@ -113,7 +115,10 @@
     "ipDuplicateBulk": "IP {ip} assigned to multiple devices in import",
     "configSaveSuccess": "Settings saved and verified via dnsmasq --test",
     "configSaveError": "Failed to save settings",
-    "configCreateError": "Failed to create file"
+    "configCreateError": "Failed to create file",
+    "invalidData": "Invalid data",
+    "aliasAddError": "Failed to add DNS entry",
+    "aliasDeleteError": "Failed to delete DNS entry"
   },
   "api": {
     "already_setup": "Already set up",
@@ -141,7 +146,11 @@
     "invalid_directive_value": "Invalid directive value",
     "invalid_filename": "Invalid filename",
     "file_exists": "File already exists",
-    "serialize_error": "Configuration serialization error"
+    "serialize_error": "Configuration serialization error",
+    "alias_duplicate": "Domain already used by another DNS entry",
+    "alias_duplicate_bulk": "Duplicate domain in import",
+    "no_valid_entries": "No valid entries",
+    "alias_not_found": "DNS entry not found"
   },
   "config": {
     "groupDns": "DNS / Network",
@@ -181,6 +190,40 @@
     "action_rollback": "Rollback",
     "action_reload": "Reload",
     "action_config_update": "Config update",
-    "action_config_create_file": "File created"
+    "action_config_create_file": "File created",
+    "action_alias_add": "DNS add",
+    "action_alias_delete": "DNS delete",
+    "action_alias_bulk_add": "DNS bulk add"
+  },
+  "dns": {
+    "editing": "Editing",
+    "newAlias": "New DNS entry",
+    "addTo": "Add to",
+    "importList": "Import list",
+    "cancel": "Cancel",
+    "filePlaceholder": "File (/etc/...)",
+    "save": "Save",
+    "add": "Add",
+    "bulkPlaceholder": "Paste entries. Supported formats:\nA nas.lan 192.168.1.10\nCNAME wiki nas.lan\naddress=/nas.lan/192.168.1.10\ncname=wiki,nas.lan\nOne entry per line.",
+    "parsed": "Parsed:",
+    "aliases": "entries",
+    "destFile": "Destination file",
+    "importBtn": "Import",
+    "csvMode": "CSV file",
+    "allFiles": "All files",
+    "rollback": "Rollback",
+    "rollbackTooltip": "Undo last change to file",
+    "type": "Type",
+    "domain": "Domain",
+    "target": "Target",
+    "fileCol": "File",
+    "actions": "Actions",
+    "editTooltip": "Edit",
+    "deleteTooltip": "Delete",
+    "searchEmpty": "Nothing found for this query",
+    "empty": "DNS entries list is empty",
+    "domainPlaceholder": "nas.lan",
+    "targetIpPlaceholder": "192.168.1.10",
+    "targetDomainPlaceholder": "target.lan"
   }
 }

@@ -603,6 +603,9 @@ func readConfigSnapshot() ConfigSnapshot {
 			if strings.HasPrefix(line, "dhcp-host=") || strings.HasPrefix(line, "dhcp-host:") {
 				continue
 			}
+			if isAliasDirective(line) {
+				continue
+			}
 
 			key, value, ok := splitDirective(line)
 			if !ok {
@@ -765,6 +768,7 @@ func serializeConfigFile(path string, directives []Directive) ([]byte, error) {
 
 	headerComments := []string{}
 	dhcpHostLines := []string{}
+	aliasLines := []string{}
 	if existing != "" {
 		for _, raw := range strings.Split(existing, "\n") {
 			line := strings.TrimSpace(raw)
@@ -773,6 +777,10 @@ func serializeConfigFile(path string, directives []Directive) ([]byte, error) {
 			}
 			if strings.HasPrefix(line, "dhcp-host=") || strings.HasPrefix(line, "dhcp-host:") {
 				dhcpHostLines = append(dhcpHostLines, raw)
+				continue
+			}
+			if isAliasDirective(line) {
+				aliasLines = append(aliasLines, raw)
 				continue
 			}
 			if strings.HasPrefix(line, "#") {
@@ -813,6 +821,13 @@ func serializeConfigFile(path string, directives []Directive) ([]byte, error) {
 			b.WriteString("\n")
 		}
 		b.WriteString(strings.Join(dhcpHostLines, "\n"))
+		b.WriteString("\n")
+	}
+	if len(aliasLines) > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(strings.Join(aliasLines, "\n"))
 		b.WriteString("\n")
 	}
 	if len(sorted) > 0 {
@@ -857,6 +872,235 @@ func directiveGroup(key string) int {
 // writeConfigWithTest writes new content to a .conf file and validates the
 // result via `dnsmasq --test`. If the test fails the previous content is
 // restored from the .bak backup created just before writing.
+// aliasLinePrefixes returns true if the given trimmed line is a managed
+// DNS alias directive (address= or cname=).
+func isAliasDirective(line string) bool {
+	return strings.HasPrefix(line, "address=") || strings.HasPrefix(line, "cname=")
+}
+
+// parseAliasLine parses a single "address=" or "cname=" line into a
+// DnsAliasEntry. Returns ok=false if the line is malformed or unsupported
+// (e.g. address=/#/IP wildcard is out of scope).
+func parseAliasLine(line, file string, hasBak bool) (DnsAliasEntry, bool) {
+	entry := DnsAliasEntry{File: file}
+	if hasBak {
+		entry.File = file + "|has_bak"
+	}
+	if strings.HasPrefix(line, "address=") {
+		val := strings.TrimPrefix(line, "address=")
+		// Expected form: /domain/IP. Domain is between two slashes.
+		if !strings.HasPrefix(val, "/") {
+			return DnsAliasEntry{}, false
+		}
+		rest := strings.TrimPrefix(val, "/")
+		slash := strings.Index(rest, "/")
+		if slash < 0 {
+			return DnsAliasEntry{}, false
+		}
+		entry.Type = "A"
+		entry.Domain = rest[:slash]
+		entry.Target = strings.TrimSpace(rest[slash+1:])
+		if entry.Domain == "" || entry.Target == "" {
+			return DnsAliasEntry{}, false
+		}
+		// Wildcards (#, *.domain) are out of scope for the UI.
+		if entry.Domain == "#" || strings.HasPrefix(entry.Domain, "*") {
+			return DnsAliasEntry{}, false
+		}
+		return entry, true
+	}
+	if strings.HasPrefix(line, "cname=") {
+		val := strings.TrimPrefix(line, "cname=")
+		parts := strings.Split(val, ",")
+		if len(parts) < 2 {
+			return DnsAliasEntry{}, false
+		}
+		entry.Type = "CNAME"
+		entry.Domain = strings.TrimSpace(parts[0])
+		entry.Target = strings.TrimSpace(parts[1])
+		if entry.Domain == "" || entry.Target == "" {
+			return DnsAliasEntry{}, false
+		}
+		// Skip tagged cnames (cname=alias,target,tag:...) — keep alias/target only.
+		return entry, true
+	}
+	return DnsAliasEntry{}, false
+}
+
+func aliasToLine(a DnsAliasEntry) string {
+	if a.Type == "CNAME" {
+		return fmt.Sprintf("cname=%s,%s", a.Domain, a.Target)
+	}
+	return fmt.Sprintf("address=/%s/%s", a.Domain, a.Target)
+}
+
+// readAllAliases scans all .conf files in ConfigDir and returns every
+// address= and cname= directive as a structured DnsAliasEntry.
+func readAllAliases() []DnsAliasEntry {
+	aliases := []DnsAliasEntry{}
+	files, err := os.ReadDir(*ConfigDir)
+	if err != nil {
+		return aliases
+	}
+	for _, f := range files {
+		if filepath.Ext(f.Name()) != ".conf" {
+			continue
+		}
+		fullPath := filepath.Join(*ConfigDir, f.Name())
+		hasBak := false
+		if _, err := os.Stat(fullPath + ".bak"); err == nil {
+			hasBak = true
+		}
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+		for _, raw := range strings.Split(string(content), "\n") {
+			line := strings.TrimSpace(raw)
+			if !isAliasDirective(line) {
+				continue
+			}
+			if entry, ok := parseAliasLine(line, fullPath, hasBak); ok {
+				aliases = append(aliases, entry)
+			}
+		}
+	}
+	return aliases
+}
+
+// findAliasesByDomain returns aliases whose Domain matches (case-insensitive)
+// the given domain, excluding one with the provided file+type combination.
+// Used for duplicate detection.
+func findAliasesByDomain(domain string, excludeType, excludeFile string) []DnsAliasEntry {
+	result := []DnsAliasEntry{}
+	domainLower := strings.ToLower(domain)
+	for _, a := range readAllAliases() {
+		if strings.ToLower(a.Domain) != domainLower {
+			continue
+		}
+		if a.Type == excludeType && cleanAliasFile(a.File) == excludeFile {
+			continue
+		}
+		result = append(result, a)
+	}
+	return result
+}
+
+// cleanAliasFile strips the "|has_bak" marker appended by readAllAliases.
+func cleanAliasFile(f string) string {
+	if i := strings.Index(f, "|"); i >= 0 {
+		return f[:i]
+	}
+	return f
+}
+
+// appendAliasLine appends a single alias directive to the file, preserving
+// existing content. Does NOT validate; caller must do that.
+func appendAliasLine(filePath string, entry DnsAliasEntry) error {
+	content, _ := os.ReadFile(filePath)
+	line := aliasToLine(entry)
+	out := strings.TrimRight(string(content), "\n")
+	if out != "" {
+		out += "\n"
+	}
+	out += line + "\n"
+	return os.WriteFile(filePath, []byte(out), 0644)
+}
+
+// removeAliasLine removes the first alias directive matching the given
+// type+domain from the file. Returns true if a line was removed.
+func removeAliasLine(filePath, aliasType, domain string) (bool, error) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return false, err
+	}
+	lines := strings.Split(string(content), "\n")
+	newLines := []string{}
+	removed := false
+	domainLower := strings.ToLower(domain)
+	for _, line := range lines {
+		clean := strings.TrimSpace(line)
+		if !removed && isAliasDirective(clean) {
+			if entry, ok := parseAliasLine(clean, "", false); ok && entry.Type == aliasType && strings.ToLower(entry.Domain) == domainLower {
+				removed = true
+				continue
+			}
+		}
+		if clean != "" {
+			newLines = append(newLines, line)
+		}
+	}
+	if !removed {
+		return false, nil
+	}
+	return true, os.WriteFile(filePath, []byte(strings.Join(newLines, "\n")+"\n"), 0644)
+}
+
+func aliasesToCSV(aliases []DnsAliasEntry) []byte {
+	buf := new(bytes.Buffer)
+	w := csv.NewWriter(buf)
+	w.Write([]string{"type", "domain", "target"})
+	for _, a := range aliases {
+		w.Write([]string{a.Type, a.Domain, a.Target})
+	}
+	w.Flush()
+	return buf.Bytes()
+}
+
+func parseCSVAliases(r io.Reader, targetFile string) ([]DnsAliasEntry, error) {
+	reader := csv.NewReader(r)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	aliases := []DnsAliasEntry{}
+	for i, row := range records {
+		if i == 0 {
+			// Skip header if present.
+			if len(row) >= 1 && strings.EqualFold(row[0], "type") {
+				continue
+			}
+		}
+		if len(row) < 3 {
+			continue
+		}
+		t := strings.ToUpper(strings.TrimSpace(row[0]))
+		domain := strings.TrimSpace(row[1])
+		target := strings.TrimSpace(row[2])
+		if t != "A" && t != "CNAME" {
+			continue
+		}
+		if !aliasDomainRegex.MatchString(domain) {
+			continue
+		}
+		if t == "A" {
+			if net.ParseIP(target) == nil {
+				continue
+			}
+		} else {
+			if !aliasDomainRegex.MatchString(target) {
+				continue
+			}
+		}
+		aliases = append(aliases, DnsAliasEntry{Type: t, Domain: domain, Target: target, File: targetFile})
+	}
+	return aliases, nil
+}
+
+// ensureAliasesFile creates the default aliases file if it does not exist,
+// with a small header comment. Path is returned unchanged when it already
+// exists. Used as a fallback when req.File is empty.
+func ensureAliasesFile(path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	if !isSafePath(path) {
+		return os.ErrPermission
+	}
+	header := "# DNS aliases managed by Intermasq\n# Format: address=/domain/IP  or  cname=alias,target\n"
+	return os.WriteFile(path, []byte(header), 0644)
+}
+
 func writeConfigWithTest(path string, content []byte) error {
 	if !isSafePath(path) {
 		return os.ErrPermission

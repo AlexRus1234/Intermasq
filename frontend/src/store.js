@@ -19,6 +19,7 @@ export const store = reactive({
     templates: [],
     configSnapshot: null,
     dhcpRanges: [],
+    aliases: [],
     
     transferData: null 
 })
@@ -53,7 +54,7 @@ export const actions = {
 
     async loadData() {
         try {
-            const [hRes, lRes, aRes, pRes, auditRes, tRes, cfgRes, rangesRes] = await Promise.all([
+            const [hRes, lRes, aRes, pRes, auditRes, tRes, cfgRes, rangesRes, alRes] = await Promise.all([
                 api.get('/hosts'), 
                 api.get('/leases'), 
                 api.get('/arp'),
@@ -61,7 +62,8 @@ export const actions = {
                 api.get('/audit').catch(() => ({ data: [] })),
                 api.get('/templates').catch(() => ({ data: [] })),
                 api.get('/config').catch(() => ({ data: null })),
-                api.get('/templates/ranges').catch(() => ({ data: { ranges: [] } }))
+                api.get('/templates/ranges').catch(() => ({ data: { ranges: [] } })),
+                api.get('/aliases').catch(() => ({ data: [] }))
             ])
             store.hosts = hRes.data
             store.leases = lRes.data
@@ -71,6 +73,7 @@ export const actions = {
             store.templates = tRes.data
             store.configSnapshot = cfgRes.data
             store.dhcpRanges = rangesRes.data.ranges || []
+            store.aliases = alRes.data
         } catch (e) {
             if (e.response?.status === 401) this.logout()
             else store.view = 'error'
@@ -259,5 +262,75 @@ export const actions = {
             const res = await api.get('/templates/ranges')
             store.dhcpRanges = res.data.ranges || []
         } catch (e) {}
+    },
+
+    async loadAliases() {
+        try {
+            const res = await api.get('/aliases')
+            store.aliases = res.data
+        } catch (e) {}
+    },
+
+    async addAlias(alias) {
+        try {
+            await api.post('/aliases', alias)
+            this.loadData()
+            return true
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.aliasAddError')
+            alert(msg)
+            return false
+        }
+    },
+
+    async bulkAddAliases(aliases, file) {
+        try {
+            const res = await api.post('/aliases/bulk', { aliases, file })
+            this.loadData()
+            return res.data
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.aliasAddError')
+            alert(msg)
+            return null
+        }
+    },
+
+    async deleteAlias(type, domain, file) {
+        try {
+            await api.post('/aliases/delete', { type, domain, file })
+            this.loadData()
+            return true
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.aliasDeleteError')
+            alert(msg)
+            return false
+        }
+    },
+
+    async downloadAliasesCSV() {
+        try {
+            const res = await api.get('/aliases/csv', { responseType: 'blob' })
+            const url = window.URL.createObjectURL(new Blob([res.data]))
+            const link = document.createElement('a')
+            link.href = url
+            link.setAttribute('download', 'intermasq_aliases.csv')
+            document.body.appendChild(link); link.click(); document.body.removeChild(link)
+        } catch (e) { alert(t('alert.csvExportError')) }
+    },
+
+    async importAliasesCSV(file, targetFile) {
+        const formData = new FormData()
+        formData.append('file', file)
+        if (targetFile) formData.append('target_file', targetFile)
+        try {
+            const res = await api.post('/aliases/csv', formData)
+            alert(t('alert.csvImportSuccess', { count: res.data.count }))
+            this.loadData()
+            return true
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.csvImportError')
+            alert(msg)
+            return false
+        }
     }
 }

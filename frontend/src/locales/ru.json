@@ -16,6 +16,7 @@
     "tabLeases": "Аренды",
     "tabConfig": "Настройки dnsmasq",
     "tabAudit": "История",
+    "tabDns": "DNS",
     "searchPlaceholder": "Поиск по MAC, IP, Имени...",
     "backup": "Бэкап",
     "downloadArchive": "Скачать архив",
@@ -85,6 +86,7 @@
   },
   "confirm": {
     "deleteHost": "Удалить запись {mac}?",
+    "deleteAlias": "Удалить DNS-запись {domain}?",
     "deleteCount": "Точно удалить {count} записей?",
     "rollback": "Отменить последнее изменение в файле {file}?",
     "rollback": "Отменить последнее изменение в файле {file}?",
@@ -114,7 +116,10 @@
     "ipDuplicateBulk": "IP {ip} указан для нескольких устройств в импорте",
     "configSaveSuccess": "Настройки сохранены и проверены через dnsmasq --test",
     "configSaveError": "Ошибка сохранения настроек",
-    "configCreateError": "Ошибка создания файла"
+    "configCreateError": "Ошибка создания файла",
+    "invalidData": "Неверные данные",
+    "aliasAddError": "Ошибка добавления DNS-записи",
+    "aliasDeleteError": "Ошибка удаления DNS-записи"
   },
   "api": {
     "already_setup": "Уже настроено",
@@ -142,7 +147,11 @@
     "invalid_directive_value": "Недопустимое значение директивы",
     "invalid_filename": "Недопустимое имя файла",
     "file_exists": "Файл уже существует",
-    "serialize_error": "Ошибка сериализации конфигурации"
+    "serialize_error": "Ошибка сериализации конфигурации",
+    "alias_duplicate": "Домен уже используется в другой DNS-записи",
+    "alias_duplicate_bulk": "Дубликат домена в импорте",
+    "no_valid_entries": "Нет валидных записей",
+    "alias_not_found": "DNS-запись не найдена"
   },
   "config": {
     "groupDns": "DNS / Сеть",
@@ -182,6 +191,40 @@
     "action_rollback": "Откат",
     "action_reload": "Перезагрузка",
     "action_config_update": "Изменение настроек",
-    "action_config_create_file": "Создание файла"
+    "action_config_create_file": "Создание файла",
+    "action_alias_add": "Добавление DNS",
+    "action_alias_delete": "Удаление DNS",
+    "action_alias_bulk_add": "Массовое добавление DNS"
+  },
+  "dns": {
+    "editing": "Редактирование",
+    "newAlias": "Новая DNS-запись",
+    "addTo": "Добавить в",
+    "importList": "Импорт списком",
+    "cancel": "Отмена",
+    "filePlaceholder": "Файл (/etc/...)",
+    "save": "Сохранить",
+    "add": "Добавить",
+    "bulkPlaceholder": "Вставьте записи. Поддерживаемые форматы:\nA nas.lan 192.168.1.10\nCNAME wiki nas.lan\naddress=/nas.lan/192.168.1.10\ncname=wiki,nas.lan\nОдна запись на строку.",
+    "parsed": "Распознано:",
+    "aliases": "записей",
+    "destFile": "Файл назначения",
+    "importBtn": "Импортировать",
+    "csvMode": "CSV файл",
+    "allFiles": "Все файлы",
+    "rollback": "Откат",
+    "rollbackTooltip": "Отменить последнее изменение файла",
+    "type": "Тип",
+    "domain": "Домен",
+    "target": "Значение",
+    "fileCol": "Файл",
+    "actions": "Действия",
+    "editTooltip": "Редактировать",
+    "deleteTooltip": "Удалить",
+    "searchEmpty": "По запросу ничего не найдено",
+    "empty": "Список DNS-записей пуст",
+    "domainPlaceholder": "nas.lan",
+    "targetIpPlaceholder": "192.168.1.10",
+    "targetDomainPlaceholder": "target.lan"
   }
 }

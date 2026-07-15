@@ -55,11 +55,15 @@ var (
 	PluginsDir   = "/etc/intermasq/plugins"
 	SocketsDir   = "/run/intermasq/sockets"
 	SecretKey    = []byte(os.Getenv("INTERMASQ_SECRET"))
+	// DefaultAliasesFile is the file created on first alias add when no
+	// explicit target file is provided. Relative to ConfigDir.
+	DefaultAliasesFileName = "10-dns-aliases.conf"
 )
 
 var (
 	macRegex      = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
 	hostnameRegex = regexp.MustCompile(`^[a-zA-Z0-9-.]+$`)
+	aliasDomainRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-.]*[a-zA-Z0-9])?$`)
 	mu            sync.Mutex
 	loadedPlugins []PluginManifest
 )
@@ -203,6 +207,12 @@ func main() {
 			auth.GET("/config", getConfigHandler)
 			auth.PUT("/config", updateConfigHandler)
 			auth.POST("/config/file", createConfigFileHandler)
+			auth.GET("/aliases", getAliasesHandler)
+			auth.POST("/aliases", addAliasHandler)
+			auth.POST("/aliases/bulk", bulkAddAliasesHandler)
+			auth.POST("/aliases/delete", deleteAliasHandler)
+			auth.GET("/aliases/csv", exportAliasesCSVHandler)
+			auth.POST("/aliases/csv", importAliasesCSVHandler)
 			auth.POST("/rollback", rollbackHandler)
 			auth.POST("/reload", reloadHandler)
 			auth.GET("/backup", backupHandler)
