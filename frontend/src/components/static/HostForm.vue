@@ -17,8 +17,23 @@
       </div>
       
       <div v-if="importMode === 'single'" class="row g-2">
+          <div class="col-12 d-flex align-items-center gap-2 mb-1">
+              <select v-model="selectedTemplateId" @change="onTemplateChange" class="form-select form-select-sm" style="width: auto;">
+                  <option value="">{{ $t('hosts.noTemplate', 'No template (manual)') }}</option>
+                  <option v-for="tpl in store.templates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
+              </select>
+              <button @click="showTemplatesModal = true" class="btn btn-sm btn-outline-secondary" type="button">⚙️</button>
+          </div>
           <div class="col-md-3"><input v-model="form.mac" :placeholder="'MAC (aa:bb...)'" class="form-control"></div>
-          <div class="col-md-3"><input v-model="form.ip" placeholder="IP (172.20...)" class="form-control"></div>
+          <div class="col-md-3">
+              <div class="input-group">
+                  <input v-model="form.ip" placeholder="IP (172.20...)" class="form-control">
+                  <button @click="autoIP" class="btn btn-outline-secondary" :disabled="autoIPLoading" :title="$t('hosts.autoIpTooltip', 'Auto pick free IP')" type="button">
+                      <span v-if="autoIPLoading">…</span><span v-else>🎲</span>
+                  </button>
+              </div>
+              <input v-if="showRangeInput" v-model="ipRange" :placeholder="$t('hosts.ipRangePlaceholder', 'CIDR 10.0.0.0/24')" class="form-control form-control-sm mt-1">
+          </div>
           <div class="col-md-3"><input v-model="form.hostname" placeholder="Hostname" class="form-control"></div>
           <div class="col-md-3">
               <div class="input-group">
@@ -56,6 +71,8 @@
           </div>
       </div>
   </div>
+
+  <TemplatesModal :show="showTemplatesModal" @close="showTemplatesModal = false" />
 </template>
 
 <script setup>
@@ -63,6 +80,7 @@ import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { store, api, actions } from '../../store.js'
 import { translateApiError } from '../../i18n.js'
+import TemplatesModal from './TemplatesModal.vue'
 
 const { t } = useI18n()
 
@@ -77,6 +95,11 @@ const bulkText = ref('')
 const originalMac = ref('')
 const originalFile = ref('')
 const form = ref({ mac: '', ip: '', hostname: '', file: '' })
+const ipRange = ref('')
+const showRangeInput = ref(false)
+const autoIPLoading = ref(false)
+const selectedTemplateId = ref('')
+const showTemplatesModal = ref(false)
 
 const isEditing = computed(() => originalMac.value !== '')
 
@@ -110,6 +133,47 @@ watch(() => store.transferData, (data) => {
         store.transferData = null
     }
 }, { immediate: true })
+
+async function autoIP() {
+  let range = ipRange.value.trim()
+  if (!range) {
+    const tpl = store.templates.find(t => t.id === selectedTemplateId.value)
+    if (tpl) {
+      range = tpl.ip_range
+    }
+  }
+  if (!range) {
+    showRangeInput.value = true
+    if (!ipRange.value) return
+    range = ipRange.value.trim()
+  }
+  if (!range) return
+  autoIPLoading.value = true
+  try {
+    const res = await api.get('/hosts/next-ip', { params: { range } })
+    form.value.ip = res.data.ip
+    showRangeInput.value = false
+  } catch (e) {
+    const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.autoIpError', 'Failed to get free IP')
+    alert(msg)
+  } finally {
+    autoIPLoading.value = false
+  }
+}
+
+async function onTemplateChange() {
+  if (!selectedTemplateId.value) return
+  const tpl = store.templates.find(t => t.id === selectedTemplateId.value)
+  if (!tpl) return
+  form.value.file = tpl.target_file
+  if (!form.value.mac) return
+  const result = await actions.applyTemplate(form.value.mac, tpl.id)
+  if (result) {
+    form.value.ip = result.ip
+    form.value.hostname = result.hostname
+    form.value.file = result.file
+  }
+}
 
 async function saveHost() {
   const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/i;

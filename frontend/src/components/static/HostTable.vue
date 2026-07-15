@@ -3,7 +3,11 @@
       
       <div v-if="selectedHosts.length > 0" class="bg-danger text-white p-2 d-flex justify-content-between align-items-center fade-in">
           <span class="fw-bold ms-2">{{ $t('hosts.selected') }} {{ selectedHosts.length }}</span>
-          <button @click="bulkDelete" class="btn btn-sm btn-light text-danger fw-bold">🗑️ {{ $t('hosts.deleteSelected') }}</button>
+          <div class="btn-group btn-group-sm">
+              <button @click="showMove = true" class="btn btn-light text-primary fw-bold">📦 {{ $t('hosts.moveSelected', 'Move') }}</button>
+              <button @click="showEdit = true" class="btn btn-light text-warning fw-bold">✏️ {{ $t('hosts.editSelected', 'Edit') }}</button>
+              <button @click="bulkDelete" class="btn btn-light text-danger fw-bold">🗑️ {{ $t('hosts.deleteSelected') }}</button>
+          </div>
       </div>
 
       <table class="table table-hover mb-0 align-middle">
@@ -49,6 +53,9 @@
       </tbody>
       </table>
   </div>
+
+  <BulkMoveModal :show="showMove" :hosts="selectedHosts" @close="showMove = false" @done="onMoveDone" />
+  <BulkEditModal :show="showEdit" :hosts="selectedHosts" @close="showEdit = false" @done="onEditDone" />
 </template>
 
 <script setup>
@@ -56,6 +63,8 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { store, api, actions } from '../../store.js'
 import { translateApiError } from '../../i18n.js'
+import BulkMoveModal from './BulkMoveModal.vue'
+import BulkEditModal from './BulkEditModal.vue'
 
 const { t } = useI18n()
 
@@ -65,6 +74,8 @@ const emit = defineEmits(['edit-host'])
 const sortKey = ref('ip')
 const sortAsc = ref(true)
 const selectedHosts = ref([])
+const showMove = ref(false)
+const showEdit = ref(false)
 
 watch(() => props.selectedFile, () => { selectedHosts.value = [] })
 
@@ -141,5 +152,15 @@ async function bulkDelete() {
     selectedHosts.value = []
     actions.loadData()
   } catch (e) { alert(t('alert.bulkDeleteError')) }
+}
+
+function onMoveDone() {
+  showMove.value = false
+  selectedHosts.value = []
+}
+
+function onEditDone() {
+  showEdit.value = false
+  selectedHosts.value = []
 }
 </script>

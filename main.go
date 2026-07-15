@@ -51,6 +51,7 @@ var (
 	SystemdScope = flag.String("systemd-scope", "", "Legacy flag: auto, system, user, none (overrides -init-system if set)")
 	CiMode       = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
 	AuditLogPath = flag.String("audit-log", "/etc/intermasq/audit.log", "Path to audit log file")
+	TemplatesPath = flag.String("templates", "/etc/intermasq/templates.json", "Path to templates file")
 	PluginsDir   = "/etc/intermasq/plugins"
 	SocketsDir   = "/run/intermasq/sockets"
 	SecretKey    = []byte(os.Getenv("INTERMASQ_SECRET"))
@@ -142,6 +143,7 @@ func loadPlugins(r *gin.Engine) {
 func main() {
 	flag.Parse()
 	loadUsers()
+	loadTemplates()
 
 	initValue := *InitSystem
 	if *SystemdScope != "" {
@@ -182,6 +184,8 @@ func main() {
 				}
 			})
 			auth.GET("/hosts", getHostsHandler)
+			auth.GET("/hosts/next-ip", nextIPHandler)
+			auth.POST("/hosts/apply-template", applyTemplateHandler)
 			auth.GET("/leases", getLeasesHandler)
 			auth.GET("/arp", getArpHandler)
 			auth.GET("/audit", auditHandler)
@@ -189,7 +193,12 @@ func main() {
 			auth.POST("/hosts/csv", importCSVHandler)
 			auth.POST("/hosts", addHostHandler)
 			auth.POST("/hosts/bulk", bulkAddHostsHandler)
+			auth.POST("/hosts/bulk-move", bulkMoveHandler)
+			auth.POST("/hosts/bulk-edit", bulkEditHandler)
 			auth.DELETE("/hosts/:mac", deleteHostHandler)
+			auth.GET("/templates", getTemplatesHandler)
+			auth.POST("/templates", createTemplateHandler)
+			auth.DELETE("/templates/:id", deleteTemplateHandler)
 			auth.POST("/rollback", rollbackHandler)
 			auth.POST("/reload", reloadHandler)
 			auth.GET("/backup", backupHandler)

@@ -58,6 +58,314 @@ func getArpHandler(c *gin.Context) {
 	c.JSON(200, getArpTable())
 }
 
+func nextIPHandler(c *gin.Context) {
+	cidr := c.Query("range")
+	if cidr == "" {
+		c.JSON(400, gin.H{"error": "range_required"})
+		return
+	}
+	ip, err := findFreeIP(cidr)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"ip": ip})
+}
+
+func getTemplatesHandler(c *gin.Context) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	result := []Template{}
+	for _, t := range templates {
+		result = append(result, t)
+	}
+	c.JSON(200, result)
+}
+
+func createTemplateHandler(c *gin.Context) {
+	var req Template
+	if err := c.BindJSON(&req); err != nil {
+		return
+	}
+	if req.Name == "" || req.HostnamePattern == "" || req.IPRange == "" {
+		c.JSON(400, gin.H{"error": "missing_fields"})
+		return
+	}
+	if !isSafePath(req.TargetFile) {
+		c.JSON(403, gin.H{"error": "access_denied"})
+		return
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	req.ID = strings.ToLower(strings.ReplaceAll(req.Name, " ", "-"))
+	if _, exists := templates[req.ID]; exists {
+		c.JSON(409, gin.H{"error": "template_exists"})
+		return
+	}
+	templates[req.ID] = req
+	saveTemplates()
+	c.JSON(200, req)
+}
+
+func deleteTemplateHandler(c *gin.Context) {
+	id := c.Param("id")
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if _, exists := templates[id]; !exists {
+		c.JSON(404, gin.H{"error": "template_not_found"})
+		return
+	}
+	delete(templates, id)
+	saveTemplates()
+	c.JSON(200, gin.H{"status": "deleted"})
+}
+
+func applyTemplateHandler(c *gin.Context) {
+	var req ApplyTemplateReq
+	if err := c.BindJSON(&req); err != nil {
+		return
+	}
+	if !macRegex.MatchString(req.Mac) {
+		c.JSON(400, gin.H{"error": "invalid_mac"})
+		return
+	}
+
+	mu.Lock()
+	tpl, exists := templates[req.TemplateID]
+	mu.Unlock()
+	if !exists {
+		c.JSON(404, gin.H{"error": "template_not_found"})
+		return
+	}
+
+	ip, err := findFreeIP(tpl.IPRange)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	index := countHostsInFile(tpl.TargetFile) + 1
+	hostname := genHostnameFromPattern(tpl.HostnamePattern, index)
+
+	c.JSON(200, gin.H{
+		"mac":      req.Mac,
+		"ip":       ip,
+		"hostname": hostname,
+		"file":     tpl.TargetFile,
+	})
+}
+
+func bulkMoveHandler(c *gin.Context) {
+	var req BulkMoveReq
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid_data"})
+		return
+	}
+	if !isSafePath(req.Target) {
+		c.JSON(403, gin.H{"error": "access_denied"})
+		return
+	}
+	if len(req.Hosts) == 0 {
+		c.JSON(400, gin.H{"error": "no_hosts"})
+		return
+	}
+
+	for _, h := range req.Hosts {
+		if !macRegex.MatchString(h.Mac) || !isSafePath(h.File) {
+			c.JSON(400, gin.H{"error": "invalid_data"})
+			return
+		}
+		if h.File == req.Target {
+			c.JSON(400, gin.H{"error": "same_file", "mac": h.Mac})
+			return
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	moved := 0
+	skipped := []string{}
+
+	for _, h := range req.Hosts {
+		existing := readHostByMac(h.File, h.Mac)
+		if existing == nil {
+			skipped = append(skipped, h.Mac)
+			continue
+		}
+
+		ipConflicts := findHostsByIP(existing.Ip, existing.Mac)
+		hasConflictInTarget := false
+		for _, cf := range ipConflicts {
+			if cf.File == req.Target {
+				hasConflictInTarget = true
+				break
+			}
+		}
+		if hasConflictInTarget {
+			skipped = append(skipped, h.Mac)
+			continue
+		}
+
+		macConflicts := findHostsByMac(existing.Mac)
+		hasMacInTarget := false
+		for _, cf := range macConflicts {
+			if cf.File == req.Target {
+				hasMacInTarget = true
+				break
+			}
+		}
+		if hasMacInTarget {
+			skipped = append(skipped, h.Mac)
+			continue
+		}
+
+		createLocalBackup(h.File)
+		createLocalBackup(req.Target)
+
+		if err := removeHostLine(h.File, h.Mac); err != nil {
+			c.JSON(500, gin.H{"error": "file_write_error", "mac": h.Mac})
+			return
+		}
+		if err := appendHostLine(req.Target, existing.Mac, existing.Hostname, existing.Ip); err != nil {
+			c.JSON(500, gin.H{"error": "file_write_error", "mac": h.Mac})
+			return
+		}
+		moved++
+	}
+
+	writeAudit(AuditEntry{
+		User:   getUser(c),
+		Action: "bulk_move",
+		File:   req.Target,
+		Mac:    fmt.Sprintf("%d moved, %d skipped", moved, len(skipped)),
+	})
+
+	c.JSON(200, gin.H{"status": "ok", "moved": moved, "skipped": skipped})
+}
+
+func bulkEditHandler(c *gin.Context) {
+	var req BulkEditReq
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid_data"})
+		return
+	}
+	if len(req.Hosts) == 0 {
+		c.JSON(400, gin.H{"error": "no_hosts"})
+		return
+	}
+
+	transform, err := parseIPTransform(req.IPTransform.OldPrefix, req.IPTransform.NewPrefix)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	for _, h := range req.Hosts {
+		if !macRegex.MatchString(h.Mac) || !isSafePath(h.File) {
+			c.JSON(400, gin.H{"error": "invalid_data", "mac": h.Mac})
+			return
+		}
+	}
+
+	type plannedChange struct {
+		mac      string
+		file     string
+		oldEntry *HostEntry
+		newIP    string
+		newHost  string
+	}
+
+	planned := []plannedChange{}
+	seenNewIPs := make(map[string]string)
+
+	for _, h := range req.Hosts {
+		existing := readHostByMac(h.File, h.Mac)
+		if existing == nil {
+			c.JSON(404, gin.H{"error": "host_not_found", "mac": h.Mac})
+			return
+		}
+
+		newIP, err := transform.apply(existing.Ip)
+		if err != nil {
+			c.JSON(400, gin.H{"error": err.Error(), "mac": h.Mac, "old_ip": existing.Ip})
+			return
+		}
+		if net.ParseIP(newIP) == nil {
+			c.JSON(400, gin.H{"error": "invalid_ip", "mac": h.Mac})
+			return
+		}
+
+		newHostname := existing.Hostname
+		if strip := req.HostnameTransform.StripOld; strip != "" {
+			newHostname = strings.TrimSuffix(newHostname, strip)
+		}
+		if suffix := req.HostnameTransform.Suffix; suffix != "" {
+			newHostname = newHostname + suffix
+		}
+		if !hostnameRegex.MatchString(newHostname) {
+			c.JSON(400, gin.H{"error": "invalid_hostname", "mac": h.Mac, "hostname": newHostname})
+			return
+		}
+
+		if otherMac, dup := seenNewIPs[newIP]; dup && otherMac != existing.Mac {
+			c.JSON(409, gin.H{"error": "ip_duplicate_bulk", "ip": newIP, "mac1": existing.Mac, "mac2": otherMac})
+			return
+		}
+		seenNewIPs[newIP] = existing.Mac
+
+		conflicts := findHostsByIP(newIP, existing.Mac)
+		if len(conflicts) > 0 {
+			c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
+			return
+		}
+
+		planned = append(planned, plannedChange{
+			mac:      existing.Mac,
+			file:     existing.File,
+			oldEntry: existing,
+			newIP:    newIP,
+			newHost:  newHostname,
+		})
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	affectedFiles := make(map[string]bool)
+	for _, p := range planned {
+		affectedFiles[p.file] = true
+	}
+	for f := range affectedFiles {
+		createLocalBackup(f)
+	}
+
+	for _, p := range planned {
+		if err := removeHostLine(p.file, p.mac); err != nil {
+			c.JSON(500, gin.H{"error": "file_write_error", "mac": p.mac})
+			return
+		}
+		if err := appendHostLine(p.file, p.mac, p.newHost, p.newIP); err != nil {
+			c.JSON(500, gin.H{"error": "file_write_error", "mac": p.mac})
+			return
+		}
+	}
+
+	writeAudit(AuditEntry{
+		User:   getUser(c),
+		Action: "bulk_edit",
+		Mac:    fmt.Sprintf("%d hosts", len(planned)),
+		Ip:     fmt.Sprintf("%s -> %s", req.IPTransform.OldPrefix, req.IPTransform.NewPrefix),
+	})
+
+	c.JSON(200, gin.H{"status": "ok", "updated": len(planned)})
+}
+
 func getHostsHandler(c *gin.Context) {
 	hosts := []HostEntry{}
 	files, err := os.ReadDir(*ConfigDir)

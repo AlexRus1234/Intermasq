@@ -16,6 +16,7 @@ export const store = reactive({
     arpTable: {},
     plugins: [],
     auditLog: [],
+    templates: [],
     
     transferData: null 
 })
@@ -50,18 +51,20 @@ export const actions = {
 
     async loadData() {
         try {
-            const [hRes, lRes, aRes, pRes, auditRes] = await Promise.all([
+            const [hRes, lRes, aRes, pRes, auditRes, tRes] = await Promise.all([
                 api.get('/hosts'), 
                 api.get('/leases'), 
                 api.get('/arp'),
                 api.get('/plugins').catch(() => ({ data: [] })),
-                api.get('/audit').catch(() => ({ data: [] }))
+                api.get('/audit').catch(() => ({ data: [] })),
+                api.get('/templates').catch(() => ({ data: [] }))
             ])
             store.hosts = hRes.data
             store.leases = lRes.data
             store.arpTable = aRes.data
             store.plugins = pRes.data
             store.auditLog = auditRes.data.reverse()
+            store.templates = tRes.data
         } catch (e) {
             if (e.response?.status === 401) this.logout()
             else store.view = 'error'
@@ -136,6 +139,71 @@ export const actions = {
             const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.csvImportError')
             alert(msg)
             return false
+        }
+    },
+
+    async loadTemplates() {
+        try {
+            const res = await api.get('/templates')
+            store.templates = res.data
+        } catch (e) {}
+    },
+
+    async createTemplate(template) {
+        try {
+            await api.post('/templates', template)
+            this.loadTemplates()
+            return true
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.templateCreateError', 'Failed to create template')
+            alert(msg)
+            return false
+        }
+    },
+
+    async deleteTemplate(id) {
+        try {
+            await api.delete(`/templates/${id}`)
+            this.loadTemplates()
+            return true
+        } catch (e) {
+            alert(t('alert.templateDeleteError', 'Failed to delete template'))
+            return false
+        }
+    },
+
+    async applyTemplate(mac, templateId) {
+        try {
+            const res = await api.post('/hosts/apply-template', { mac, template_id: templateId })
+            return res.data
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.templateApplyError', 'Failed to apply template')
+            alert(msg)
+            return null
+        }
+    },
+
+    async bulkMove(hosts, target) {
+        try {
+            const res = await api.post('/hosts/bulk-move', { hosts, target })
+            this.loadData()
+            return res.data
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.bulkMoveError', 'Failed to move hosts')
+            alert(msg)
+            return null
+        }
+    },
+
+    async bulkEdit(hosts, ipTransform, hostnameTransform) {
+        try {
+            const res = await api.post('/hosts/bulk-edit', { hosts, ip_transform: ipTransform, hostname_transform: hostnameTransform })
+            this.loadData()
+            return res.data
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.bulkEditError', 'Failed to edit hosts')
+            alert(msg)
+            return null
         }
     }
 }

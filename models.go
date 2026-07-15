@@ -39,3 +39,37 @@ type AuthReq struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
+
+type Template struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	IPRange         string `json:"ip_range"`
+	HostnamePattern string `json:"hostname_pattern"`
+	TargetFile      string `json:"target_file"`
+}
+
+type ApplyTemplateReq struct {
+	Mac        string `json:"mac"`
+	TemplateID string `json:"template_id"`
+}
+
+type BulkMoveReq struct {
+	Hosts  []HostEntry `json:"hosts"`
+	Target string      `json:"target"`
+}
+
+type BulkEditReq struct {
+	Hosts             []HostEntry        `json:"hosts"`
+	IPTransform       IPTransformSpec    `json:"ip_transform"`
+	HostnameTransform HostnameTransformSpec `json:"hostname_transform"`
+}
+
+type IPTransformSpec struct {
+	OldPrefix string `json:"old_prefix"`
+	NewPrefix string `json:"new_prefix"`
+}
+
+type HostnameTransformSpec struct {
+	Suffix    string `json:"suffix"`
+	StripOld  string `json:"strip_old"`
+}
