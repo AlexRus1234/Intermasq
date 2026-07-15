@@ -73,3 +73,50 @@ type HostnameTransformSpec struct {
 	Suffix    string `json:"suffix"`
 	StripOld  string `json:"strip_old"`
 }
+
+// Directive represents a single dnsmasq directive line (excluding dhcp-host).
+type Directive struct {
+	Key    string `json:"key"`
+	Value  string `json:"value"`
+	Active bool   `json:"active"`
+	File   string `json:"file,omitempty"`
+	LineNo int    `json:"line_no,omitempty"`
+}
+
+// ConfigFile groups directives by source file.
+type ConfigFile struct {
+	Path       string      `json:"path"`
+	Name       string      `json:"name"`
+	Directives []Directive `json:"directives"`
+	HasBak     bool        `json:"has_bak"`
+}
+
+// ConfigSnapshot is the response for GET /api/config.
+type ConfigSnapshot struct {
+	Files      []ConfigFile `json:"files"`
+	DhcpRanges []DhcpRange  `json:"dhcp_ranges"`
+}
+
+// DhcpRange is a structured representation of a dhcp-range= directive.
+type DhcpRange struct {
+	Raw       string `json:"raw"`
+	Start     string `json:"start"`
+	End       string `json:"end"`
+	Mask      string `json:"mask"`
+	LeaseTime string `json:"lease_time"`
+	Tag       string `json:"tag"`
+	CIDR      string `json:"cidr"`
+	File      string `json:"file"`
+	LineNo    int    `json:"line_no"`
+}
+
+// ConfigUpdateReq is the body of PUT /api/config.
+type ConfigUpdateReq struct {
+	File       string      `json:"file"`
+	Directives []Directive `json:"directives"`
+}
+
+// CreateConfigFileReq is the body of POST /api/config/file.
+type CreateConfigFileReq struct {
+	Name string `json:"name"`
+}

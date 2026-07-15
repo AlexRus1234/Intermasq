@@ -25,9 +25,9 @@
                   <tr v-for="(entry, idx) in store.auditLog" :key="idx">
                       <td class="small text-muted">{{ formatTime(entry.timestamp) }}</td>
                       <td>{{ entry.user }}</td>
-                      <td>
-                          <span :class="actionClass(entry.action)" class="badge">{{ entry.action }}</span>
-                      </td>
+                       <td>
+                           <span :class="actionClass(entry.action)" class="badge">{{ actionLabel(entry.action) }}</span>
+                       </td>
                       <td class="font-monospace small">{{ entry.mac }}</td>
                       <td>{{ entry.hostname }}</td>
                       <td>{{ entry.ip }}</td>
@@ -41,10 +41,18 @@
 
 <script setup>
 import { store } from '../../store.js'
+import { useI18n } from 'vue-i18n'
+
+const { t, te } = useI18n()
 
 function formatTime(ts) {
     if (!ts) return ''
     try { return new Date(ts).toLocaleString() } catch { return ts }
+}
+
+function actionLabel(action) {
+    const key = 'audit.action_' + action
+    return te(key) ? t(key) : action
 }
 
 function actionClass(action) {
@@ -53,6 +61,7 @@ function actionClass(action) {
         case 'delete': case 'bulk_delete': return 'bg-danger'
         case 'rollback': return 'bg-warning text-dark'
         case 'reload': return 'bg-info'
+        case 'config_update': case 'config_create_file': return 'bg-primary'
         default: return 'bg-secondary'
     }
 }

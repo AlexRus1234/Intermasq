@@ -17,6 +17,8 @@ export const store = reactive({
     plugins: [],
     auditLog: [],
     templates: [],
+    configSnapshot: null,
+    dhcpRanges: [],
     
     transferData: null 
 })
@@ -51,13 +53,15 @@ export const actions = {
 
     async loadData() {
         try {
-            const [hRes, lRes, aRes, pRes, auditRes, tRes] = await Promise.all([
+            const [hRes, lRes, aRes, pRes, auditRes, tRes, cfgRes, rangesRes] = await Promise.all([
                 api.get('/hosts'), 
                 api.get('/leases'), 
                 api.get('/arp'),
                 api.get('/plugins').catch(() => ({ data: [] })),
                 api.get('/audit').catch(() => ({ data: [] })),
-                api.get('/templates').catch(() => ({ data: [] }))
+                api.get('/templates').catch(() => ({ data: [] })),
+                api.get('/config').catch(() => ({ data: null })),
+                api.get('/templates/ranges').catch(() => ({ data: { ranges: [] } }))
             ])
             store.hosts = hRes.data
             store.leases = lRes.data
@@ -65,6 +69,8 @@ export const actions = {
             store.plugins = pRes.data
             store.auditLog = auditRes.data.reverse()
             store.templates = tRes.data
+            store.configSnapshot = cfgRes.data
+            store.dhcpRanges = rangesRes.data.ranges || []
         } catch (e) {
             if (e.response?.status === 401) this.logout()
             else store.view = 'error'
@@ -205,5 +211,53 @@ export const actions = {
             alert(msg)
             return null
         }
+    },
+
+    async loadConfig() {
+        try {
+            const res = await api.get('/config')
+            store.configSnapshot = res.data
+            const rRes = await api.get('/templates/ranges')
+            store.dhcpRanges = rRes.data.ranges || []
+        } catch (e) {
+            if (e.response?.status === 401) this.logout()
+        }
+    },
+
+    async saveConfig(file, directives) {
+        try {
+            const res = await api.put('/config', { file, directives })
+            store.configSnapshot = res.data
+            const rRes = await api.get('/templates/ranges')
+            store.dhcpRanges = rRes.data.ranges || []
+            return true
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.configSaveError')
+            if (e.response?.data?.detail) {
+                alert(msg + '\n\n' + e.response.data.detail)
+            } else {
+                alert(msg)
+            }
+            return false
+        }
+    },
+
+    async createConfigFile(name) {
+        try {
+            const res = await api.post('/config/file', { name })
+            store.configSnapshot = res.data
+            return true
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.configCreateError')
+            alert(msg)
+            return false
+        }
+    },
+
+    async loadDhcpRanges() {
+        try {
+            const res = await api.get('/templates/ranges')
+            store.dhcpRanges = res.data.ranges || []
+        } catch (e) {}
     }
 }

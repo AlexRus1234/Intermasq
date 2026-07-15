@@ -25,15 +25,21 @@
               <button @click="showTemplatesModal = true" class="btn btn-sm btn-outline-secondary" type="button">⚙️</button>
           </div>
           <div class="col-md-3"><input v-model="form.mac" :placeholder="'MAC (aa:bb...)'" class="form-control"></div>
-          <div class="col-md-3">
-              <div class="input-group">
-                  <input v-model="form.ip" placeholder="IP (172.20...)" class="form-control">
-                  <button @click="autoIP" class="btn btn-outline-secondary" :disabled="autoIPLoading" :title="$t('hosts.autoIpTooltip', 'Auto pick free IP')" type="button">
-                      <span v-if="autoIPLoading">…</span><span v-else>🎲</span>
-                  </button>
-              </div>
-              <input v-if="showRangeInput" v-model="ipRange" :placeholder="$t('hosts.ipRangePlaceholder', 'CIDR 10.0.0.0/24')" class="form-control form-control-sm mt-1">
-          </div>
+           <div class="col-md-3">
+               <div class="input-group">
+                   <input v-model="form.ip" placeholder="IP (172.20...)" class="form-control">
+                   <button @click="autoIP" class="btn btn-outline-secondary" :disabled="autoIPLoading" :title="$t('hosts.autoIpTooltip', 'Auto pick free IP')" type="button">
+                       <span v-if="autoIPLoading">…</span><span v-else>🎲</span>
+                   </button>
+               </div>
+               <div v-if="showRangeInput" class="mt-1">
+                   <select v-if="store.dhcpRanges.length > 0" v-model="ipRange" class="form-select form-select-sm">
+                       <option v-for="r in store.dhcpRanges" :key="r" :value="r">{{ r }}</option>
+                       <option value="">— {{ $t('hosts.manualCidr', 'manual CIDR') }} —</option>
+                   </select>
+                   <input v-if="store.dhcpRanges.length === 0 || ipRange === ''" v-model="manualRange" :placeholder="$t('hosts.ipRangePlaceholder', 'CIDR 10.0.0.0/24')" class="form-control form-control-sm mt-1">
+               </div>
+           </div>
           <div class="col-md-3"><input v-model="form.hostname" placeholder="Hostname" class="form-control"></div>
           <div class="col-md-3">
               <div class="input-group">
@@ -96,6 +102,7 @@ const originalMac = ref('')
 const originalFile = ref('')
 const form = ref({ mac: '', ip: '', hostname: '', file: '' })
 const ipRange = ref('')
+const manualRange = ref('')
 const showRangeInput = ref(false)
 const autoIPLoading = ref(false)
 const selectedTemplateId = ref('')
@@ -135,19 +142,22 @@ watch(() => store.transferData, (data) => {
 }, { immediate: true })
 
 async function autoIP() {
-  let range = ipRange.value.trim()
+  if (store.dhcpRanges.length === 0) await actions.loadDhcpRanges()
+  let range = (ipRange.value && ipRange.value !== '') ? ipRange.value : manualRange.value.trim()
   if (!range) {
     const tpl = store.templates.find(t => t.id === selectedTemplateId.value)
     if (tpl) {
       range = tpl.ip_range
     }
   }
+  if (!range && store.dhcpRanges.length > 0) {
+    range = store.dhcpRanges[0]
+    ipRange.value = range
+  }
   if (!range) {
     showRangeInput.value = true
-    if (!ipRange.value) return
-    range = ipRange.value.trim()
+    return
   }
-  if (!range) return
   autoIPLoading.value = true
   try {
     const res = await api.get('/hosts/next-ip', { params: { range } })
@@ -156,6 +166,7 @@ async function autoIP() {
   } catch (e) {
     const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.autoIpError', 'Failed to get free IP')
     alert(msg)
+    showRangeInput.value = true
   } finally {
     autoIPLoading.value = false
   }

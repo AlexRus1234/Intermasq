@@ -14,6 +14,7 @@
     "retryConnection": "Retry connection",
     "tabStatic": "Static",
     "tabLeases": "Leases",
+    "tabConfig": "dnsmasq Settings",
     "tabAudit": "History",
     "searchPlaceholder": "Search by MAC, IP, Hostname...",
     "backup": "Backup",
@@ -86,7 +87,8 @@
     "deleteHost": "Delete entry {mac}?",
     "deleteCount": "Delete {count} entries?",
     "rollback": "Undo last change in file {file}?",
-    "restartSystem": "Restart Intermasq service? (Required to activate new plugins)"
+    "restartSystem": "Restart Intermasq service? (Required to activate new plugins)",
+    "deleteTemplate": "Delete template?"
   },
   "alert": {
     "applySuccess": "Configuration verified and applied successfully!",
@@ -108,7 +110,10 @@
     "csvImportError": "CSV import error",
     "csvImportSuccess": "Successfully imported {count} devices from CSV!",
     "ipDuplicate": "IP {ip} already used by {hostname} ({mac}) in {file}",
-    "ipDuplicateBulk": "IP {ip} assigned to multiple devices in import"
+    "ipDuplicateBulk": "IP {ip} assigned to multiple devices in import",
+    "configSaveSuccess": "Settings saved and verified via dnsmasq --test",
+    "configSaveError": "Failed to save settings",
+    "configCreateError": "Failed to create file"
   },
   "api": {
     "already_setup": "Already set up",
@@ -130,7 +135,33 @@
     "mac_duplicate": "This MAC is already used in another file",
     "no_file": "No file uploaded",
     "invalid_csv": "Invalid CSV format",
-    "csv_empty": "CSV file is empty or contains no valid entries"
+    "csv_empty": "CSV file is empty or contains no valid entries",
+    "dnsmasq_test_failed": "dnsmasq --test failed. Changes rolled back.",
+    "invalid_directive_key": "Invalid directive key",
+    "invalid_directive_value": "Invalid directive value",
+    "invalid_filename": "Invalid filename",
+    "file_exists": "File already exists",
+    "serialize_error": "Configuration serialization error"
+  },
+  "config": {
+    "groupDns": "DNS / Network",
+    "groupDhcp": "DHCP",
+    "groupLog": "Logging",
+    "groupOther": "Other",
+    "newFile": "New file",
+    "selectFile": "Select a configuration file",
+    "noDirectives": "No settings in this file (only dhcp-host)",
+    "save": "Save configuration",
+    "saveConfirm": "Apply changes and verify via dnsmasq --test?",
+    "rollback": "Rollback file",
+    "addRange": "Add range",
+    "addDirective": "Add directive",
+    "customKey": "custom directive...",
+    "rangeStart": "Start",
+    "rangeEnd": "End",
+    "rangeMask": "Mask/CIDR",
+    "rangeLease": "Lease time",
+    "rangeTag": "Tag"
   },
   "audit": {
     "title": "Change history",
@@ -141,6 +172,15 @@
     "mac": "MAC",
     "ip": "IP",
     "hostname": "Hostname",
-    "file": "File"
+    "file": "File",
+    "action_add": "Add",
+    "action_delete": "Delete",
+    "action_bulk_add": "Bulk add",
+    "action_bulk_move": "Move",
+    "action_bulk_edit": "Bulk edit",
+    "action_rollback": "Rollback",
+    "action_reload": "Reload",
+    "action_config_update": "Config update",
+    "action_config_create_file": "File created"
   }
 }

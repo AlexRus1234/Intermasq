@@ -14,6 +14,7 @@
     "retryConnection": "Повторить подключение",
     "tabStatic": "Статика",
     "tabLeases": "Аренды",
+    "tabConfig": "Настройки dnsmasq",
     "tabAudit": "История",
     "searchPlaceholder": "Поиск по MAC, IP, Имени...",
     "backup": "Бэкап",
@@ -86,7 +87,9 @@
     "deleteHost": "Удалить запись {mac}?",
     "deleteCount": "Точно удалить {count} записей?",
     "rollback": "Отменить последнее изменение в файле {file}?",
-    "restartSystem": "Перезагрузить службу Intermasq? (Нужно для активации новых плагинов)"
+    "rollback": "Отменить последнее изменение в файле {file}?",
+    "restartSystem": "Перезагрузить службу Intermasq? (Нужно для активации новых плагинов)",
+    "deleteTemplate": "Удалить шаблон?"
   },
   "alert": {
     "applySuccess": "Конфигурация проверена и успешно применена!",
@@ -108,7 +111,10 @@
     "csvImportError": "Ошибка импорта CSV",
     "csvImportSuccess": "Успешно импортировано {count} устройств из CSV!",
     "ipDuplicate": "IP {ip} уже используется хостом {hostname} ({mac}) в файле {file}",
-    "ipDuplicateBulk": "IP {ip} указан для нескольких устройств в импорте"
+    "ipDuplicateBulk": "IP {ip} указан для нескольких устройств в импорте",
+    "configSaveSuccess": "Настройки сохранены и проверены через dnsmasq --test",
+    "configSaveError": "Ошибка сохранения настроек",
+    "configCreateError": "Ошибка создания файла"
   },
   "api": {
     "already_setup": "Уже настроено",
@@ -130,7 +136,33 @@
     "mac_duplicate": "Этот MAC уже используется в другом файле",
     "no_file": "Файл не загружен",
     "invalid_csv": "Неверный формат CSV",
-    "csv_empty": "CSV файл пуст или не содержит валидных записей"
+    "csv_empty": "CSV файл пуст или не содержит валидных записей",
+    "dnsmasq_test_failed": "Проверка dnsmasq --test не пройдена. Изменения откачены.",
+    "invalid_directive_key": "Недопустимое имя директивы",
+    "invalid_directive_value": "Недопустимое значение директивы",
+    "invalid_filename": "Недопустимое имя файла",
+    "file_exists": "Файл уже существует",
+    "serialize_error": "Ошибка сериализации конфигурации"
+  },
+  "config": {
+    "groupDns": "DNS / Сеть",
+    "groupDhcp": "DHCP",
+    "groupLog": "Логирование",
+    "groupOther": "Прочее",
+    "newFile": "Новый файл",
+    "selectFile": "Выберите файл конфигурации",
+    "noDirectives": "В этом файле нет настроек (только dhcp-host)",
+    "save": "Сохранить конфигурацию",
+    "saveConfirm": "Применить изменения и проверить через dnsmasq --test?",
+    "rollback": "Откатить файл",
+    "addRange": "Добавить диапазон",
+    "addDirective": "Добавить директиву",
+    "customKey": "своя директива...",
+    "rangeStart": "Начало",
+    "rangeEnd": "Конец",
+    "rangeMask": "Маска/CIDR",
+    "rangeLease": "Lease time",
+    "rangeTag": "Тег"
   },
   "audit": {
     "title": "История изменений",
@@ -141,6 +173,15 @@
     "mac": "MAC",
     "ip": "IP",
     "hostname": "Имя",
-    "file": "Файл"
+    "file": "Файл",
+    "action_add": "Добавление",
+    "action_delete": "Удаление",
+    "action_bulk_add": "Массовое добавление",
+    "action_bulk_move": "Перемещение",
+    "action_bulk_edit": "Массовое редактирование",
+    "action_rollback": "Откат",
+    "action_reload": "Перезагрузка",
+    "action_config_update": "Изменение настроек",
+    "action_config_create_file": "Создание файла"
   }
 }

@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -437,14 +438,14 @@ func addHostHandler(c *gin.Context) {
 
 	conflicts := findHostsByIP(req.Ip, req.Mac)
 	if len(conflicts) > 0 {
-		fmt.Printf("[VALIDATION] IP duplicate detected: %s conflicts for IP %s\n", len(conflicts), req.Ip)
+		fmt.Printf("[VALIDATION] IP duplicate detected: %d conflicts for IP %s\n", len(conflicts), req.Ip)
 		c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
 		return
 	}
 
 	macConflicts := findHostsByMac(req.Mac)
 	if len(macConflicts) > 0 {
-		fmt.Printf("[VALIDATION] MAC duplicate detected: %s for MAC %s\n", len(macConflicts), req.Mac)
+		fmt.Printf("[VALIDATION] MAC duplicate detected: %d for MAC %s\n", len(macConflicts), req.Mac)
 		c.JSON(409, gin.H{"error": "mac_duplicate", "conflicts": macConflicts})
 		return
 	}
@@ -821,4 +822,103 @@ func importCSVHandler(c *gin.Context) {
 	})
 
 	c.JSON(200, gin.H{"status": "ok", "count": len(hosts)})
+}
+
+func getConfigHandler(c *gin.Context) {
+	snap := readConfigSnapshot()
+	c.JSON(200, snap)
+}
+
+func updateConfigHandler(c *gin.Context) {
+	var req ConfigUpdateReq
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid_data"})
+		return
+	}
+	if !isSafePath(req.File) {
+		c.JSON(403, gin.H{"error": "access_denied"})
+		return
+	}
+	directiveKeyValidator := regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	for _, d := range req.Directives {
+		if !directiveKeyValidator.MatchString(d.Key) {
+			c.JSON(400, gin.H{"error": "invalid_directive_key", "key": d.Key})
+			return
+		}
+		if strings.Contains(d.Value, "\n") {
+			c.JSON(400, gin.H{"error": "invalid_directive_value", "key": d.Key})
+			return
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	content, err := serializeConfigFile(req.File, req.Directives)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "serialize_error"})
+		return
+	}
+	if err := writeConfigWithTest(req.File, content); err != nil {
+		errMsg := err.Error()
+		if strings.HasPrefix(errMsg, "dnsmasq_test_failed") {
+			c.JSON(400, gin.H{"error": "dnsmasq_test_failed", "detail": strings.TrimPrefix(errMsg, "dnsmasq_test_failed: ")})
+		} else {
+			c.JSON(500, gin.H{"error": "write_error"})
+		}
+		return
+	}
+
+	writeAudit(AuditEntry{
+		User:   getUser(c),
+		Action: "config_update",
+		File:   req.File,
+		Mac:    fmt.Sprintf("%d directives", len(req.Directives)),
+	})
+
+	snap := readConfigSnapshot()
+	c.JSON(200, snap)
+}
+
+func getDhcpRangesHandler(c *gin.Context) {
+	c.JSON(200, gin.H{"ranges": detectDhcpRangesCIDR()})
+}
+
+func createConfigFileHandler(c *gin.Context) {
+	var req CreateConfigFileReq
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid_data"})
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\\") || filepath.Ext(name) != ".conf" {
+		c.JSON(400, gin.H{"error": "invalid_filename"})
+		return
+	}
+	fullPath := filepath.Join(*ConfigDir, name)
+	if !isSafePath(fullPath) {
+		c.JSON(403, gin.H{"error": "access_denied"})
+		return
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if _, err := os.Stat(fullPath); err == nil {
+		c.JSON(409, gin.H{"error": "file_exists"})
+		return
+	}
+	if err := os.WriteFile(fullPath, []byte("# === Managed by Intermasq ===\n"), 0644); err != nil {
+		c.JSON(500, gin.H{"error": "write_error"})
+		return
+	}
+
+	writeAudit(AuditEntry{
+		User:   getUser(c),
+		Action: "config_create_file",
+		File:   fullPath,
+	})
+
+	snap := readConfigSnapshot()
+	c.JSON(200, snap)
 }

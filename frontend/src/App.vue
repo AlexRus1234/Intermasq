@@ -7,6 +7,7 @@ import AuthScreen from './components/AuthScreen.vue'
 import StaticView from './components/static/StaticView.vue'
 import LeasesTab from './components/leases/LeasesTab.vue'
 import AuditTab from './components/audit/AuditTab.vue'
+import DnsmasqConfig from './components/config/DnsmasqConfig.vue'
 
 const { locale } = useI18n()
 
@@ -87,10 +88,11 @@ onUnmounted(() => { clearInterval(arpInterval) })
                     <div class="btn-group w-100">
                         <button @click="store.tab='static'" :class="['btn', store.tab==='static' ? 'btn-primary' : 'btn-outline-primary']">{{ $t('app.tabStatic') }}</button>
                         <button @click="store.tab='leases'" :class="['btn', store.tab==='leases' ? 'btn-primary' : 'btn-outline-primary']">{{ $t('app.tabLeases') }}</button>
+                        <button @click="store.tab='config'" :class="['btn', store.tab==='config' ? 'btn-primary' : 'btn-outline-primary']">⚙️ {{ $t('app.tabConfig') }}</button>
                         <button @click="store.tab='audit'" :class="['btn', store.tab==='audit' ? 'btn-primary' : 'btn-outline-primary']">{{ $t('app.tabAudit') }}</button>
                     </div>
                 </div>
-                <div class="col-12 col-md">
+                <div v-if="store.tab !== 'config'" class="col-12 col-md">
                     <input v-model="store.searchQuery" type="text" class="form-control" :placeholder="$t('app.searchPlaceholder')">
                 </div>
                 <div class="col-12 col-md-auto text-md-end d-flex gap-2 justify-content-end">
@@ -102,6 +104,7 @@ onUnmounted(() => { clearInterval(arpInterval) })
 
             <StaticView v-if="store.tab === 'static'" />
             <LeasesTab v-if="store.tab === 'leases'" />
+            <DnsmasqConfig v-if="store.tab === 'config'" />
             <AuditTab v-if="store.tab === 'audit'" />
         </div>
 

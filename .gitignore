@@ -5,6 +5,8 @@
 *.so
 *.dylib
 intermask
+intermasq
+intermasq-linux
 *.test
 *.out
 vendor/

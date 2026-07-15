@@ -17,6 +17,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -195,4 +197,212 @@ func TestSystemdCallerRestartSelf(t *testing.T) {
 	_ = caller
 	callerUser := &SystemdUserCaller{}
 	_ = callerUser
+}
+
+func TestParseDhcpRangeClassic(t *testing.T) {
+	r := parseDhcpRange("192.168.1.50,192.168.1.150,255.255.255.0,12h", "/etc/dnsmasq.d/x.conf", 1)
+	if r.Start != "192.168.1.50" || r.End != "192.168.1.150" || r.Mask != "255.255.255.0" || r.LeaseTime != "12h" {
+		t.Errorf("unexpected range: %+v", r)
+	}
+	if r.CIDR != "192.168.1.0/24" {
+		t.Errorf("CIDR = %q, want 192.168.1.0/24", r.CIDR)
+	}
+}
+
+func TestParseDhcpRangeCIDRForm(t *testing.T) {
+	r := parseDhcpRange("192.168.0.0/24,1h", "/etc/dnsmasq.d/x.conf", 1)
+	if r.Mask != "192.168.0.0/24" || r.LeaseTime != "1h" {
+		t.Errorf("unexpected range: %+v", r)
+	}
+	if r.CIDR != "192.168.0.0/24" {
+		t.Errorf("CIDR = %q, want 192.168.0.0/24", r.CIDR)
+	}
+}
+
+func TestParseDhcpRangeTagged(t *testing.T) {
+	r := parseDhcpRange("set:corp,192.168.1.10,192.168.1.100,255.255.255.0,2h", "/etc/dnsmasq.d/x.conf", 1)
+	if r.Tag != "corp" || r.Start != "192.168.1.10" || r.End != "192.168.1.100" {
+		t.Errorf("unexpected range: %+v", r)
+	}
+	if r.CIDR != "192.168.1.0/24" {
+		t.Errorf("CIDR = %q, want 192.168.1.0/24", r.CIDR)
+	}
+}
+
+func TestParseDhcpRangeNoMask(t *testing.T) {
+	r := parseDhcpRange("10.0.0.5,10.0.0.20,6h", "/etc/dnsmasq.d/x.conf", 1)
+	if r.Start != "10.0.0.5" || r.End != "10.0.0.20" || r.LeaseTime != "6h" {
+		t.Errorf("unexpected range: %+v", r)
+	}
+	if r.Mask != "" {
+		t.Errorf("Mask should be empty, got %q", r.Mask)
+	}
+	if r.CIDR != "" {
+		t.Errorf("CIDR should be empty when mask missing, got %q", r.CIDR)
+	}
+}
+
+func TestDhcpRangeToCIDRIPv6Rejected(t *testing.T) {
+	r := DhcpRange{Start: "::1", Mask: "ffff:ffff::"}
+	if c := dhcpRangeToCIDR(r); c != "" {
+		t.Errorf("ipv6 should yield empty CIDR, got %q", c)
+	}
+}
+
+func TestSerializeConfigFilePreservesDhcpHosts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.conf")
+	initial := []byte("# header comment\n\ndhcp-host=aa:bb:cc:dd:ee:ff,host1,192.168.1.10\nserver=8.8.8.8\n")
+	if err := os.WriteFile(path, initial, 0644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := serializeConfigFile(path, []Directive{
+		{Key: "domain", Value: "lan", Active: true},
+		{Key: "server", Value: "1.1.1.1", Active: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "dhcp-host=aa:bb:cc:dd:ee:ff,host1,192.168.1.10") {
+		t.Errorf("dhcp-host line lost:\n%s", s)
+	}
+	if !strings.Contains(s, "# header comment") {
+		t.Errorf("header comment lost:\n%s", s)
+	}
+	if !strings.Contains(s, "domain=lan") {
+		t.Errorf("new directive missing:\n%s", s)
+	}
+	if !strings.Contains(s, "server=1.1.1.1") {
+		t.Errorf("server override missing:\n%s", s)
+	}
+	if strings.Contains(s, "server=8.8.8.8") {
+		t.Errorf("old server should be replaced:\n%s", s)
+	}
+}
+
+func TestSerializeConfigFileInactiveDirective(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.conf")
+	if err := os.WriteFile(path, []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := serializeConfigFile(path, []Directive{
+		{Key: "no-resolv", Value: "", Active: false},
+		{Key: "domain", Value: "lan", Active: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "#no-resolv") {
+		t.Errorf("inactive directive should be prefixed with #:\n%s", s)
+	}
+	if strings.Contains(s, "\nno-resolv\n") {
+		t.Errorf("inactive directive should not be active:\n%s", s)
+	}
+	if !strings.Contains(s, "domain=lan") {
+		t.Errorf("active directive missing:\n%s", s)
+	}
+}
+
+func TestReadConfigSnapshotFiltersDhcpHost(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	path := filepath.Join(dir, "net.conf")
+	content := []byte("dhcp-host=11:22:33:44:55:66,h,10.0.0.1\nserver=8.8.8.8\nno-resolv\n#domain-needed\n# plain comment\n")
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	snap := readConfigSnapshot()
+	if len(snap.Files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(snap.Files))
+	}
+	for _, d := range snap.Files[0].Directives {
+		if d.Key == "dhcp-host" {
+			t.Errorf("dhcp-host should be filtered out: %+v", d)
+		}
+	}
+	hasServer := false
+	hasNoResolv := false
+	hasDomainNeededInactive := false
+	for _, d := range snap.Files[0].Directives {
+		if d.Key == "server" && d.Value == "8.8.8.8" && d.Active {
+			hasServer = true
+		}
+		if d.Key == "no-resolv" && d.Active {
+			hasNoResolv = true
+		}
+		if d.Key == "domain-needed" && !d.Active {
+			hasDomainNeededInactive = true
+		}
+	}
+	if !hasServer {
+		t.Error("active server directive missing")
+	}
+	if !hasNoResolv {
+		t.Error("active no-resolv directive missing")
+	}
+	if !hasDomainNeededInactive {
+		t.Error("inactive domain-needed directive missing")
+	}
+}
+
+func TestReadConfigSnapshotDhcpRanges(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	path := filepath.Join(dir, "net.conf")
+	content := []byte("dhcp-range=192.168.1.50,192.168.1.150,255.255.255.0,12h\ndhcp-range=set:guest,10.0.0.10,10.0.0.50,255.255.255.0,2h\n")
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	snap := readConfigSnapshot()
+	if len(snap.DhcpRanges) != 2 {
+		t.Fatalf("expected 2 dhcp ranges, got %d", len(snap.DhcpRanges))
+	}
+	if snap.DhcpRanges[0].CIDR != "192.168.1.0/24" {
+		t.Errorf("first CIDR = %q", snap.DhcpRanges[0].CIDR)
+	}
+	if snap.DhcpRanges[1].Tag != "guest" || snap.DhcpRanges[1].CIDR != "10.0.0.0/24" {
+		t.Errorf("second range wrong: %+v", snap.DhcpRanges[1])
+	}
+}
+
+func TestDetectDhcpRangesCIDRDedup(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	path := filepath.Join(dir, "net.conf")
+	content := []byte("dhcp-range=192.168.1.50,192.168.1.150,255.255.255.0,12h\ndhcp-range=192.168.1.200,192.168.1.250,255.255.255.0,1h\n")
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	cidrs := detectDhcpRangesCIDR()
+	if len(cidrs) != 1 || cidrs[0] != "192.168.1.0/24" {
+		t.Errorf("expected deduped [192.168.1.0/24], got %v", cidrs)
+	}
+}
+
+func TestSerializeConfigFileGroupOrder(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.conf")
+	if err := os.WriteFile(path, []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := serializeConfigFile(path, []Directive{
+		{Key: "log-queries", Value: "", Active: true},
+		{Key: "dhcp-option", Value: "3,192.168.1.1", Active: true},
+		{Key: "domain", Value: "lan", Active: true},
+		{Key: "server", Value: "8.8.8.8", Active: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	domainIdx := strings.Index(s, "domain=lan")
+	serverIdx := strings.Index(s, "server=8.8.8.8")
+	dhcpOptIdx := strings.Index(s, "dhcp-option=3,192.168.1.1")
+	logIdx := strings.Index(s, "log-queries")
+	if !(domainIdx < serverIdx && serverIdx < dhcpOptIdx && dhcpOptIdx < logIdx) {
+		t.Errorf("directives not grouped in dns<dhcp<log order:\n%s", s)
+	}
 }
