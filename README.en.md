@@ -63,7 +63,7 @@ go build -o intermasq .
 ### Run
 
 ```bash
-sudo ./intermasq -port 8080 -conf-dir /etc/dnsmasq.d -leases /var/lib/misc/dnsmasq.leases
+sudo ./intermasq -port 8081 -conf-dir /etc/dnsmasq.d -leases /var/lib/misc/dnsmasq.leases
 ```
 
 On first launch, the admin setup screen appears. After creating an account — full access to the panel.
@@ -80,7 +80,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=3.0.0" -o intermasq .
 
 | Flag | Default | Description |
 |---|---|---|
-| `-port` | `8080` | Port to listen on |
+| `-port` | `8081` | Port to listen on |
 | `-db` | `/etc/intermasq/users.json` | Path to user database |
 | `-conf-dir` | `/etc/dnsmasq.d` | Directory with dnsmasq configs |
 | `-leases` | `/var/lib/misc/dnsmasq.leases` | Path to dnsmasq leases file |
@@ -88,6 +88,10 @@ CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=3.0.0" -o intermasq .
 | `-init-system` | `auto` | Init system: `auto`, `systemd`, `systemd-user`, `openrc`, `runit`, `sysvinit`, `none` |
 | `-systemd-scope` | — | *(deprecated)* `auto`, `system`, `user`, `none` |
 | `-ci-mode` | `false` | Disables self-restart (for CI) |
+| `-audit-log` | `/etc/intermasq/audit.log` | Path to audit log file |
+| `-templates` | `/etc/intermasq/templates.json` | Path to templates file |
+
+> **Default port note:** As of v3.0 the default port changed from `8080` to `8081`. Port `8080` is frequently occupied by other services (e.g. Crowdsec listens on `127.0.0.1:8080`), which caused binding conflicts and silent service crashes. To use the old port, pass it explicitly via `-port 8080`.
 
 ### Environment Variables
 

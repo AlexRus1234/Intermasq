@@ -42,7 +42,7 @@ import (
 var staticFiles embed.FS
 
 var (
-	Port         = flag.String("port", "8080", "Port to listen on")
+	Port         = flag.String("port", "8081", "Port to listen on")
 	DBPath       = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
 	ConfigDir    = flag.String("conf-dir", "/etc/dnsmasq.d", "Directory with dnsmasq configs")
 	LeasesPath   = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")

@@ -63,7 +63,7 @@ go build -o intermasq .
 ### Запуск
 
 ```bash
-sudo ./intermasq -port 8080 -conf-dir /etc/dnsmasq.d -leases /var/lib/misc/dnsmasq.leases
+sudo ./intermasq -port 8081 -conf-dir /etc/dnsmasq.d -leases /var/lib/misc/dnsmasq.leases
 ```
 
 При первом запуске откроется экран настройки администратора. После создания аккаунта — полный доступ к панели.
@@ -80,7 +80,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=3.0.0" -o intermasq .
 
 | Флаг | По умолчанию | Описание |
 |---|---|---|
-| `-port` | `8080` | Порт для прослушивания |
+| `-port` | `8081` | Порт для прослушивания |
 | `-db` | `/etc/intermasq/users.json` | Путь к базе пользователей |
 | `-conf-dir` | `/etc/dnsmasq.d` | Директория конфигов dnsmasq |
 | `-leases` | `/var/lib/misc/dnsmasq.leases` | Путь к файлу аренд dnsmasq |
@@ -88,6 +88,10 @@ CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=3.0.0" -o intermasq .
 | `-init-system` | `auto` | Init-система: `auto`, `systemd`, `systemd-user`, `openrc`, `runit`, `sysvinit`, `none` |
 | `-systemd-scope` | — | *(устаревший)* `auto`, `system`, `user`, `none` |
 | `-ci-mode` | `false` | Отключает саморестарт (для CI) |
+| `-audit-log` | `/etc/intermasq/audit.log` | Путь к файлу аудита |
+| `-templates` | `/etc/intermasq/templates.json` | Путь к файлу шаблонов |
+
+> **Примечание о порте по умолчанию:** Начиная с v3.0 порт по умолчанию изменён с `8080` на `8081`. Порт `8080` часто занят другими сервисами (например, Crowdsec слушает на `127.0.0.1:8080`), что приводило к конфликту биндинга и молчаливому падению службы. Если требуется старый порт — указывайте его явно через `-port 8080`.
 
 ### Переменные окружения
 
