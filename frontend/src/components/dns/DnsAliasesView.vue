@@ -21,11 +21,21 @@
         <button v-if="selectedFile !== 'all' && hasBackup" @click="rollbackFile" class="btn btn-sm btn-outline-warning ms-2" :title="$t('dns.rollbackTooltip')">
             ⏪ {{ $t('dns.rollback') }}
         </button>
+        <button v-if="selectedFile !== 'all'" @click="showHistory = true" class="btn btn-sm btn-outline-secondary ms-2" :title="$t('history.iconTooltip')">
+            🕒 {{ $t('history.icon') }}
+        </button>
     </div>
 
     <AliasTable
         :selectedFile="selectedFile"
         @edit-alias="startEdit"
+    />
+
+    <HistoryModal
+        :show="showHistory"
+        :file="selectedFile"
+        @close="showHistory = false"
+        @restored="actions.loadData()"
     />
   </div>
 </template>
@@ -37,11 +47,13 @@ import { store, api, actions } from '../../store.js'
 import { translateApiError } from '../../i18n.js'
 import AliasForm from './AliasForm.vue'
 import AliasTable from './AliasTable.vue'
+import HistoryModal from '../history/HistoryModal.vue'
 
 const { t } = useI18n()
 
 const selectedFile = ref('all')
 const editData = ref(null)
+const showHistory = ref(false)
 
 const cleanPath = (path) => path ? path.split('|')[0] : ''
 

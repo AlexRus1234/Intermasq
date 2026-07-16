@@ -21,7 +21,9 @@ export const store = reactive({
     dhcpRanges: [],
     aliases: [],
     
-    transferData: null 
+    transferData: null,
+    history: [],
+    historyDiff: ''
 })
 
 export const api = axios.create({ baseURL: '/api' })
@@ -329,6 +331,45 @@ export const actions = {
             return true
         } catch (e) {
             const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.csvImportError')
+            alert(msg)
+            return false
+        }
+    },
+
+    async loadHistory(file) {
+        try {
+            const res = await api.get('/history', { params: { file } })
+            store.history = res.data.versions || []
+            store.historyDiff = ''
+            return true
+        } catch (e) {
+            store.history = []
+            store.historyDiff = ''
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.historyLoadError')
+            alert(msg)
+            return false
+        }
+    },
+
+    async loadHistoryDiff(file, from, to) {
+        try {
+            const res = await api.get('/history/diff', { params: { file, from, to } })
+            store.historyDiff = res.data.diff || ''
+            return true
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.historyDiffError')
+            alert(msg)
+            return false
+        }
+    },
+
+    async restoreHistory(file, version) {
+        try {
+            await api.post('/history/restore', { file, version })
+            alert(t('alert.restoreSuccess'))
+            return true
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.restoreError')
             alert(msg)
             return false
         }

@@ -142,3 +142,9 @@ type DeleteAliasReq struct {
 	Domain string `json:"domain"`
 	File   string `json:"file"`
 }
+
+// HistoryRestoreReq is the body of POST /api/history/restore.
+type HistoryRestoreReq struct {
+	File    string `json:"file"`
+	Version string `json:"version"`
+}

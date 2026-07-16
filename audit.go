@@ -19,6 +19,7 @@ type AuditEntry struct {
 	Hostname  string `json:"hostname"`
 	Ip        string `json:"ip"`
 	File      string `json:"file"`
+	Version   string `json:"version,omitempty"`
 }
 
 func writeAudit(entry AuditEntry) {

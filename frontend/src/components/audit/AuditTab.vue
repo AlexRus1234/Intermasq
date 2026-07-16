@@ -59,7 +59,7 @@ function actionClass(action) {
     switch (action) {
         case 'add': case 'bulk_add': return 'bg-success'
         case 'delete': case 'bulk_delete': return 'bg-danger'
-        case 'rollback': return 'bg-warning text-dark'
+        case 'rollback': case 'restore': return 'bg-warning text-dark'
         case 'reload': return 'bg-info'
         case 'config_update': case 'config_create_file': return 'bg-primary'
         default: return 'bg-secondary'

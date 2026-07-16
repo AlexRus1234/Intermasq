@@ -28,7 +28,7 @@ Lightweight, fast, single binary — everything included.
 - **Device monitoring** — online/offline status via ARP table (auto-refresh every 30 sec)
 - **Lease-to-static conversion** — promote a DHCP lease to a static entry in one click
 - **Bulk import** — paste a list of devices from text (MAC IP Hostname)
-- **Backup & rollback** — download ZIP archive of configs and rollback changes per file (`.bak`)
+- **Backup & rollback** — download ZIP archive of configs, quick `.bak` rollback and multi-level version history (N latest snapshots under `/etc/intermasq/history/`)
 - **Multi-init** — auto-detection and support: systemd, systemd-user, OpenRC, runit, sysvinit
 - **Plugin system** — extend functionality via Unix sockets
 - **Single binary** — frontend embedded into Go binary via `go:embed`
@@ -90,6 +90,8 @@ CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=3.0.0" -o intermasq .
 | `-ci-mode` | `false` | Disables self-restart (for CI) |
 | `-audit-log` | `/etc/intermasq/audit.log` | Path to audit log file |
 | `-templates` | `/etc/intermasq/templates.json` | Path to templates file |
+| `-history-dir` | `/etc/intermasq/history` | Directory for config version history |
+| `-history-depth` | `10` | Number of latest versions to keep per file |
 
 > **Default port note:** As of v3.0 the default port changed from `8080` to `8081`. Port `8080` is frequently occupied by other services (e.g. Crowdsec listens on `127.0.0.1:8080`), which caused binding conflicts and silent service crashes. To use the old port, pass it explicitly via `-port 8080`.
 
@@ -120,6 +122,9 @@ After launch, Swagger documentation is available at: `http://<host>:<port>/swagg
 | `GET` | `/api/arp` | ARP table (online MACs) | Yes |
 | `POST` | `/api/reload` | Validate config + restart dnsmasq | Yes |
 | `POST` | `/api/rollback` | Rollback file to `.bak` version | Yes |
+| `GET` | `/api/history?file=<path>` | List stored versions of a file | Yes |
+| `GET` | `/api/history/diff?file=<path>&from=<v>&to=<v\|current>` | Diff between versions | Yes |
+| `POST` | `/api/history/restore` | Restore file from a version | Yes |
 | `GET` | `/api/backup` | Download ZIP archive of all `.conf` | Yes |
 | `POST` | `/api/restart-self` | Restart Intermasq service | Yes |
 | `GET` | `/api/plugins` | List loaded plugins | Yes |

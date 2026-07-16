@@ -52,6 +52,8 @@ var (
 	CiMode       = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
 	AuditLogPath = flag.String("audit-log", "/etc/intermasq/audit.log", "Path to audit log file")
 	TemplatesPath = flag.String("templates", "/etc/intermasq/templates.json", "Path to templates file")
+	HistoryDir    = flag.String("history-dir", "/etc/intermasq/history", "Directory for versioned config history")
+	HistoryDepth  = flag.Int("history-depth", 10, "Maximum number of history versions per file")
 	PluginsDir   = "/etc/intermasq/plugins"
 	SocketsDir   = "/run/intermasq/sockets"
 	SecretKey    = []byte(os.Getenv("INTERMASQ_SECRET"))
@@ -148,6 +150,9 @@ func main() {
 	flag.Parse()
 	loadUsers()
 	loadTemplates()
+	if err := ensureHistoryDir(); err != nil {
+		fmt.Printf("[HISTORY] Failed to create dir %s: %v\n", *HistoryDir, err)
+	}
 
 	initValue := *InitSystem
 	if *SystemdScope != "" {
@@ -214,6 +219,9 @@ func main() {
 			auth.GET("/aliases/csv", exportAliasesCSVHandler)
 			auth.POST("/aliases/csv", importAliasesCSVHandler)
 			auth.POST("/rollback", rollbackHandler)
+			auth.GET("/history", historyListHandler)
+			auth.GET("/history/diff", historyDiffHandler)
+			auth.POST("/history/restore", historyRestoreHandler)
 			auth.POST("/reload", reloadHandler)
 			auth.GET("/backup", backupHandler)
 		}

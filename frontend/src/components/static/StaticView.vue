@@ -1,6 +1,6 @@
 <template>
   <div class="fade-in">
-    <HostForm 
+    <HostForm
         :selectedFile="selectedFile"
         :editData="editData"
         @cancel-edit="cancelEdit"
@@ -17,31 +17,45 @@
                 </a>
             </li>
         </ul>
-        
-        <button v-if="selectedFile !== 'all' && hasBackup" @click="rollbackFile" class="btn btn-sm btn-outline-warning ms-2" :title="$t('hosts.rollbackTooltip')">
-            ⏪ {{ $t('hosts.rollback') }}
-        </button>
+
+        <div class="d-flex gap-2">
+            <button v-if="selectedFile !== 'all'" @click="showHistory = true" class="btn btn-sm btn-outline-secondary" :title="$t('history.iconTooltip')">
+                🕒 {{ $t('history.icon') }}
+            </button>
+            <button v-if="selectedFile !== 'all' && hasBackup" @click="rollbackFile" class="btn btn-sm btn-outline-warning" :title="$t('hosts.rollbackTooltip')">
+                ⏪ {{ $t('hosts.rollback') }}
+            </button>
+        </div>
     </div>
 
-    <HostTable 
+    <HostTable
         :selectedFile="selectedFile"
         @edit-host="startEdit"
+    />
+
+    <HistoryModal
+        :show="showHistory"
+        :file="selectedFile"
+        @close="showHistory = false"
+        @restored="actions.loadData()"
     />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { store, api, actions } from '../../store.js'
 import { translateApiError } from '../../i18n.js'
 import HostForm from './HostForm.vue'
 import HostTable from './HostTable.vue'
+import HistoryModal from '../history/HistoryModal.vue'
 
 const { t } = useI18n()
 
 const selectedFile = ref('all')
 const editData = ref(null)
+const showHistory = ref(false)
 
 const cleanPath = (path) => path ? path.split('|')[0] : ''
 
@@ -65,11 +79,11 @@ function cancelEdit() {
 
 async function rollbackFile() {
     if(!confirm(t('confirm.rollback', { file: selectedFile.value.split('/').pop() }))) return
-    try { 
+    try {
         await api.post('/rollback', { file: selectedFile.value })
         actions.loadData()
         alert(t('alert.rollbackSuccess'))
-    } catch (e) { 
+    } catch (e) {
         const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.rollbackError')
         alert(msg)
     }

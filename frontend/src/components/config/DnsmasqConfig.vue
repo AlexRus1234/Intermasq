@@ -13,6 +13,9 @@
         </li>
       </ul>
       <div class="d-flex gap-2">
+        <button v-if="currentFile" @click="showHistory = true" class="btn btn-sm btn-outline-secondary" :title="$t('history.iconTooltip')">
+          🕒 {{ $t('history.icon') }}
+        </button>
         <button v-if="currentFile && currentFile.has_bak" @click="rollback" class="btn btn-sm btn-outline-warning">
           ⏪ {{ $t('config.rollback') }}
         </button>
@@ -114,6 +117,13 @@
         <button @click="cancelAdd" class="btn btn-sm btn-outline-secondary">✕</button>
       </div>
     </div>
+
+    <HistoryModal
+      :show="showHistory"
+      :file="selectedFile"
+      @close="showHistory = false"
+      @restored="actions.loadConfig()"
+    />
   </div>
 </template>
 
@@ -124,6 +134,7 @@ import { store, api, actions } from '../../store.js'
 import { translateApiError } from '../../i18n.js'
 import { DIRECTIVE_SCHEMA, GROUP_ORDER, GROUP_LABELS, schemaFor } from './directives.js'
 import DhcpRangeRow from './DhcpRangeRow.vue'
+import HistoryModal from '../history/HistoryModal.vue'
 
 const { t } = useI18n()
 
@@ -136,6 +147,7 @@ const addingKey = ref(false)
 const addingGroup = ref('')
 const addingKeyName = ref('')
 const addingCustomKey = ref('')
+const showHistory = ref(false)
 
 const files = computed(() => store.configSnapshot?.files || [])
 
