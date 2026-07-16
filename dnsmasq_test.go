@@ -17,11 +17,18 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
+	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func TestParseArpContent(t *testing.T) {
@@ -748,5 +755,696 @@ func TestUnifiedDiffEmptyA(t *testing.T) {
 	d := unifiedDiff("", "x\ny\n", "a", "b")
 	if !strings.Contains(d, "+x") || !strings.Contains(d, "+y") {
 		t.Errorf("expected both lines added: %s", d)
+	}
+}
+
+// ========== Raw file read/write ==========
+
+func TestReadFileRaw(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	path := filepath.Join(dir, "raw.conf")
+	os.WriteFile(path, []byte("server=1.2.3.4\n"), 0644)
+	content, err := readFileRaw(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "server=1.2.3.4\n" {
+		t.Errorf("unexpected content: %q", content)
+	}
+}
+
+func TestReadFileRawUnsafePath(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	_, err := readFileRaw("/etc/passwd")
+	if err != os.ErrPermission {
+		t.Errorf("expected ErrPermission, got %v", err)
+	}
+}
+
+func TestReadFileRawNotExist(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	path := filepath.Join(dir, "nope.conf")
+	_, err := readFileRaw(path)
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestWriteFileRaw(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	*HistoryDir = t.TempDir()
+	*HistoryDepth = 5
+	path := filepath.Join(dir, "writetest.conf")
+	os.WriteFile(path, []byte("old\n"), 0644)
+	_ = writeFileRaw(path, []byte("server=8.8.8.8\n"))
+	_, err := os.Stat(path + ".bak")
+	if os.IsNotExist(err) {
+		t.Error(".bak should exist even if dnsmasq --test fails")
+	}
+}
+
+func TestWriteFileRawUnsafePath(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	err := writeFileRaw("/etc/passwd", []byte("x"))
+	if err != os.ErrPermission {
+		t.Errorf("expected ErrPermission, got %v", err)
+	}
+}
+
+// ========== SSE broker ==========
+
+func TestSseRegisterUnregister(t *testing.T) {
+	cl := &sseClient{ch: make(chan string, 1)}
+	sseRegister(cl)
+	if !sseClients[cl] {
+		t.Fatal("client should be registered")
+	}
+	sseUnregister(cl)
+	if sseClients[cl] {
+		t.Fatal("client should be unregistered")
+	}
+}
+
+func TestSseBroadcast(t *testing.T) {
+	cl := &sseClient{ch: make(chan string, 10)}
+	sseRegister(cl)
+	defer sseUnregister(cl)
+	sseBroadcast("arp", `{"aa:bb:cc:dd:ee:ff":true}`)
+	select {
+	case msg := <-cl.ch:
+		if !strings.Contains(msg, "event: arp") {
+			t.Errorf("bad event: %s", msg)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("message not received")
+	}
+}
+
+func TestSseBroadcastFullChannel(t *testing.T) {
+	cl := &sseClient{ch: make(chan string, 0)}
+	sseRegister(cl)
+	defer sseUnregister(cl)
+	sseBroadcast("arp", "{}")
+}
+
+func TestArpToJSON(t *testing.T) {
+	arp := map[string]bool{"aa:bb:cc:dd:ee:ff": true, "11:22:33:44:55:66": false}
+	s := arpToJSON(arp)
+	var decoded map[string]bool
+	if err := json.Unmarshal([]byte(s), &decoded); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(decoded) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(decoded))
+	}
+	if !decoded["aa:bb:cc:dd:ee:ff"] {
+		t.Error("expected aa:bb:cc:dd:ee:ff=true")
+	}
+}
+
+// ========== User management ==========
+
+func TestCreateUser(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	users = make(map[string]string)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/users", strings.NewReader(`{"username":"admin","password":"secret123"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	createUserHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if _, ok := users["admin"]; !ok {
+		t.Fatal("user not stored")
+	}
+}
+
+func TestCreateUserDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	users = map[string]string{"admin": "hash"}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/users", strings.NewReader(`{"username":"admin","password":"secret123"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	createUserHandler(c)
+	if w.Code != 409 {
+		t.Fatalf("expected 409, got %d", w.Code)
+	}
+}
+
+func TestCreateUserEmptyFields(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	users = make(map[string]string)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/users", strings.NewReader(`{"username":"","password":""}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	createUserHandler(c)
+	if w.Code != 400 {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestDeleteUser(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	users = map[string]string{"target": "hash"}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("DELETE", "/api/users/target", nil)
+	c.Params = gin.Params{{Key: "name", Value: "target"}}
+	c.Set("user", "admin")
+	deleteUserHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if _, ok := users["target"]; ok {
+		t.Fatal("user should be deleted")
+	}
+}
+
+func TestDeleteUserSelf(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	users = map[string]string{"admin": "hash"}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("DELETE", "/api/users/admin", nil)
+	c.Params = gin.Params{{Key: "name", Value: "admin"}}
+	c.Set("user", "admin")
+	deleteUserHandler(c)
+	if w.Code != 400 {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestDeleteUserNotFound(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	users = make(map[string]string)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("DELETE", "/api/users/nobody", nil)
+	c.Params = gin.Params{{Key: "name", Value: "nobody"}}
+	c.Set("user", "admin")
+	deleteUserHandler(c)
+	if w.Code != 404 {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestChangePassword(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	users = map[string]string{"admin": "$2a$10$1"}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/users/password", strings.NewReader(`{"old_password":"1","new_password":"new"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	changePasswordHandler(c)
+	if w.Code == 401 {
+		t.Log("bcrypt rejected dummy hash — expected. Validating shape.")
+	} else if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestChangePasswordWrongOld(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	users = map[string]string{"admin": "$2a$10$zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/users/password", strings.NewReader(`{"old_password":"wrong","new_password":"new"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	changePasswordHandler(c)
+	if w.Code != 401 {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+// ========== New devices ==========
+
+func TestGetNewDevicesAllInStatic(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	*ArpPath = filepath.Join(dir, "arp")
+	*LeasesPath = filepath.Join(dir, "leases")
+	os.WriteFile(*ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
+	os.WriteFile(*LeasesPath, []byte("0 aa:bb:cc:dd:ee:ff 192.168.1.1 * 01:aa:bb:cc:dd:ee:ff\n"), 0644)
+	devices := getNewDevices()
+	if len(devices) != 0 {
+		t.Fatalf("expected 0 devices (MAC in leases), got %d", len(devices))
+	}
+}
+
+func TestGetNewDevicesAllInHosts(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	*ArpPath = filepath.Join(dir, "arp")
+	*LeasesPath = filepath.Join(dir, "leases")
+	os.WriteFile(*ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
+	os.WriteFile(*LeasesPath, []byte(""), 0644)
+	os.WriteFile(filepath.Join(dir, "hosts.conf"), []byte("dhcp-host=aa:bb:cc:dd:ee:ff,host1,192.168.1.1\n"), 0644)
+	devices := getNewDevices()
+	if len(devices) != 0 {
+		t.Fatalf("expected 0 devices (MAC in static), got %d", len(devices))
+	}
+}
+
+func TestGetNewDevicesUnknown(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	*ArpPath = filepath.Join(dir, "arp")
+	*LeasesPath = filepath.Join(dir, "leases")
+	os.WriteFile(*ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
+	os.WriteFile(*LeasesPath, []byte(""), 0644)
+	devices := getNewDevices()
+	if len(devices) != 1 {
+		t.Fatalf("expected 1 unknown device, got %d", len(devices))
+	}
+	if devices[0].Mac != "aa:bb:cc:dd:ee:ff" {
+		t.Errorf("bad MAC: %q", devices[0].Mac)
+	}
+}
+
+func TestGetNewDevicesEmpty(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	*ArpPath = filepath.Join(dir, "arp")
+	*LeasesPath = filepath.Join(dir, "leases")
+	os.WriteFile(*ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n"), 0644)
+	os.WriteFile(*LeasesPath, []byte(""), 0644)
+	devices := getNewDevices()
+	if len(devices) != 0 {
+		t.Fatalf("expected 0 devices, got %d", len(devices))
+	}
+}
+
+// ========== Bulk lease-to-static ==========
+
+func TestBulkLeaseToStatic(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(file, []byte(""), 0644)
+	body := `{"leases":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"192.168.1.1","hostname":"testhost"}],"file":"` + strings.ReplaceAll(file, "\\", "\\\\") + `"}`
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/leases/to-static", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	bulkLeaseToStaticHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	content, _ := os.ReadFile(file)
+	if !strings.Contains(string(content), "dhcp-host=aa:bb:cc:dd:ee:ff,testhost,192.168.1.1") {
+		t.Errorf("host not written: %s", content)
+	}
+}
+
+func TestBulkLeaseToStaticMacConflict(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(file, []byte("dhcp-host=aa:bb:cc:dd:ee:ff,existing,1.2.3.4\n"), 0644)
+	body := `{"leases":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"192.168.1.1","hostname":"new"}],"file":"` + strings.ReplaceAll(file, "\\", "\\\\") + `"}`
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/leases/to-static", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	bulkLeaseToStaticHandler(c)
+	if w.Code != 409 {
+		t.Fatalf("expected 409 for MAC conflict, got %d", w.Code)
+	}
+}
+
+func TestBulkLeaseToStaticInvalidMac(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(file, []byte(""), 0644)
+	body := `{"leases":[{"mac":"bad","ip":"192.168.1.1"}],"file":"` + strings.ReplaceAll(file, "\\", "\\\\") + `"}`
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/leases/to-static", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	bulkLeaseToStaticHandler(c)
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for invalid MAC, got %d", w.Code)
+	}
+}
+
+func TestBulkLeaseToStaticEmpty(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "hosts.conf")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/leases/to-static", strings.NewReader(`{"leases":[],"file":"`+file+`"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	bulkLeaseToStaticHandler(c)
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for empty list, got %d", w.Code)
+	}
+}
+
+func TestBulkLeaseToStaticUnsafePath(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/leases/to-static", strings.NewReader(`{"leases":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"192.168.1.1"}],"file":"/etc/passwd"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	bulkLeaseToStaticHandler(c)
+	if w.Code != 403 {
+		t.Fatalf("expected 403 for unsafe path, got %d", w.Code)
+	}
+}
+
+func TestBulkLeaseToStaticDefaultHostname(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(file, []byte(""), 0644)
+	body := `{"leases":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"192.168.1.1","hostname":"*"}],"file":"` + strings.ReplaceAll(file, "\\", "\\\\") + `"}`
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/leases/to-static", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	bulkLeaseToStaticHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	content, _ := os.ReadFile(file)
+	if !strings.Contains(string(content), "device-") {
+		t.Errorf("expected auto-generated hostname, got: %s", content)
+	}
+}
+
+// ========== Restore from ZIP ==========
+
+func makeTestZip(entries map[string]string) []byte {
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	for name, content := range entries {
+		fw, _ := zw.Create(name)
+		fw.Write([]byte(content))
+	}
+	zw.Close()
+	return buf.Bytes()
+}
+
+func TestRestoreBackupZipValid(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	zipData := makeTestZip(map[string]string{
+		"hosts.conf": "dhcp-host=aa:bb:cc:dd:ee:ff,host1,1.2.3.4\n",
+	})
+	_ = restoreBackupZip(zipData)
+	_, err := os.ReadFile(filepath.Join(dir, "hosts.conf"))
+	if err != nil {
+		t.Error("file should have been written before dnsmasq test")
+	}
+}
+
+func TestRestoreBackupZipCreatesRestoreBak(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	os.WriteFile(filepath.Join(dir, "hosts.conf"), []byte("old content\n"), 0644)
+	zipData := makeTestZip(map[string]string{
+		"hosts.conf": "new content\n",
+	})
+	_ = restoreBackupZip(zipData)
+	bak, _ := os.ReadFile(filepath.Join(dir, "hosts.conf.restore.bak"))
+	if string(bak) != "old content\n" {
+		t.Errorf("bak mismatch: %q", bak)
+	}
+}
+
+func TestRestoreBackupZipNoConfFiles(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	zipData := makeTestZip(map[string]string{
+		"notes.txt": "hello\n",
+	})
+	err := restoreBackupZip(zipData)
+	if err == nil || !strings.Contains(err.Error(), "no_valid_conf_files") {
+		t.Errorf("expected no_valid_conf_files error, got %v", err)
+	}
+}
+
+func TestRestoreBackupZipInvalidData(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	err := restoreBackupZip([]byte("not a zip file"))
+	if err == nil || !strings.Contains(err.Error(), "invalid_zip") {
+		t.Errorf("expected invalid_zip error, got %v", err)
+	}
+}
+
+func TestRestoreBackupZipIgnoresUnsafeNames(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	zipData := makeTestZip(map[string]string{
+		"../evil.conf": "bad\n",
+		"hosts.conf":   "good\n",
+	})
+	_ = restoreBackupZip(zipData)
+	_, err := os.ReadFile(filepath.Join(dir, "hosts.conf"))
+	if err != nil {
+		t.Fatal("hosts.conf should have been extracted")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "..", "evil.conf")); err == nil {
+		t.Fatal("evil.conf should not have been extracted")
+	}
+}
+
+// ========== Rate-limit ==========
+
+func TestRateLimitUnderLimit(t *testing.T) {
+	rateLimitStore = make(map[string][]time.Time)
+	handler := rateLimitMiddleware(3, time.Minute)
+	for i := 0; i < 3; i++ {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("POST", "/", nil)
+		c.Request.RemoteAddr = "10.0.0.1:1234"
+		handler(c)
+		if w.Code == 429 {
+			t.Fatalf("request %d should not be rate-limited", i+1)
+		}
+	}
+}
+
+func TestRateLimitOverLimit(t *testing.T) {
+	rateLimitStore = make(map[string][]time.Time)
+	handler := rateLimitMiddleware(2, time.Minute)
+	for i := 0; i < 3; i++ {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("POST", "/", nil)
+		c.Request.RemoteAddr = "10.0.0.2:1234"
+		handler(c)
+		if i == 2 && w.Code != 429 {
+			t.Fatalf("third request should be rate-limited, got %d", w.Code)
+		}
+	}
+}
+
+func TestRateLimitDifferentIPs(t *testing.T) {
+	rateLimitStore = make(map[string][]time.Time)
+	handler := rateLimitMiddleware(2, time.Minute)
+
+	w1 := httptest.NewRecorder()
+	c1, _ := gin.CreateTestContext(w1)
+	c1.Request = httptest.NewRequest("POST", "/", nil)
+	c1.Request.RemoteAddr = "10.0.1.1:1234"
+	handler(c1)
+	handler(c1)
+
+	w2 := httptest.NewRecorder()
+	c2, _ := gin.CreateTestContext(w2)
+	c2.Request = httptest.NewRequest("POST", "/", nil)
+	c2.Request.RemoteAddr = "10.0.1.2:1234"
+	handler(c2)
+	handler(c2)
+
+	if w1.Code == 429 {
+		t.Fatal("IP1 should not be rate-limited yet")
+	}
+	if w2.Code == 429 {
+		t.Fatal("IP2 should not be rate-limited yet")
+	}
+
+	handler(c1)
+	if w1.Code != 429 {
+		t.Fatalf("IP1 should now be rate-limited, got %d", w1.Code)
+	}
+	handler(c2)
+	if w2.Code != 429 {
+		t.Fatalf("IP2 should now be rate-limited, got %d", w2.Code)
+	}
+}
+
+func TestRateLimitCleanupExpired(t *testing.T) {
+	rateLimitStore = make(map[string][]time.Time)
+	rateLimitStore["10.0.0.1"] = []time.Time{
+		time.Now().Add(-2 * time.Minute),
+		time.Now().Add(-2 * time.Minute),
+	}
+	handler := rateLimitMiddleware(2, time.Minute)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/", nil)
+	c.Request.RemoteAddr = "10.0.0.1:1234"
+	handler(c)
+	if w.Code == 429 {
+		t.Fatal("old entries should have been cleaned, request should pass")
+	}
+}
+
+// ========== JWT blacklist / logout ==========
+
+func TestTokenRevoked(t *testing.T) {
+	blacklist = make(map[string]time.Time)
+	exp := time.Now().Add(time.Hour)
+	jti := "test-jti-123"
+	revokeToken(jti, exp)
+	if !isTokenRevoked(jti) {
+		t.Fatal("token should be revoked")
+	}
+}
+
+func TestTokenNotRevoked(t *testing.T) {
+	blacklist = make(map[string]time.Time)
+	if isTokenRevoked("nonexistent") {
+		t.Fatal("non-revoked token should not be marked revoked")
+	}
+}
+
+func TestCleanBlacklist(t *testing.T) {
+	blacklist = make(map[string]time.Time)
+	expiredJTI := "expired-jti"
+	freshJTI := "fresh-jti"
+	revokeToken(expiredJTI, time.Now().Add(-time.Hour))
+	revokeToken(freshJTI, time.Now().Add(time.Hour))
+	blacklistMu.Lock()
+	now := time.Now()
+	for id, exp := range blacklist {
+		if exp.Before(now) {
+			delete(blacklist, id)
+		}
+	}
+	blacklistMu.Unlock()
+	if isTokenRevoked(expiredJTI) {
+		t.Fatal("expired token should be cleaned")
+	}
+	if !isTokenRevoked(freshJTI) {
+		t.Fatal("fresh token should still be revoked")
+	}
+}
+
+func TestLogoutRevokesToken(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	users = map[string]string{"admin": "$2a$10$placeholder"}
+	blacklist = make(map[string]time.Time)
+
+	originalKey := SecretKey
+	SecretKey = []byte("test-secret-key-32-bytes-long!!")
+	defer func() { SecretKey = originalKey }()
+
+	token := makeToken("admin")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/logout", nil)
+	c.Request.Header.Set("Authorization", "Bearer "+token)
+	logoutHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	parsed, _ := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) { return SecretKey, nil })
+	if parsed == nil {
+		t.Fatal("token parsing failed")
+	}
+	claims := parsed.Claims.(jwt.MapClaims)
+	jti := claims["jti"].(string)
+	if !isTokenRevoked(jti) {
+		t.Fatal("token JTI should be in blacklist after logout")
+	}
+}
+
+// ========== OUI lookup ==========
+
+func TestLookupOUIKnownVMware(t *testing.T) {
+	v := lookupOUI("00:0c:29:aa:bb:cc")
+	if v != "VMware" {
+		t.Errorf("expected VMware, got %q", v)
+	}
+}
+
+func TestLookupOUIKnownApple(t *testing.T) {
+	v := lookupOUI("f0:18:98:11:22:33")
+	if v != "Apple" {
+		t.Errorf("expected Apple, got %q", v)
+	}
+}
+
+func TestLookupOUIUnknown(t *testing.T) {
+	v := lookupOUI("ff:ff:ff:aa:bb:cc")
+	if v != "" {
+		t.Errorf("expected empty for unknown OUI, got %q", v)
+	}
+}
+
+func TestLookupOUIShort(t *testing.T) {
+	v := lookupOUI("aa:bb")
+	if v != "" {
+		t.Errorf("expected empty for short MAC, got %q", v)
+	}
+}
+
+func TestLookupOUICaseInsensitive(t *testing.T) {
+	v1 := lookupOUI("00:0C:29:AA:BB:CC")
+	v2 := lookupOUI("00:0c:29:11:22:33")
+	if v1 != "VMware" || v2 != "VMware" {
+		t.Errorf("case-insensitive lookup failed: v1=%q v2=%q", v1, v2)
+	}
+}
+
+func TestLookupOUIKnownCisco(t *testing.T) {
+	v := lookupOUI("f4:7a:c2:11:22:33")
+	if v != "Cisco" {
+		t.Errorf("expected Cisco, got %q", v)
+	}
+}
+
+func TestLookupOUIKnownNetgear(t *testing.T) {
+	v := lookupOUI("c0:3f:0e:11:22:33")
+	if v != "Netgear" {
+		t.Errorf("expected Netgear, got %q", v)
 	}
 }

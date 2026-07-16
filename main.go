@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/swaggo/files"
@@ -171,12 +172,13 @@ func main() {
 	r := gin.Default()
 
 	loadPlugins(r)
+	startSSEBroadcaster()
 
 	api := r.Group("/api")
 	{
 		api.GET("/status", statusHandler)
 		api.POST("/setup", setupHandler)
-		api.POST("/login", loginHandler)
+		api.POST("/login", rateLimitMiddleware(10, time.Minute), loginHandler)
 
 		auth := api.Group("/")
 		auth.Use(authMiddleware)
@@ -224,6 +226,17 @@ func main() {
 			auth.POST("/history/restore", historyRestoreHandler)
 			auth.POST("/reload", reloadHandler)
 			auth.GET("/backup", backupHandler)
+			auth.POST("/backup/restore", restoreBackupHandler)
+			auth.GET("/files/:name", getFileHandler)
+			auth.PUT("/files/:name", putFileHandler)
+			auth.GET("/events", eventsHandler)
+			auth.GET("/users", getUsersHandler)
+			auth.POST("/users", createUserHandler)
+			auth.DELETE("/users/:name", deleteUserHandler)
+			auth.POST("/users/password", changePasswordHandler)
+			auth.POST("/logout", logoutHandler)
+			auth.GET("/new-devices", getNewDevicesHandler)
+			auth.POST("/leases/to-static", bulkLeaseToStaticHandler)
 		}
 	}
 

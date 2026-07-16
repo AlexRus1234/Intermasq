@@ -148,3 +148,19 @@ type HistoryRestoreReq struct {
 	File    string `json:"file"`
 	Version string `json:"version"`
 }
+
+type UserPasswordReq struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
+type NewDeviceInfo struct {
+	Mac    string `json:"mac"`
+	Ip     string `json:"ip"`
+	Vendor string `json:"vendor"`
+}
+
+type BulkLeaseToStaticReq struct {
+	Leases []LeaseEntry `json:"leases"`
+	File   string       `json:"file"`
+}

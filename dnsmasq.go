@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -31,6 +32,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -38,6 +40,65 @@ func isSafePath(path string) bool {
 	cleanPath := filepath.Clean(path)
 	cleanDir := filepath.Clean(*ConfigDir)
 	return strings.HasPrefix(cleanPath, cleanDir+string(os.PathSeparator)) || cleanPath == cleanDir
+}
+
+type sseClient struct {
+	ch chan string
+}
+
+var (
+	sseClients   = make(map[*sseClient]bool)
+	sseClientsMu sync.Mutex
+)
+
+func sseRegister(client *sseClient) {
+	sseClientsMu.Lock()
+	sseClients[client] = true
+	sseClientsMu.Unlock()
+}
+
+func sseUnregister(client *sseClient) {
+	sseClientsMu.Lock()
+	delete(sseClients, client)
+	sseClientsMu.Unlock()
+}
+
+func sseBroadcast(event, data string) {
+	sseClientsMu.Lock()
+	defer sseClientsMu.Unlock()
+	msg := fmt.Sprintf("event: %s\ndata: %s\n\n", event, data)
+	for c := range sseClients {
+		select {
+		case c.ch <- msg:
+		default:
+		}
+	}
+}
+
+func startSSEBroadcaster() {
+	go func() {
+		lastArp := ""
+		lastStatus := false
+		for {
+			time.Sleep(5 * time.Second)
+			arp := getArpTable()
+			arpJSON := arpToJSON(arp)
+			status := checkDnsmasqStatus()
+			if arpJSON != lastArp {
+				sseBroadcast("arp", arpJSON)
+				lastArp = arpJSON
+			}
+			if status != lastStatus {
+				sseBroadcast("dnsmasq_status", fmt.Sprintf(`{"active":%v}`, status))
+				lastStatus = status
+			}
+		}
+	}()
+}
+
+func arpToJSON(arp map[string]bool) string {
+	b, _ := json.Marshal(arp)
+	return string(b)
 }
 
 func checkDnsmasqStatus() bool {
@@ -1400,4 +1461,118 @@ func writeConfigWithTest(path string, content []byte) error {
 		return fmt.Errorf("dnsmasq_test_failed: %s", testOut)
 	}
 	return nil
+}
+
+func readFileRaw(path string) ([]byte, error) {
+	if !isSafePath(path) {
+		return nil, os.ErrPermission
+	}
+	return os.ReadFile(path)
+}
+
+func writeFileRaw(path string, content []byte) error {
+	if !isSafePath(path) {
+		return os.ErrPermission
+	}
+	createLocalBackup(path)
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		return err
+	}
+	testCmd := exec.Command("/usr/bin/dnsmasq", "--test")
+	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
+		_ = rollbackFile(path)
+		return fmt.Errorf("dnsmasq_test_failed: %s", testOut)
+	}
+	return nil
+}
+
+func restoreBackupZip(zipData []byte) error {
+	reader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		return fmt.Errorf("invalid_zip: %v", err)
+	}
+
+	var restoredFiles []string
+
+	for _, f := range reader.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		name := filepath.Base(f.Name)
+		if filepath.Ext(name) != ".conf" {
+			continue
+		}
+		fullPath := filepath.Join(*ConfigDir, name)
+		if !isSafePath(fullPath) {
+			continue
+		}
+
+		src, err := f.Open()
+		if err != nil {
+			continue
+		}
+		content, err := io.ReadAll(src)
+		src.Close()
+		if err != nil {
+			continue
+		}
+
+		if existing, err := os.ReadFile(fullPath); err == nil {
+			bakPath := fullPath + ".restore.bak"
+			os.WriteFile(bakPath, existing, 0644)
+		}
+
+		if err := os.WriteFile(fullPath, content, 0644); err != nil {
+			continue
+		}
+		restoredFiles = append(restoredFiles, name)
+	}
+
+	if len(restoredFiles) == 0 {
+		return fmt.Errorf("no_valid_conf_files")
+	}
+
+	testCmd := exec.Command("/usr/bin/dnsmasq", "--test")
+	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
+		for _, name := range restoredFiles {
+			fullPath := filepath.Join(*ConfigDir, name)
+			bakPath := fullPath + ".restore.bak"
+			if bakContent, err := os.ReadFile(bakPath); err == nil {
+				os.WriteFile(fullPath, bakContent, 0644)
+			}
+		}
+		return fmt.Errorf("dnsmasq_test_failed: %s", testOut)
+	}
+
+	return nil
+}
+
+func getNewDevices() []NewDeviceInfo {
+	arp := getArpTable()
+	leases := parseLeases()
+	hosts := readAllHosts()
+
+	knownMacs := make(map[string]bool)
+	for _, l := range leases {
+		knownMacs[strings.ToLower(l.Mac)] = true
+	}
+	for _, h := range hosts {
+		knownMacs[strings.ToLower(h.Mac)] = true
+	}
+
+	var devices []NewDeviceInfo
+	for mac := range arp {
+		macLower := strings.ToLower(mac)
+		if !knownMacs[macLower] {
+			devices = append(devices, NewDeviceInfo{
+				Mac:    macLower,
+				Vendor: lookupOUI(macLower),
+			})
+		}
+	}
+
+	sort.Slice(devices, func(i, j int) bool {
+		return devices[i].Mac < devices[j].Mac
+	})
+	return devices
 }

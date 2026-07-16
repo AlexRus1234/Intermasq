@@ -17,9 +17,13 @@
     "tabConfig": "dnsmasq Settings",
     "tabAudit": "History",
     "tabDns": "DNS",
+    "tabNewDevices": "New devices",
+    "tabUsers": "Users",
     "searchPlaceholder": "Search by MAC, IP, Hostname...",
     "backup": "Backup",
+    "restore": "Restore",
     "downloadArchive": "Download archive",
+    "restoreArchive": "Restore from archive",
     "csvExport": "CSV",
     "csvExportTooltip": "Export to CSV",
     "apply": "Apply",
@@ -82,7 +86,8 @@
     "inStatic": "In static",
     "searchEmpty": "Nothing found for query \"{query}\".",
     "allInStatic": "All connected devices are already in Static!",
-    "noLeases": "No active DHCP leases."
+    "noLeases": "No active DHCP leases.",
+    "bulkToStatic": "Add {n} to Static"
   },
   "confirm": {
     "deleteHost": "Delete entry {mac}?",
@@ -123,7 +128,12 @@
     "configCreateError": "Failed to create file",
     "invalidData": "Invalid data",
     "aliasAddError": "Failed to add DNS entry",
-    "aliasDeleteError": "Failed to delete DNS entry"
+    "aliasDeleteError": "Failed to delete DNS entry",
+    "passwordChanged": "Password changed successfully",
+    "bulkLeaseToStaticSuccess": "Added {count} devices to static",
+    "bulkLeaseToStaticError": "Failed to add devices to static",
+    "restoreBackupSuccess": "Backup restored successfully",
+    "restoreBackupError": "Failed to restore backup"
   },
   "api": {
     "already_setup": "Already set up",
@@ -156,7 +166,16 @@
     "alias_duplicate": "Domain already used by another DNS entry",
     "alias_duplicate_bulk": "Duplicate domain in import",
     "no_valid_entries": "No valid entries",
-    "alias_not_found": "DNS entry not found"
+    "alias_not_found": "DNS entry not found",
+    "too_many_attempts": "Too many login attempts. Wait a minute",
+    "user_exists": "User already exists",
+    "user_not_found": "User not found",
+    "cannot_delete_self": "Cannot delete yourself",
+    "no_leases": "No leases provided",
+    "invalid_mac": "Invalid MAC address",
+    "file_not_found": "File not found",
+    "no_valid_conf_files": "No valid .conf files found in archive",
+    "invalid_zip": "Invalid ZIP archive"
   },
   "config": {
     "groupDns": "DNS / Network",
@@ -246,5 +265,25 @@
     "domainPlaceholder": "nas.lan",
     "targetIpPlaceholder": "192.168.1.10",
     "targetDomainPlaceholder": "target.lan"
+  },
+  "newDevices": {
+    "title": "ARP-detected but unconfigured devices",
+    "refresh": "Refresh",
+    "mac": "MAC Address",
+    "vendor": "Vendor",
+    "action": "Action",
+    "add": "Add to Static",
+    "empty": "No unknown devices online"
+  },
+  "users": {
+    "title": "User list",
+    "count": "users",
+    "empty": "No users",
+    "changePassword": "Change password",
+    "oldPassword": "Current password",
+    "newPassword": "New password",
+    "change": "Change",
+    "createUser": "Create user",
+    "create": "Create"
   }
 }

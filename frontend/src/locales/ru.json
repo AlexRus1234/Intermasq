@@ -17,9 +17,13 @@
     "tabConfig": "Настройки dnsmasq",
     "tabAudit": "История",
     "tabDns": "DNS",
+    "tabNewDevices": "Новые устройства",
+    "tabUsers": "Пользователи",
     "searchPlaceholder": "Поиск по MAC, IP, Имени...",
     "backup": "Бэкап",
+    "restore": "Восстановить",
     "downloadArchive": "Скачать архив",
+    "restoreArchive": "Восстановить из архива",
     "csvExport": "CSV",
     "csvExportTooltip": "Экспорт в CSV",
     "apply": "Применить",
@@ -82,7 +86,8 @@
     "inStatic": "В статике",
     "searchEmpty": "По запросу «{query}» ничего не найдено.",
     "allInStatic": "Все подключенные устройства уже занесены в Статику!",
-    "noLeases": "Нет активных DHCP аренд."
+    "noLeases": "Нет активных DHCP аренд.",
+    "bulkToStatic": "Добавить {n} в статику"
   },
   "confirm": {
     "deleteHost": "Удалить запись {mac}?",
@@ -124,7 +129,12 @@
     "configCreateError": "Ошибка создания файла",
     "invalidData": "Неверные данные",
     "aliasAddError": "Ошибка добавления DNS-записи",
-    "aliasDeleteError": "Ошибка удаления DNS-записи"
+    "aliasDeleteError": "Ошибка удаления DNS-записи",
+    "passwordChanged": "Пароль успешно изменён",
+    "bulkLeaseToStaticSuccess": "Добавлено {count} устройств в статику",
+    "bulkLeaseToStaticError": "Ошибка добавления устройств в статику",
+    "restoreBackupSuccess": "Бэкап успешно восстановлен",
+    "restoreBackupError": "Ошибка восстановления бэкапа"
   },
   "api": {
     "already_setup": "Уже настроено",
@@ -157,7 +167,16 @@
     "alias_duplicate": "Домен уже используется в другой DNS-записи",
     "alias_duplicate_bulk": "Дубликат домена в импорте",
     "no_valid_entries": "Нет валидных записей",
-    "alias_not_found": "DNS-запись не найдена"
+    "alias_not_found": "DNS-запись не найдена",
+    "too_many_attempts": "Слишком много попыток. Подождите минуту",
+    "user_exists": "Пользователь уже существует",
+    "user_not_found": "Пользователь не найден",
+    "cannot_delete_self": "Нельзя удалить самого себя",
+    "no_leases": "Не указаны аренды",
+    "invalid_mac": "Неверный MAC-адрес",
+    "file_not_found": "Файл не найден",
+    "no_valid_conf_files": "Нет валидных .conf файлов в архиве",
+    "invalid_zip": "Неверный ZIP-архив"
   },
   "config": {
     "groupDns": "DNS / Сеть",
@@ -247,5 +266,25 @@
     "domainPlaceholder": "nas.lan",
     "targetIpPlaceholder": "192.168.1.10",
     "targetDomainPlaceholder": "target.lan"
+  },
+  "newDevices": {
+    "title": "Обнаруженные по ARP, но не настроенные устройства",
+    "refresh": "Обновить",
+    "mac": "MAC-адрес",
+    "vendor": "Производитель",
+    "action": "Действие",
+    "add": "Добавить в статику",
+    "empty": "Нет неизвестных устройств онлайн"
+  },
+  "users": {
+    "title": "Список пользователей",
+    "count": "пользователей",
+    "empty": "Нет пользователей",
+    "changePassword": "Сменить пароль",
+    "oldPassword": "Текущий пароль",
+    "newPassword": "Новый пароль",
+    "change": "Сменить",
+    "createUser": "Создать пользователя",
+    "create": "Создать"
   }
 }

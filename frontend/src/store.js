@@ -20,10 +20,13 @@ export const store = reactive({
     configSnapshot: null,
     dhcpRanges: [],
     aliases: [],
+    newDevices: [],
+    users: [],
     
     transferData: null,
     history: [],
-    historyDiff: ''
+    historyDiff: '',
+    selectedLeases: []
 })
 
 export const api = axios.create({ baseURL: '/api' })
@@ -373,5 +376,103 @@ export const actions = {
             alert(msg)
             return false
         }
+    },
+
+    async loadNewDevices() {
+        try {
+            const res = await api.get('/new-devices')
+            store.newDevices = res.data
+        } catch (e) {}
+    },
+
+    async loadUsers() {
+        try {
+            const res = await api.get('/users')
+            store.users = res.data.users || []
+        } catch (e) {}
+    },
+
+    async createUser(username, password) {
+        try {
+            await api.post('/users', { username, password })
+            this.loadUsers()
+            return true
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : 'Failed to create user'
+            alert(msg)
+            return false
+        }
+    },
+
+    async deleteUser(username) {
+        try {
+            await api.delete(`/users/${username}`)
+            this.loadUsers()
+            return true
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : 'Failed to delete user'
+            alert(msg)
+            return false
+        }
+    },
+
+    async changePassword(oldPassword, newPassword) {
+        try {
+            await api.post('/users/password', { old_password: oldPassword, new_password: newPassword })
+            alert(t('alert.passwordChanged'))
+            return true
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : 'Failed to change password'
+            alert(msg)
+            return false
+        }
+    },
+
+    async logoutRequest() {
+        try {
+            await api.post('/logout')
+        } catch (e) {}
+        this.logout()
+    },
+
+    async bulkLeaseToStatic(leases, file) {
+        try {
+            const res = await api.post('/leases/to-static', { leases, file })
+            alert(t('alert.bulkLeaseToStaticSuccess', { count: res.data.count }))
+            this.loadData()
+            return true
+        } catch (e) {
+            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.bulkLeaseToStaticError')
+            alert(msg)
+            return false
+        }
+    },
+
+    async restoreBackup(file) {
+        const formData = new FormData()
+        formData.append('file', file)
+        try {
+            await api.post('/backup/restore', formData)
+            alert(t('alert.restoreBackupSuccess'))
+            this.loadData()
+            return true
+        } catch (e) {
+            const msg = e.response?.data?.detail || e.response?.data?.error || t('alert.restoreBackupError')
+            alert(msg)
+            return false
+        }
+    },
+
+    connectSSE() {
+        if (!store.token) return
+        const eventSource = new EventSource('/api/events')
+        eventSource.addEventListener('arp', (e) => {
+            try { store.arpTable = JSON.parse(e.data) } catch (_) {}
+        })
+        eventSource.addEventListener('dnsmasq_status', (e) => {
+            try { store.isDnsmasqActive = JSON.parse(e.data).active } catch (_) {}
+        })
+        eventSource.onerror = () => {}
+        return eventSource
     }
 }

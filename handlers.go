@@ -2,13 +2,16 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -1339,4 +1342,315 @@ func importAliasesCSVHandler(c *gin.Context) {
 	})
 
 	c.JSON(200, gin.H{"status": "ok", "count": len(aliases)})
+}
+
+func getFileHandler(c *gin.Context) {
+	name := c.Param("name")
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		c.JSON(403, gin.H{"error": "access_denied"})
+		return
+	}
+	path := filepath.Join(*ConfigDir, name)
+	content, err := readFileRaw(path)
+	if err != nil {
+		c.JSON(404, gin.H{"error": "file_not_found"})
+		return
+	}
+	c.JSON(200, gin.H{"path": path, "content": string(content)})
+}
+
+func putFileHandler(c *gin.Context) {
+	name := c.Param("name")
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") || filepath.Ext(name) != ".conf" {
+		c.JSON(403, gin.H{"error": "access_denied"})
+		return
+	}
+	path := filepath.Join(*ConfigDir, name)
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if err := writeFileRaw(path, []byte(req.Content)); err != nil {
+		if strings.HasPrefix(err.Error(), "dnsmasq_test_failed") {
+			c.JSON(400, gin.H{"error": "dnsmasq_test_failed", "detail": strings.TrimPrefix(err.Error(), "dnsmasq_test_failed: ")})
+		} else {
+			c.JSON(500, gin.H{"error": "write_error"})
+		}
+		return
+	}
+	writeAudit(AuditEntry{
+		User:   getUser(c),
+		Action: "config_write_raw",
+		File:   path,
+	})
+	c.JSON(200, gin.H{"status": "ok"})
+}
+
+func createUserHandler(c *gin.Context) {
+	var req AuthReq
+	if err := c.BindJSON(&req); err != nil {
+		return
+	}
+	if req.Username == "" || req.Password == "" {
+		c.JSON(400, gin.H{"error": "missing_fields"})
+		return
+	}
+	if len(req.Username) > 64 {
+		c.JSON(400, gin.H{"error": "username_too_long"})
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if _, exists := users[req.Username]; exists {
+		c.JSON(409, gin.H{"error": "user_exists"})
+		return
+	}
+	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	users[req.Username] = string(hash)
+	saveUsers()
+	writeAudit(AuditEntry{
+		User:   getUser(c),
+		Action: "user_create",
+		Mac:    req.Username,
+	})
+	c.JSON(200, gin.H{"status": "ok"})
+}
+
+func deleteUserHandler(c *gin.Context) {
+	name := c.Param("name")
+	currentUser := getUser(c)
+	if name == currentUser {
+		c.JSON(400, gin.H{"error": "cannot_delete_self"})
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if _, exists := users[name]; !exists {
+		c.JSON(404, gin.H{"error": "user_not_found"})
+		return
+	}
+	delete(users, name)
+	saveUsers()
+	writeAudit(AuditEntry{
+		User:   currentUser,
+		Action: "user_delete",
+		Mac:    name,
+	})
+	c.JSON(200, gin.H{"status": "deleted"})
+}
+
+func changePasswordHandler(c *gin.Context) {
+	var req UserPasswordReq
+	if err := c.BindJSON(&req); err != nil {
+		return
+	}
+	if req.NewPassword == "" {
+		c.JSON(400, gin.H{"error": "missing_fields"})
+		return
+	}
+	currentUser := getUser(c)
+	mu.Lock()
+	defer mu.Unlock()
+	hash, ok := users[currentUser]
+	if !ok || bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.OldPassword)) != nil {
+		c.JSON(401, gin.H{"error": "invalid_credentials"})
+		return
+	}
+	newHash, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	users[currentUser] = string(newHash)
+	saveUsers()
+	writeAudit(AuditEntry{
+		User:   currentUser,
+		Action: "password_change",
+	})
+	c.JSON(200, gin.H{"status": "ok"})
+}
+
+func logoutHandler(c *gin.Context) {
+	authHeader := c.GetHeader("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		token, _ := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) { return SecretKey, nil })
+		if token != nil {
+			if claims, ok := token.Claims.(jwt.MapClaims); ok {
+				if jti, ok := claims["jti"].(string); ok {
+					if exp, ok := claims["exp"].(float64); ok {
+						revokeToken(jti, time.Unix(int64(exp), 0))
+					}
+				}
+			}
+		}
+	}
+	c.JSON(200, gin.H{"status": "logged_out"})
+}
+
+func getNewDevicesHandler(c *gin.Context) {
+	c.JSON(200, getNewDevices())
+}
+
+func bulkLeaseToStaticHandler(c *gin.Context) {
+	var req BulkLeaseToStaticReq
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid_data"})
+		return
+	}
+	if !isSafePath(req.File) {
+		c.JSON(403, gin.H{"error": "access_denied"})
+		return
+	}
+	if len(req.Leases) == 0 {
+		c.JSON(400, gin.H{"error": "no_leases"})
+		return
+	}
+
+	for _, l := range req.Leases {
+		if !macRegex.MatchString(l.Mac) {
+			c.JSON(400, gin.H{"error": "invalid_mac", "mac": l.Mac})
+			return
+		}
+		macConflicts := findHostsByMac(l.Mac)
+		if len(macConflicts) > 0 {
+			c.JSON(409, gin.H{"error": "mac_duplicate", "conflicts": macConflicts})
+			return
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	createLocalBackup(req.File)
+
+	content, err := os.ReadFile(req.File)
+	if err != nil && !os.IsNotExist(err) {
+		c.JSON(500, gin.H{"error": "read_error"})
+		return
+	}
+
+	lines := strings.Split(string(content), "\n")
+	newLines := []string{}
+	newMacs := make(map[string]bool)
+	for _, l := range req.Leases {
+		if macRegex.MatchString(l.Mac) {
+			newMacs[strings.ToLower(l.Mac)] = true
+		}
+	}
+
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "dhcp-host=") {
+			parts := strings.Split(line, ",")
+			skip := false
+			for _, p := range parts {
+				if newMacs[strings.ToLower(strings.TrimSpace(p))] {
+					skip = true
+					break
+				}
+			}
+			if skip {
+				continue
+			}
+		}
+		if strings.TrimSpace(line) != "" {
+			newLines = append(newLines, line)
+		}
+	}
+
+	count := 0
+	for _, l := range req.Leases {
+		if !macRegex.MatchString(l.Mac) {
+			continue
+		}
+		hostname := l.Hostname
+		if hostname == "*" || hostname == "" {
+			hostname = "device-" + strings.ReplaceAll(strings.ToLower(l.Mac), ":", "")[:8]
+		}
+		newLines = append(newLines, fmt.Sprintf("dhcp-host=%s,%s,%s", l.Mac, hostname, l.Ip))
+		count++
+	}
+
+	if err := os.WriteFile(req.File, []byte(strings.Join(newLines, "\n")+"\n"), 0644); err != nil {
+		c.JSON(500, gin.H{"error": "write_error"})
+		return
+	}
+
+	writeAudit(AuditEntry{
+		User:   getUser(c),
+		Action: "bulk_lease_to_static",
+		File:   req.File,
+		Mac:    fmt.Sprintf("%d leases", count),
+	})
+
+	c.JSON(200, gin.H{"status": "ok", "count": count})
+}
+
+func restoreBackupHandler(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(400, gin.H{"error": "no_file"})
+		return
+	}
+	f, err := file.Open()
+	if err != nil {
+		c.JSON(500, gin.H{"error": "read_error"})
+		return
+	}
+	defer f.Close()
+	zipData, err := io.ReadAll(f)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "read_error"})
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if err := restoreBackupZip(zipData); err != nil {
+		if strings.HasPrefix(err.Error(), "dnsmasq_test_failed") {
+			c.JSON(400, gin.H{"error": "dnsmasq_test_failed", "detail": strings.TrimPrefix(err.Error(), "dnsmasq_test_failed: ")})
+		} else {
+			c.JSON(400, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	writeAudit(AuditEntry{
+		User:   getUser(c),
+		Action: "backup_restore",
+	})
+	c.JSON(200, gin.H{"status": "ok"})
+}
+
+func getUsersHandler(c *gin.Context) {
+	mu.Lock()
+	defer mu.Unlock()
+	names := make([]string, 0, len(users))
+	for u := range users {
+		names = append(names, u)
+	}
+	c.JSON(200, gin.H{"users": names})
+}
+
+func eventsHandler(c *gin.Context) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Access-Control-Allow-Origin", "*")
+
+	client := &sseClient{ch: make(chan string, 10)}
+	sseRegister(client)
+	defer sseUnregister(client)
+
+	arp := getArpTable()
+	c.SSEvent("arp", arp)
+	c.Writer.Flush()
+
+	for {
+		select {
+		case msg := <-client.ch:
+			c.Writer.Write([]byte(msg))
+			c.Writer.Flush()
+		case <-c.Request.Context().Done():
+			return
+		}
+	}
 }

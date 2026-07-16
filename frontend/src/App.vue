@@ -9,10 +9,26 @@ import LeasesTab from './components/leases/LeasesTab.vue'
 import AuditTab from './components/audit/AuditTab.vue'
 import DnsmasqConfig from './components/config/DnsmasqConfig.vue'
 import DnsAliasesView from './components/dns/DnsAliasesView.vue'
+import NewDevicesTab from './components/NewDevicesTab.vue'
+import UsersTab from './components/UsersTab.vue'
 
 const { locale } = useI18n()
 
 let arpInterval = null
+let sseConnection = null
+
+function uploadRestore() {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.zip'
+    input.onchange = async (e) => {
+        const file = e.target.files[0]
+        if (!file) return
+        if (!confirm('Restore configuration from backup? Existing files will be backed up as .restore.bak')) return
+        await actions.restoreBackup(file)
+    }
+    input.click()
+}
 
 function toggleTheme() {
   const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark'
@@ -36,10 +52,10 @@ onMounted(() => {
         document.documentElement.setAttribute('data-bs-theme', 'dark')
     }
     actions.checkStatus()
-    arpInterval = setInterval(() => { actions.loadArp() }, 30000)
+    sseConnection = actions.connectSSE()
 })
 
-onUnmounted(() => { clearInterval(arpInterval) })
+onUnmounted(() => { if (sseConnection) sseConnection.close() })
 </script>
 
 <template>
@@ -74,7 +90,7 @@ onUnmounted(() => { clearInterval(arpInterval) })
                 <li><a class="dropdown-item" href="/swagger/index.html" target="_blank">📖 {{ $t('app.apiDocs') }}</a></li>
                 <li><a class="dropdown-item" href="#" @click.prevent="actions.restartSystem()">🔄 {{ $t('app.restart') }}</a></li>
                 <li><hr class="dropdown-divider"></li>
-                <li><a class="dropdown-item text-danger" href="#" @click.prevent="actions.logout()">🚪 {{ $t('app.logout') }}</a></li>
+                <li><a class="dropdown-item text-danger" href="#" @click.prevent="actions.logoutRequest()">🚪 {{ $t('app.logout') }}</a></li>
             </ul>
         </div>
     </div>
@@ -97,6 +113,8 @@ onUnmounted(() => { clearInterval(arpInterval) })
                         <button @click="store.tab='leases'" :class="['btn', store.tab==='leases' ? 'btn-primary' : 'btn-outline-primary']">{{ $t('app.tabLeases') }}</button>
                         <button @click="store.tab='config'" :class="['btn', store.tab==='config' ? 'btn-primary' : 'btn-outline-primary']">⚙️ {{ $t('app.tabConfig') }}</button>
                         <button @click="store.tab='audit'" :class="['btn', store.tab==='audit' ? 'btn-primary' : 'btn-outline-primary']">{{ $t('app.tabAudit') }}</button>
+                        <button @click="store.tab='newdevices'; actions.loadNewDevices()" :class="['btn', store.tab==='newdevices' ? 'btn-primary' : 'btn-outline-primary']">🔍 {{ $t('app.tabNewDevices') }}</button>
+                        <button @click="store.tab='users'; actions.loadUsers()" :class="['btn', store.tab==='users' ? 'btn-primary' : 'btn-outline-primary']">👥 {{ $t('app.tabUsers') }}</button>
                     </div>
                 </div>
                 <div v-if="store.tab !== 'config'" class="col-12 col-md">
@@ -104,6 +122,7 @@ onUnmounted(() => { clearInterval(arpInterval) })
                 </div>
                 <div class="col-12 col-md-auto text-md-end d-flex gap-2 justify-content-end">
                     <button @click="actions.downloadBackup()" class="btn btn-outline-info fw-bold" :title="$t('app.downloadArchive')">💾 {{ $t('app.backup') }}</button>
+                    <button @click="uploadRestore()" class="btn btn-outline-warning fw-bold" :title="$t('app.restoreArchive')">📤 {{ $t('app.restore') }}</button>
                     <button @click="downloadCSV()" class="btn btn-outline-success fw-bold" :title="$t('app.csvExportTooltip')">📥 {{ $t('app.csvExport') }}</button>
                     <button @click="actions.applyConfig()" class="btn btn-warning fw-bold text-dark">🔄 {{ $t('app.apply') }}</button>
                 </div>
@@ -114,6 +133,8 @@ onUnmounted(() => { clearInterval(arpInterval) })
             <LeasesTab v-if="store.tab === 'leases'" />
             <DnsmasqConfig v-if="store.tab === 'config'" />
             <AuditTab v-if="store.tab === 'audit'" />
+            <NewDevicesTab v-if="store.tab === 'newdevices'" />
+            <UsersTab v-if="store.tab === 'users'" />
         </div>
 
         <!-- 2. ОКНО ПЛАГИНА (полная ширина viewport, поверх приложения) -->
