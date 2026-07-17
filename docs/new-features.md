@@ -1,15 +1,17 @@
 # Новые возможности Intermasq
 
-Начиная с v3.1 в Intermasq добавлены 8 новых функций:
-редактор конфигурационных файлов, SSE-события, управление пользователями,
-определение вендора по MAC (OUI), восстановление из ZIP, rate-limit на логин,
-logout с отзывом JWT, массовый перенос lease → static, и вкладка «Новые устройства».
+8 функций, добавленных поверх базового функционала: прямой редактор конфигов,
+SSE-события, управление пользователями, вкладка «Новые устройства» с OUI-lookup,
+массовый перенос lease → static, восстановление из ZIP, rate-limit на логин,
+logout с отзывом JWT.
 
 ---
 
 ## 1. Редактор конфигурационных файлов
 
-Просмотр и редактирование любых `.conf` файлов в `-conf-dir` через веб-интерфейс.
+Просмотр и редактирование любых `.conf` файлов в `-conf-dir` через веб.
+Подстраховка для строк, которые GUI не покрывает, и для ручного редактирования
+без SSH.
 
 ### API
 
@@ -17,9 +19,9 @@ logout с отзывом JWT, массовый перенос lease → static, 
 GET /api/files/:name
 Authorization: Bearer <token>
 
-→ 200 {"content":"..."}
+→ 200 {"path":"/etc/dnsmasq.d/hosts.conf","content":"server=1.2.3.4\n"}
+→ 403 {"error":"access_denied"}   # name без .conf, содержит / или \
 → 404 {"error":"file_not_found"}
-→ 400 {"error":"unsafe_path"}
 ```
 
 ```
@@ -29,139 +31,121 @@ Content-Type: application/json
 
 {"content":"новое содержимое\n"}
 
-→ 200 {"message":"ok"}
-→ 400 {"error":"unsafe_path"}
-→ 400 {"error":"validation_error"}
-→ 400 {"error":"dnsmasq_test_failed"}
+→ 200 {"status":"ok"}
+→ 403 {"error":"access_denied"}                       # name без .conf или с разделителем
+→ 400 {"error":"dnsmasq_test_failed","detail":"..."}  # невалидный синтаксис
+→ 500 {"error":"write_error"}
 ```
 
-### Механизм работы
+### Механизм работы (`dnsmasq.go`)
 
-1. PUT создаёт `.bak`-копию файла перед записью.
-2. После записи запускает `dnsmasq --test` для проверки синтаксиса.
-3. При неудаче теста автоматически откатывает изменения.
-4. При успехе сохраняет версию в историю (см. `docs/version-history.md`).
+- `readFileRaw(path) ([]byte, error)` — чтение, проверка пути через `isSafePath`.
+- `writeFileRaw(path, content) error` — `createLocalBackup` (`.bak`) → запись →
+  `dnsmasq --test` → при неудаче `rollbackFile`. История версий здесь не
+  сохраняется (см. отдельную подсистему history).
+
+Все эндпоинты под `authMiddleware`. `:name` обязано оканчиваться на `.conf` и не
+содержать разделителей пути.
 
 ---
 
 ## 2. SSE-события (Server-Sent Events)
 
-Канал реального времени для уведомлений о событиях в системе.
+Сервер пушит изменения ARP-таблицы и статуса dnsmasq подключённым клиентам,
+вместо опроса раз в 30 сек. Односторонний пуш, работает через reverse proxy без
+донастройки.
 
 ### API
 
 ```
-GET /api/events
+GET /api/events?token=<JWT>
 Content-Type: text/event-stream
 
-data: {"type":"config_updated","data":"hosts.conf"}
+event: arp
+data: {"aa:bb:cc:dd:ee:ff":true}
 
-data: {"type":"user_changed","data":"created"}
+event: dnsmasq_status
+data: {"active":true}
 ```
 
-### Использование
+Эндпоинт под `authMiddleware`. EventSource не умеет ставить заголовок
+`Authorization`, поэтому токен передаётся в query-параметре `?token=` (fallback в
+`authMiddleware`, когда нет заголовка).
 
-Подключение через `EventSource` в браузере:
-```js
-const es = new EventSource('/api/events');
-es.onmessage = (e) => {
-  const evt = JSON.parse(e.data);
-  // evt.type, evt.data
-};
-```
+### Механизм (`dnsmasq.go`)
 
-### События
-
-- `config_updated` — конфигурационный файл изменён через PUT /api/files/:name
-- `user_changed` — пользователь создан/удалён
-- В будущем: lease changes, device discovery, system alerts
+- `sseClient{ch chan string}`, пакетные `sseClients` map + `sseClientsMu`.
+- `sseRegister` / `sseUnregister` / `sseBroadcast(event, data)` (non-blocking).
+- `startSSEBroadcaster()` (горутина в `main`) опрашивает ARP и статус dnsmasq
+  каждые 5 сек и пушит только при изменении (`arp`, `dnsmasq_status`).
+- `eventsHandler` при подключении шлёт текущее состояние ARP, далее слушает
+  broadcast до `c.Request.Context().Done()`.
 
 ---
 
 ## 3. Управление пользователями
 
-CRUD для пользователей через веб-интерфейс (вкладка «Пользователи»).
+Создание/удаление пользователей и смена собственного пароля (вкладка
+«Пользователи»). Имена — `username` (не `login`).
 
 ### API
 
 ```
-POST /api/users
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{"login":"newuser","password":"secret123"}
-
-→ 201 {"message":"created"}
-→ 400 {"error":"empty_fields"}
-→ 409 {"error":"user_exists"}
+POST /api/users            {"username":"newuser","password":"secret123"}
+GET  /api/users
+DELETE /api/users/:name
+POST /api/users/password   {"old_password":"old","new_password":"new"}
 ```
 
-```
-DELETE /api/users/:login
-Authorization: Bearer <token>
-
-→ 200 {"message":"deleted"}
-→ 400 {"error":"cannot_delete_self"}
-→ 404 {"error":"user_not_found"}
-```
-
-```
-PUT /api/users/me/password
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{"old_password":"old","new_password":"new"}
-
-→ 200 {"message":"changed"}
-→ 400 {"error":"wrong_password"}
-→ 400 {"error":"empty_fields"}
-```
+| Метод+путь | Успех | Ошибки |
+|---|---|---|
+| `POST /api/users` | 200 `{"status":"ok"}` | 400 `missing_fields` / `username_too_long`, 409 `user_exists` |
+| `GET /api/users` | 200 `{"users":["admin","bob"]}` | — |
+| `DELETE /api/users/:name` | 200 `{"status":"deleted"}` | 400 `cannot_delete_self`, 404 `user_not_found` |
+| `POST /api/users/password` | 200 `{"status":"ok"}` | 400 `missing_fields`, 401 `invalid_credentials` |
 
 ### Безопасность
 
-- Пароли хранятся в bcrypt.
-- Нельзя удалить самого себя.
-- Все руты под `authMiddleware`.
+- Пароли — bcrypt (`DefaultCost`), хранятся в `users.json`.
+- Нельзя удалить самого себя (защита от локапа: список никогда не опустеет).
+- Все роуты под `authMiddleware`; действия пишутся в audit-лог (`user_create`,
+  `user_delete`, `password_change`).
 
 ---
 
 ## 4. Вкладка «Новые устройства»
 
-Автоматическое обнаружение устройств в ARP-таблице, которых ещё нет
-в статических конфигурациях.
+ARP-MAC, которых нет ни в `dhcp-host=` (static), ни в leases. Опционально
+определение вендора по первым 3 октетам MAC.
 
 ### API
 
 ```
-GET /api/devices/new
+GET /api/new-devices
 Authorization: Bearer <token>
 
 → 200 [
-  {"mac":"aa:bb:cc:dd:ee:ff","ip":"192.168.1.100","oui":"Apple Inc."},
-  {"mac":"11:22:33:44:55:66","ip":"192.168.1.101","oui":""}
+  {"mac":"aa:bb:cc:dd:ee:ff","ip":"","vendor":"Apple"},
+  {"mac":"11:22:33:44:55:66","ip":"","vendor":""}
 ]
 ```
 
-### Логика
+### Логика (`dnsmasq.go`)
 
-1. Читает `arp.json` из `-dir`.
-2. Парсит записи через `parseArpContent`.
-3. Для каждого MAC проверяет наличие `dhcp-host=` в статических хостах
-   и hosts-файлах.
-4. Если MAC не найден — возвращает устройство как «новое».
-5. Определяет вендора через OUI-таблицу (первые 3 октета MAC).
+- `getNewDevices() []NewDeviceInfo` читает ARP через `getArpTable()` (флаг
+  `-arp-file`, по умолчанию `/proc/net/arp`), leases и static-хосты.
+- MAC, отсутствующий в обоих списках, помечается как «новый».
+- Вендор — `lookupOUI(mac)` по встроенной таблице (`oui.go`). Поле `ip`
+  возвращается пустым.
 
-### UI
-
-- Таблица с колонками: MAC, IP, Вендор (OUI).
-- Кнопка «Добавить как статический» для каждого устройства.
-- При добавлении вызывается bulkLeaseToStatic для одного хоста.
+UI: таблица MAC + вендор, кнопка «Добавить» перекидывает в форму static с
+предзаполненным MAC.
 
 ---
 
 ## 5. Массовый перенос lease → static
 
-Перенос выбранных динамических аренд в статические `dhcp-host=` записи.
+Расширение «В статику» для нескольких выделенных аренд сразу.
 
 ### API
 
@@ -171,95 +155,85 @@ Authorization: Bearer <token>
 Content-Type: application/json
 
 {
-  "leases": [
-    {"mac":"aa:bb:cc:dd:ee:ff","ip":"192.168.1.1","hostname":"myhost"}
-  ],
-  "file": "hosts.conf"
+  "leases": [{"mac":"aa:bb:cc:dd:ee:ff","ip":"192.168.1.1","hostname":"myhost"}],
+  "file": "/etc/dnsmasq.d/hosts.conf"
 }
 
-→ 200 {"message":"ok"}
-→ 400 {"error":"invalid_data"}
-→ 400 {"error":"invalid_mac"}
-→ 409 {"error":"mac_conflict"}
+→ 200 {"status":"ok","count":1}
+→ 403 {"error":"access_denied"}                          # unsafe path (проверяется первым)
+→ 400 {"error":"no_leases"}                              # пустой список
+→ 400 {"error":"invalid_mac","mac":"bad"}
+→ 409 {"error":"mac_duplicate","conflicts":[...]}
 ```
 
 ### Особенности
 
-- **MAC-конфликт:** если `dhcp-host=<mac>` уже есть в целевом файле —
-  возвращается 409, запись не добавляется.
-- **Авто-hostname:** если hostname == `*`, генерируется `device-{ip без точек}`
-  (например `device-19216811`).
-- **Валидация MAC:** строгий формат `xx:xx:xx:xx:xx:xx`.
-- **Unsafe path:** пути с `..` блокируются.
-
-### UI
-
-- Чекбоксы для выбора lease в таблице аренд.
-- Выпадающий список для выбора целевого файла.
-- Кнопка «Перенести выбранные в статику».
-- Обработка ошибок: конфликты MAC показываются в toast.
+- **MAC-конфликт:** если MAC уже есть в `dhcp-host=` — 409, ничего не пишется.
+- **Авто-hostname:** при `hostname == "*" | ""` генерируется
+  `device-<первые 8 символов MAC без двоеточий>` (например `device-aabbccdd`).
+- **Валидация MAC:** `^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$` (допускает `:` и `-`).
+- Перед записью — `isSafePath(file)` и `createLocalBackup(file)`.
+- **Внимание:** `dnsmasq --test` здесь НЕ запускается (прямая запись в файл).
 
 ---
 
 ## 6. Восстановление из ZIP-архива
 
-Загрузка ZIP-архива с конфигурационными файлами и восстановление
-с созданием backup-копии.
+Зеркало `GET /api/backup`: загрузка архива, распаковка в `-conf-dir` с `.bak`
+заменяемых файлов и проверкой конфига.
 
 ### API
 
 ```
-POST /api/files/restore
+POST /api/backup/restore
 Authorization: Bearer <token>
 Content-Type: multipart/form-data
 
 file: backup.zip
 
-→ 200 {"message":"ok"}
+→ 200 {"status":"ok"}
+→ 400 {"error":"no_file"}                                   # нет поля file
 → 400 {"error":"invalid_zip"}
-→ 400 {"error":"no_conf_files"}
-→ 400 {"error":"dnsmasq_test_failed"}
+→ 400 {"error":"no_valid_conf_files"}                       # в архиве нет .conf
+→ 400 {"error":"dnsmasq_test_failed","detail":"..."}
 ```
 
-### Механизм работы
+### Механизм (`dnsmasq.go`)
 
-1. Принимает ZIP-архив через multipart/form-data.
-2. Распаковывает in-memory, для каждого `.conf`-файла:
-   - Проверяет path traversal (отклоняет `../` и абсолютные пути).
-   - Создаёт `.restore.bak` из текущей версии файла.
-   - Записывает содержимое из архива.
-3. Запускает `dnsmasq --test` для проверки всей конфигурации.
-4. При неудаче откатывает все изменённые файлы из `.restore.bak`.
+`restoreBackupZip(data) error`:
 
-### Безопасность
-
-- Файлы за пределами `-conf-dir` игнорируются.
-- Архивы без `.conf` файлов возвращают `no_conf_files`.
-- Некорректные ZIP-архивы возвращают `invalid_zip`.
+1. `zip.NewReader`, обход всех записей.
+2. Берётся `filepath.Base(name)`, пропускаются не-`.conf` и небезопасные имена
+   (защита от `../` и абсолютных путей).
+3. Для существующего файла пишется `<file>.restore.bak`.
+4. Запись содержимого из архива.
+5. `dnsmasq --test`; при неудаче все изменённые файлы откатываются из
+   `.restore.bak` (сами `.restore.bak` не удаляются).
 
 ---
 
 ## 7. Rate-limit на `/api/login`
 
-Защита от brute-force атак на endpoint логина.
+Защита от брутфорса (bcrypt + неограниченные попытки = уязвимость).
 
-### Конфигурация
+### Поведение (`auth.go`)
 
-- **Максимум попыток:** 5 (по умолчанию) с одного IP.
-- **Интервал:** 1 минута (по умолчанию).
-- При превышении — `429 Too Many Requests` с телом `{"error":"too_many_requests"}`.
-- При успешном входе счётчик для IP сбрасывается.
+- Лимит **10 попыток с одного IP за 1 минуту** (зашито в регистрации роута в
+  `main.go`: `rateLimitMiddleware(10, time.Minute)`).
+- При превышении — `429 {"error":"too_many_attempts"}`.
+- Хранилище: пакетный `rateLimitStore map[string][]time.Time` + `sync.Mutex`.
+- Очистка **ленивая**: внутри middleware, если с последней очистки прошло >5 мин,
+  просроченные метки удаляются. Фонового cleanup-горутины НЕТ.
+- **Сброса счётчика при успешном логине нет.**
 
-### Очистка
-
-- Фоновый cleanup запускается каждые 10 минут, удаляя истёкшие записи.
-- Используется `sync.Mutex` для потокобезопасности.
+> За reverse-proxy: `c.ClientIP()` вернёт реальный IP только при корректной
+> настройке доверенных прокси (deployment-конфигурация).
 
 ---
 
 ## 8. Logout / JWT blacklist
 
-Возможность принудительного завершения сессии с отзывом JWT-токена.
+Простой in-memory blacklist отозванных токенов.
 
 ### API
 
@@ -267,65 +241,49 @@ file: backup.zip
 POST /api/logout
 Authorization: Bearer <token>
 
-→ 200 {"message":"logged_out"}
+→ 200 {"status":"logged_out"}
 ```
 
-### Механизм
+### Механизм (`auth.go`)
 
-1. Клиент отправляет `POST /api/logout` с токеном в `Authorization`.
-2. Бэкенд парсит токен, извлекает `jti` (JWT ID) и время жизни (`exp`).
-3. `jti` сохраняется в `TokenBlacklist` до истечения срока токена.
-4. `JWTAuthMiddleware` проверяет `blacklist.IsRevoked()` при каждом запросе.
-5. Фоновый cleanup удаляет истёкшие записи каждые 30 минут.
+- Пакетные `blacklist map[string]time.Time` (jti → exp) + `blacklistMu sync.RWMutex`.
+- `logoutHandler` парсит токен, достаёт `jti` и `exp`, вызывает
+  `revokeToken(jti, exp)`.
+- `authMiddleware` проверяет `isTokenRevoked(jti)` и при попадании в blacklist
+  отдаёт 401.
+- Фоновая горутина `cleanBlacklistLoop` каждые 10 минут удаляет записи с истёкшим `exp`.
 
-### Безопасность
+### Ограничение
 
-- Отозванный токен недействителен немедленно.
-- Истёкшие записи автоматически удаляются из памяти.
-- Используется `sync.RWMutex` для конкурентного доступа.
+Blacklist in-memory: при рестарте процесса очищается, отозванные токены снова
+валидны до `exp` (72ч). Это сознательный выбор («простой blacklist» по ТЗ).
 
 ---
 
-## 9. OUI Lookup (определение вендора по MAC)
+## 9. OUI Lookup
 
-Встроенная таблица производителей сетевых устройств по первым 3 октетам MAC.
+Встроенная таблица производителей по первым 3 октетам MAC.
 
-### Таблица
-
-Включает ~50 известных OUI: VMware, Apple, Intel, Cisco, Samsung, LG,
-Google, Huawei, Xiaomi, Dell, HP, Lenovo, Asus, Acer, Nokia, Ericsson,
-Motorola, Broadcom, Qualcomm, Roku, Sonos, TP-Link, D-Link, Netgear,
-Linksys, Ubiquiti, MikroTik, Zyxel, Lutron, Philips, Belkin, Amazon,
-Raspberry Pi, Arduino, Espressif, Texas Instruments, NXP, Sierra Wireless,
-Honeywell, Siemens, Bosch, Panasonic, Sony, Yamaha, Canon, Epson, Nikon
-
-### Формат MAC
-
-Принимает MAC в любом регистре: `aa:bb:cc:dd:ee:ff`, `AA:BB:CC:DD:EE:FF`.
-
-### API (внутренняя)
-
-```go
-vendor := LookupOUI("aa:bb:cc:dd:ee:ff") // → "Apple" или ""
-```
+- `oui.go` — `ouiTable map[string]string` (сотни записей: VMware, Apple, Cisco,
+  Netgear, Dell, HP, Raspberry Pi, QEMU/KVM и др.) + `lookupOUI(mac) string`.
+- Без учёта регистра, ключ — `xx:xx:xx` (первые 8 символов). При отсутствии — `""`.
 
 ---
 
 ## Изменённые файлы
 
-| Файл | Описание |
+| Файл | Назначение |
 |---|---|
-| `auth.go` | JWT blacklist, rate-limiter, CRUD пользователей |
-| `dnsmasq.go` | SSE broker, file I/O, restore ZIP, new devices |
-| `handlers.go` | REST-хендлеры для всех новых функций |
-| `main.go` | Инициализация, новые роуты |
-| `models.go` | Новые структуры данных |
-| `oui.go` | OUI-таблица и LookupOUI |
-| `dnsmasq_test.go` | 47 тестов для новых функций |
-| `frontend/src/App.vue` | Вкладки «Новые устройства», «Пользователи» |
-| `frontend/src/components/NewDevicesTab.vue` | Компонент новых устройств |
-| `frontend/src/components/UsersTab.vue` | Компонент управления пользователями |
-| `frontend/src/components/leases/LeasesTab.vue` | Bulk lease-to-static UI |
-| `frontend/src/store.js` | API вызовы для новых функций |
-| `frontend/src/locales/en.json` | Английские переводы |
-| `frontend/src/locales/ru.json` | Русские переводы |
+| `auth.go` | blacklist, rate-limiter, `authMiddleware` (заголовок + `?token=`) |
+| `dnsmasq.go` | SSE broker, `readFileRaw`/`writeFileRaw`, `restoreBackupZip`, `getNewDevices` |
+| `handlers.go` | REST-хендлеры всех новых функций |
+| `main.go` | инициализация `startSSEBroadcaster`, регистрация роутов |
+| `models.go` | `UserPasswordReq`, `NewDeviceInfo`, `BulkLeaseToStaticReq` |
+| `oui.go` | OUI-таблица и `lookupOUI` |
+| `dnsmasq_test.go` | тесты для всех новых функций |
+| `frontend/src/App.vue` | вкладки «Новые устройства», «Пользователи» |
+| `frontend/src/components/NewDevicesTab.vue` | компонент новых устройств |
+| `frontend/src/components/UsersTab.vue` | управление пользователями |
+| `frontend/src/components/leases/LeasesTab.vue` | bulk lease-to-static UI |
+| `frontend/src/store.js` | API-методы + `EventSource('/api/events?token=…')` |
+| `frontend/src/locales/{en,ru}.json` | переводы |

@@ -59,8 +59,8 @@ type BulkMoveReq struct {
 }
 
 type BulkEditReq struct {
-	Hosts             []HostEntry        `json:"hosts"`
-	IPTransform       IPTransformSpec    `json:"ip_transform"`
+	Hosts             []HostEntry           `json:"hosts"`
+	IPTransform       IPTransformSpec       `json:"ip_transform"`
 	HostnameTransform HostnameTransformSpec `json:"hostname_transform"`
 }
 
@@ -70,8 +70,8 @@ type IPTransformSpec struct {
 }
 
 type HostnameTransformSpec struct {
-	Suffix    string `json:"suffix"`
-	StripOld  string `json:"strip_old"`
+	Suffix   string `json:"suffix"`
+	StripOld string `json:"strip_old"`
 }
 
 // Directive represents a single dnsmasq directive line (excluding dhcp-host).

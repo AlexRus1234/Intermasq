@@ -465,7 +465,7 @@ export const actions = {
 
     connectSSE() {
         if (!store.token) return
-        const eventSource = new EventSource('/api/events')
+        const eventSource = new EventSource('/api/events?token=' + encodeURIComponent(store.token))
         eventSource.addEventListener('arp', (e) => {
             try { store.arpTable = JSON.parse(e.data) } catch (_) {}
         })

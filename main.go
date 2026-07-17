@@ -43,32 +43,32 @@ import (
 var staticFiles embed.FS
 
 var (
-	Port         = flag.String("port", "8081", "Port to listen on")
-	DBPath       = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
-	ConfigDir    = flag.String("conf-dir", "/etc/dnsmasq.d", "Directory with dnsmasq configs")
-	LeasesPath   = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
-	ArpPath      = flag.String("arp-file", "/proc/net/arp", "Path to ARP table file")
-	InitSystem   = flag.String("init-system", "auto", "Init system: auto, systemd, systemd-user, openrc, runit, sysvinit, none")
-	SystemdScope = flag.String("systemd-scope", "", "Legacy flag: auto, system, user, none (overrides -init-system if set)")
-	CiMode       = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
-	AuditLogPath = flag.String("audit-log", "/etc/intermasq/audit.log", "Path to audit log file")
+	Port          = flag.String("port", "8081", "Port to listen on")
+	DBPath        = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
+	ConfigDir     = flag.String("conf-dir", "/etc/dnsmasq.d", "Directory with dnsmasq configs")
+	LeasesPath    = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
+	ArpPath       = flag.String("arp-file", "/proc/net/arp", "Path to ARP table file")
+	InitSystem    = flag.String("init-system", "auto", "Init system: auto, systemd, systemd-user, openrc, runit, sysvinit, none")
+	SystemdScope  = flag.String("systemd-scope", "", "Legacy flag: auto, system, user, none (overrides -init-system if set)")
+	CiMode        = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
+	AuditLogPath  = flag.String("audit-log", "/etc/intermasq/audit.log", "Path to audit log file")
 	TemplatesPath = flag.String("templates", "/etc/intermasq/templates.json", "Path to templates file")
 	HistoryDir    = flag.String("history-dir", "/etc/intermasq/history", "Directory for versioned config history")
 	HistoryDepth  = flag.Int("history-depth", 10, "Maximum number of history versions per file")
-	PluginsDir   = "/etc/intermasq/plugins"
-	SocketsDir   = "/run/intermasq/sockets"
-	SecretKey    = []byte(os.Getenv("INTERMASQ_SECRET"))
+	PluginsDir    = "/etc/intermasq/plugins"
+	SocketsDir    = "/run/intermasq/sockets"
+	SecretKey     = []byte(os.Getenv("INTERMASQ_SECRET"))
 	// DefaultAliasesFile is the file created on first alias add when no
 	// explicit target file is provided. Relative to ConfigDir.
 	DefaultAliasesFileName = "10-dns-aliases.conf"
 )
 
 var (
-	macRegex      = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
-	hostnameRegex = regexp.MustCompile(`^[a-zA-Z0-9-.]+$`)
+	macRegex         = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
+	hostnameRegex    = regexp.MustCompile(`^[a-zA-Z0-9-.]+$`)
 	aliasDomainRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-.]*[a-zA-Z0-9])?$`)
-	mu            sync.Mutex
-	loadedPlugins []PluginManifest
+	mu               sync.Mutex
+	loadedPlugins    []PluginManifest
 )
 
 type PluginManifest struct {

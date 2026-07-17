@@ -19,6 +19,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"os"
@@ -1446,5 +1447,185 @@ func TestLookupOUIKnownNetgear(t *testing.T) {
 	v := lookupOUI("c0:3f:0e:11:22:33")
 	if v != "Netgear" {
 		t.Errorf("expected Netgear, got %q", v)
+	}
+}
+
+// ========== Auth middleware (header + query token for SSE) ==========
+
+func setTestSecret(t *testing.T) {
+	t.Helper()
+	orig := SecretKey
+	SecretKey = []byte("unit-test-secret-key-0123456789ab")
+	t.Cleanup(func() { SecretKey = orig })
+}
+
+func TestAuthMiddlewareBearerHeader(t *testing.T) {
+	setTestSecret(t)
+	users = map[string]string{"admin": "hash"}
+	token := makeToken("admin")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/whatever", nil)
+	c.Request.Header.Set("Authorization", "Bearer "+token)
+	authMiddleware(c)
+	if w.Code == 401 {
+		t.Fatalf("bearer header should be accepted")
+	}
+	if c.GetString("user") != "admin" {
+		t.Errorf("expected user admin, got %q", c.GetString("user"))
+	}
+}
+
+func TestAuthMiddlewareQueryToken(t *testing.T) {
+	setTestSecret(t)
+	users = map[string]string{"admin": "hash"}
+	token := makeToken("admin")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/events?token="+token, nil)
+	authMiddleware(c)
+	if w.Code == 401 {
+		t.Fatalf("query token should be accepted for SSE, got 401")
+	}
+	if c.GetString("user") != "admin" {
+		t.Errorf("expected user admin, got %q", c.GetString("user"))
+	}
+}
+
+func TestAuthMiddlewareQueryTokenRevoked(t *testing.T) {
+	setTestSecret(t)
+	blacklist = make(map[string]time.Time)
+	users = map[string]string{"admin": "hash"}
+	token := makeToken("admin")
+	parsed, _ := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) { return SecretKey, nil })
+	claims := parsed.Claims.(jwt.MapClaims)
+	jti := claims["jti"].(string)
+	revokeToken(jti, time.Now().Add(time.Hour))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/events?token="+token, nil)
+	authMiddleware(c)
+	if w.Code != 401 {
+		t.Fatalf("revoked query token should be rejected, got %d", w.Code)
+	}
+}
+
+func TestAuthMiddlewareQueryTokenBad(t *testing.T) {
+	setTestSecret(t)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/events?token=garbage", nil)
+	authMiddleware(c)
+	if w.Code != 401 {
+		t.Fatalf("bad query token should be rejected, got %d", w.Code)
+	}
+}
+
+func TestAuthMiddlewareNoCredentials(t *testing.T) {
+	setTestSecret(t)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/events", nil)
+	authMiddleware(c)
+	if w.Code != 401 {
+		t.Fatalf("missing credentials should be rejected, got %d", w.Code)
+	}
+}
+
+func TestAuthMiddlewareAPIKey(t *testing.T) {
+	setTestSecret(t)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/whatever", nil)
+	c.Request.Header.Set("X-API-Key", string(SecretKey))
+	authMiddleware(c)
+	if w.Code == 401 {
+		t.Fatalf("X-API-Key should be accepted")
+	}
+	if c.GetString("user") != "api-key" {
+		t.Errorf("expected user api-key, got %q", c.GetString("user"))
+	}
+}
+
+// ========== Events handler (SSE end-to-end) ==========
+
+func TestEventsHandlerStreamsSSE(t *testing.T) {
+	dir := t.TempDir()
+	*ArpPath = filepath.Join(dir, "arp")
+	os.WriteFile(*ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.5      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/events?token=x", nil).WithContext(ctx)
+	eventsHandler(c)
+
+	if !strings.Contains(w.Header().Get("Content-Type"), "text/event-stream") {
+		t.Errorf("expected text/event-stream content-type, got %q", w.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(w.Body.String(), "arp") {
+		t.Errorf("expected initial arp event in body, got: %s", w.Body.String())
+	}
+}
+
+// ========== GET /api/files/:name (.conf restriction) ==========
+
+func TestGetFileHandlerRejectsNonConf(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hi"), 0644)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/files/notes.txt", nil)
+	c.Params = gin.Params{{Key: "name", Value: "notes.txt"}}
+	getFileHandler(c)
+	if w.Code != 403 {
+		t.Fatalf("expected 403 for non-.conf, got %d", w.Code)
+	}
+}
+
+func TestGetFileHandlerRejectsPathSeparator(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/files/sub/x.conf", nil)
+	c.Params = gin.Params{{Key: "name", Value: "sub/x.conf"}}
+	getFileHandler(c)
+	if w.Code != 403 {
+		t.Fatalf("expected 403 for path separator in name, got %d", w.Code)
+	}
+}
+
+func TestGetFileHandlerSuccess(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	os.WriteFile(filepath.Join(dir, "x.conf"), []byte("server=1.2.3.4\n"), 0644)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/files/x.conf", nil)
+	c.Params = gin.Params{{Key: "name", Value: "x.conf"}}
+	getFileHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "server=1.2.3.4") {
+		t.Errorf("unexpected body: %s", w.Body.String())
+	}
+}
+
+func TestGetFileHandlerMissing(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/files/missing.conf", nil)
+	c.Params = gin.Params{{Key: "name", Value: "missing.conf"}}
+	getFileHandler(c)
+	if w.Code != 404 {
+		t.Fatalf("expected 404 for missing file, got %d", w.Code)
 	}
 }

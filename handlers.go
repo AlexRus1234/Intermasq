@@ -1346,7 +1346,7 @@ func importAliasesCSVHandler(c *gin.Context) {
 
 func getFileHandler(c *gin.Context) {
 	name := c.Param("name")
-	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") || filepath.Ext(name) != ".conf" {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}

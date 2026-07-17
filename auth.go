@@ -150,11 +150,15 @@ func authMiddleware(c *gin.Context) {
 	}
 
 	authHeader := c.GetHeader("Authorization")
-	if !strings.HasPrefix(authHeader, "Bearer ") {
+	var tokenStr string
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+	} else if q := c.Query("token"); q != "" {
+		tokenStr = q
+	} else {
 		c.AbortWithStatus(401)
 		return
 	}
-	tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 	token, _ := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) { return SecretKey, nil })
 
 	if token == nil || !token.Valid {

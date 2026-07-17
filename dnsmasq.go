@@ -565,11 +565,11 @@ const (
 )
 
 type ipTransform struct {
-	mode     ipTransformMode
-	oldNet   *net.IPNet
-	newNet   *net.IPNet
-	oldPref  string
-	newPref  string
+	mode    ipTransformMode
+	oldNet  *net.IPNet
+	newNet  *net.IPNet
+	oldPref string
+	newPref string
 }
 
 func parseIPTransform(oldStr, newStr string) (*ipTransform, error) {
