@@ -23,6 +23,7 @@ export const store = reactive({
     aliases: [],
     newDevices: [],
     users: [],
+    configTemplates: [],
     
     transferData: null,
     history: [],
@@ -251,15 +252,24 @@ export const actions = {
         }
     },
 
-    async createConfigFile(name) {
+    async createConfigFile(name, template = 'empty') {
         try {
-            const res = await api.post('/config/file', { name })
+            const res = await api.post('/config/file', { name, template })
             store.configSnapshot = res.data
             return true
         } catch (e) {
             const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.configCreateError')
             alert(msg)
             return false
+        }
+    },
+
+    async loadConfigTemplates() {
+        try {
+            const res = await api.get('/config/templates')
+            store.configTemplates = res.data.templates || []
+        } catch (e) {
+            store.configTemplates = [{ id: 'empty', preview: '# === Managed by Intermasq ===\n' }]
         }
     },
 

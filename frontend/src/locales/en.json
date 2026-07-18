@@ -191,6 +191,8 @@
     "groupLog": "Logging",
     "groupOther": "Other",
     "newFile": "New file",
+    "template": "Content template",
+    "templateEmpty": "Empty file",
     "selectFile": "Select a configuration file",
     "noDirectives": "No settings in this file (only dhcp-host)",
     "save": "Save configuration",

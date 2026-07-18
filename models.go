@@ -121,8 +121,12 @@ type ConfigUpdateReq struct {
 }
 
 // CreateConfigFileReq is the body of POST /api/config/file.
+// Template — опциональный ID из configTemplates (например "basic-dhcp",
+// "forwarder", "pxe", "aliases"). Пустая строка эквивалентна "empty"
+// (текущее поведение — файл с одним заголовком).
 type CreateConfigFileReq struct {
-	Name string `json:"name"`
+	Name     string `json:"name"`
+	Template string `json:"template,omitempty"`
 }
 
 // DnsAliasEntry represents a dnsmasq address= or cname= directive.

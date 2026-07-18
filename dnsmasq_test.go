@@ -21,9 +21,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -1631,5 +1634,294 @@ func TestGetFileHandlerMissing(t *testing.T) {
 	getFileHandler(c)
 	if w.Code != 404 {
 		t.Fatalf("expected 404 for missing file, got %d", w.Code)
+	}
+}
+
+// ========== Config file templates (POST /api/config/file?template=…) ==========
+
+// TestCreateConfigFileHandlerEachTemplate проверяет, что каждый зарегистрированный
+// шаблон корректно записывается в файл при выборе через POST /api/config/file.
+func TestCreateConfigFileHandlerEachTemplate(t *testing.T) {
+	for _, tpl := range knownConfigTemplateIDs() {
+		t.Run(tpl, func(t *testing.T) {
+			dir := t.TempDir()
+			*ConfigDir = dir
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			body := fmt.Sprintf(`{"name":"test_%s.conf","template":"%s"}`, tpl, tpl)
+			c.Request = httptest.NewRequest("POST", "/api/config/file", strings.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set("user", "admin")
+			createConfigFileHandler(c)
+			if w.Code != 200 {
+				t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+			}
+			content, err := os.ReadFile(filepath.Join(dir, "test_"+tpl+".conf"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(content) != configTemplates[tpl] {
+				t.Errorf("content mismatch for template %q:\nwant:\n%s\ngot:\n%s", tpl, configTemplates[tpl], string(content))
+			}
+		})
+	}
+}
+
+// TestCreateConfigFileHandlerEmptyTemplateDefault — отсутствие template в теле
+// запроса эквивалентно template="empty" (обратная совместимость).
+func TestCreateConfigFileHandlerEmptyTemplateDefault(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/config/file", strings.NewReader(`{"name":"x.conf"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	createConfigFileHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	content, _ := os.ReadFile(filepath.Join(dir, "x.conf"))
+	if string(content) != configTemplates["empty"] {
+		t.Errorf("default template not 'empty':\n%s", string(content))
+	}
+}
+
+// TestCreateConfigFileHandlerUnknownTemplate — неизвестный ID шаблона даёт
+// 400 + список доступных в поле available (нужно для подсказки в UI).
+func TestCreateConfigFileHandlerUnknownTemplate(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/config/file", strings.NewReader(`{"name":"x.conf","template":"nonexistent"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	createConfigFileHandler(c)
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for unknown template, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["error"] != "unknown_template" {
+		t.Errorf("expected error=unknown_template, got %v", resp["error"])
+	}
+	avail, _ := resp["available"].([]interface{})
+	if len(avail) != len(configTemplates) {
+		t.Errorf("expected %d available templates, got %v", len(configTemplates), avail)
+	}
+	// файл не должен быть создан при ошибке
+	if _, err := os.Stat(filepath.Join(dir, "x.conf")); !os.IsNotExist(err) {
+		t.Error("file should not be created when template is unknown")
+	}
+}
+
+// TestCreateConfigFileHandlerTemplateCaseInsensitive — "Basic-DHCP" и
+// "basic-dhcp" дают одинаковый результат (нормализация через ToLower).
+func TestCreateConfigFileHandlerTemplateCaseInsensitive(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/config/file", strings.NewReader(`{"name":"x.conf","template":"Basic-DHCP"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	createConfigFileHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for uppercase template, got %d: %s", w.Code, w.Body.String())
+	}
+	content, _ := os.ReadFile(filepath.Join(dir, "x.conf"))
+	if string(content) != configTemplates["basic-dhcp"] {
+		t.Errorf("case-insensitive lookup failed:\n%s", string(content))
+	}
+}
+
+// TestCreateConfigFileHandlerTemplateWhitespace — пробелы вокруг ID шаблона
+// должны молча обрезаться (защита от копипаста " basic-dhcp ").
+func TestCreateConfigFileHandlerTemplateWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/config/file", strings.NewReader(`{"name":"x.conf","template":"  forwarder  "}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	createConfigFileHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	content, _ := os.ReadFile(filepath.Join(dir, "x.conf"))
+	if string(content) != configTemplates["forwarder"] {
+		t.Errorf("whitespace trim failed:\n%s", string(content))
+	}
+}
+
+// TestCreateConfigFileHandlerExistingFileStill409 — даже при выборе шаблона
+// попытка перезаписать существующий файл остаётся 409 (поведение не изменилось).
+func TestCreateConfigFileHandlerExistingFileStill409(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	existing := filepath.Join(dir, "x.conf")
+	if err := os.WriteFile(existing, []byte("old\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/config/file", strings.NewReader(`{"name":"x.conf","template":"basic-dhcp"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	createConfigFileHandler(c)
+	if w.Code != 409 {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	// Содержимое существующего файла не должно измениться.
+	content, _ := os.ReadFile(existing)
+	if string(content) != "old\n" {
+		t.Errorf("existing file was overwritten:\n%s", string(content))
+	}
+}
+
+// TestListConfigTemplatesHandler — каталог отдаёт все ID из configTemplates,
+// у каждого есть непустой preview.
+func TestListConfigTemplatesHandler(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/config/templates", nil)
+	c.Set("user", "admin")
+	listConfigTemplatesHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp struct {
+		Templates []struct {
+			ID      string `json:"id"`
+			Preview string `json:"preview"`
+		} `json:"templates"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Templates) != len(configTemplates) {
+		t.Errorf("expected %d templates, got %d", len(configTemplates), len(resp.Templates))
+	}
+	seen := make(map[string]bool)
+	for _, tpl := range resp.Templates {
+		seen[tpl.ID] = true
+		if tpl.Preview == "" {
+			t.Errorf("template %q has empty preview", tpl.ID)
+		}
+		if !strings.HasPrefix(tpl.Preview, "# === Managed by Intermasq ===") {
+			t.Errorf("template %q preview missing managed header", tpl.ID)
+		}
+	}
+	for id := range configTemplates {
+		if !seen[id] {
+			t.Errorf("template %q missing from response", id)
+		}
+	}
+}
+
+// TestKnownConfigTemplateIDsSorted — контракт: список отсортирован, чтобы
+// UI и проверочные тесты могли полагаться на стабильный порядок.
+func TestKnownConfigTemplateIDsSorted(t *testing.T) {
+	ids := knownConfigTemplateIDs()
+	if !sort.StringsAreSorted(ids) {
+		t.Errorf("knownConfigTemplateIDs() must be sorted: %v", ids)
+	}
+	if len(ids) != len(configTemplates) {
+		t.Errorf("len mismatch: ids=%d map=%d", len(ids), len(configTemplates))
+	}
+}
+
+// TestKnownConfigTemplateIDsContainsEmpty — "empty" обязан всегда быть в
+// списке: это дефолтный template при отсутствии поля в запросе.
+func TestKnownConfigTemplateIDsContainsEmpty(t *testing.T) {
+	if _, ok := configTemplates["empty"]; !ok {
+		t.Fatal(`"empty" template must always exist in configTemplates`)
+	}
+	ids := knownConfigTemplateIDs()
+	found := false
+	for _, id := range ids {
+		if id == "empty" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal(`"empty" missing from knownConfigTemplateIDs()`)
+	}
+}
+
+// TestConfigTemplatesAllStartWithManagedHeader — каждый шаблон должен
+// начинаться с маркера "# === Managed by Intermasq ===", чтобы было видно
+// при чтении raw-файла, что он был создан через панель.
+func TestConfigTemplatesAllStartWithManagedHeader(t *testing.T) {
+	const marker = "# === Managed by Intermasq ==="
+	for id, content := range configTemplates {
+		if !strings.HasPrefix(content, marker) {
+			t.Errorf("template %q must start with %q", id, marker)
+		}
+	}
+}
+
+// TestConfigTemplatesValidForDnsmasqSyntax — каждый шаблон должен проходить
+// `dnsmasq --test`, чтобы последующий PUT /api/config не падал на первой
+// операции. Если dnsmasq не установлен — тест пропускается (CI без dnsmasq).
+func TestConfigTemplatesValidForDnsmasqSyntax(t *testing.T) {
+	if dnsmasqBin() == "" {
+		t.Skip("dnsmasq binary not installed — skipping syntax validation")
+	}
+	for id, content := range configTemplates {
+		t.Run(id, func(t *testing.T) {
+			tmp := filepath.Join(t.TempDir(), "x.conf")
+			if err := os.WriteFile(tmp, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+tmp)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Errorf("template %q failed dnsmasq --test:\n%s\noutput:\n%s", id, err, out)
+			}
+		})
+	}
+}
+
+// TestCreateConfigFileHandlerTemplateAuditWritten — при создании файла с
+// шаблоном в audit-лог попадает запись с полем template = выбранный ID.
+// Проверяет, что поле не теряется по пути от request до audit entry.
+func TestCreateConfigFileHandlerTemplateAuditWritten(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	auditDir := t.TempDir()
+	auditPath := filepath.Join(auditDir, "audit.log")
+	*AuditLogPath = auditPath
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/config/file", strings.NewReader(`{"name":"x.conf","template":"forwarder"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	createConfigFileHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatalf("audit log not readable: %v", err)
+	}
+	var entry AuditEntry
+	if err := json.Unmarshal(data[:len(data)-1], &entry); err != nil { // последняя '\n'
+		t.Fatalf("audit entry parse error: %v", err)
+	}
+	if entry.Template != "forwarder" {
+		t.Errorf("expected template=forwarder in audit, got %q", entry.Template)
+	}
+	if entry.Action != "config_create_file" {
+		t.Errorf("expected action=config_create_file, got %q", entry.Action)
+	}
+	if entry.User != "admin" {
+		t.Errorf("expected user=admin, got %q", entry.User)
 	}
 }

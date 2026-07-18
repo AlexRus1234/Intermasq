@@ -254,6 +254,7 @@ func main() {
 			auth.GET("/config", getConfigHandler)
 			auth.PUT("/config", updateConfigHandler)
 			auth.POST("/config/file", createConfigFileHandler)
+			auth.GET("/config/templates", listConfigTemplatesHandler)
 			auth.GET("/aliases", getAliasesHandler)
 			auth.POST("/aliases", addAliasHandler)
 			auth.POST("/aliases/bulk", bulkAddAliasesHandler)

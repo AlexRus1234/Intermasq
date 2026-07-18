@@ -20,6 +20,7 @@ type AuditEntry struct {
 	Ip        string `json:"ip"`
 	File      string `json:"file"`
 	Version   string `json:"version,omitempty"`
+	Template  string `json:"template,omitempty"`
 }
 
 func writeAudit(entry AuditEntry) {

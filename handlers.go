@@ -1019,6 +1019,15 @@ func createConfigFileHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid_filename"})
 		return
 	}
+	template := strings.ToLower(strings.TrimSpace(req.Template))
+	if template == "" {
+		template = "empty"
+	}
+	content, ok := configTemplates[template]
+	if !ok {
+		c.JSON(400, gin.H{"error": "unknown_template", "template": template, "available": knownConfigTemplateIDs()})
+		return
+	}
 	fullPath := filepath.Join(*ConfigDir, name)
 	if !isSafePath(fullPath) {
 		c.JSON(403, gin.H{"error": "access_denied"})
@@ -1032,19 +1041,35 @@ func createConfigFileHandler(c *gin.Context) {
 		c.JSON(409, gin.H{"error": "file_exists"})
 		return
 	}
-	if err := os.WriteFile(fullPath, []byte("# === Managed by Intermasq ===\n"), 0644); err != nil {
+	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
 		c.JSON(500, gin.H{"error": "write_error"})
 		return
 	}
 
 	writeAudit(AuditEntry{
-		User:   getUser(c),
-		Action: "config_create_file",
-		File:   fullPath,
+		User:     getUser(c),
+		Action:   "config_create_file",
+		File:     fullPath,
+		Template: template,
 	})
 
 	snap := readConfigSnapshot()
 	c.JSON(200, snap)
+}
+
+// listConfigTemplatesHandler отдаёт каталог известных шаблонов для UI:
+// список ID + preview-содержимое, чтобы показать админу что именно попадёт
+// в файл при выборе шаблона.
+func listConfigTemplatesHandler(c *gin.Context) {
+	ids := knownConfigTemplateIDs()
+	out := make([]gin.H, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, gin.H{
+			"id":      id,
+			"preview": configTemplates[id],
+		})
+	}
+	c.JSON(200, gin.H{"templates": out})
 }
 
 // resolveAliasesTargetFile returns the absolute path to the aliases target

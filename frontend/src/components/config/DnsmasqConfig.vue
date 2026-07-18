@@ -9,7 +9,7 @@
           </a>
         </li>
         <li class="nav-item">
-          <a class="nav-link text-success" href="#" @click.prevent="showNewFile = true">+ {{ $t('config.newFile') }}</a>
+          <a class="nav-link text-success" href="#" @click.prevent="openNewFileForm">+ {{ $t('config.newFile') }}</a>
         </li>
       </ul>
       <div class="d-flex gap-2">
@@ -26,10 +26,17 @@
     </div>
 
     <div v-if="showNewFile" class="card mb-3 border-success">
-      <div class="card-body d-flex gap-2 align-items-center">
-        <input v-model="newFileName" class="form-control" placeholder="filename.conf">
-        <button @click="createFile" class="btn btn-success">＋</button>
-        <button @click="showNewFile = false" class="btn btn-outline-secondary">✕</button>
+      <div class="card-body">
+        <div class="d-flex gap-2 align-items-center mb-2">
+          <input v-model="newFileName" class="form-control" placeholder="filename.conf">
+          <select v-model="newFileTemplate" class="form-select" style="max-width: 220px;" :title="$t('config.template')">
+            <option value="empty">∅ {{ $t('config.templateEmpty') }}</option>
+            <option v-for="tpl in nonEmptyTemplates" :key="tpl.id" :value="tpl.id">{{ tpl.id }}</option>
+          </select>
+          <button @click="createFile" class="btn btn-success">＋</button>
+          <button @click="showNewFile = false" class="btn btn-outline-secondary">✕</button>
+        </div>
+        <pre v-if="selectedTemplatePreview" class="form-text bg-body-secondary border rounded p-2 mb-0" style="max-height: 200px; overflow:auto; font-size: 0.8em;">{{ selectedTemplatePreview }}</pre>
       </div>
     </div>
 
@@ -159,6 +166,7 @@ const localDirectives = ref([])
 let uidCounter = 0
 const showNewFile = ref(false)
 const newFileName = ref('')
+const newFileTemplate = ref('empty')
 const addingKey = ref(false)
 const addingGroup = ref('')
 const addingKeyName = ref('')
@@ -168,6 +176,13 @@ const showHistory = ref(false)
 const files = computed(() => store.configSnapshot?.files || [])
 
 const currentFile = computed(() => files.value.find(f => f.path === selectedFile.value))
+
+const nonEmptyTemplates = computed(() => (store.configTemplates || []).filter(t => t.id !== 'empty'))
+
+const selectedTemplatePreview = computed(() => {
+  const t = (store.configTemplates || []).find(t => t.id === newFileTemplate.value)
+  return t?.preview || ''
+})
 
 function selectFile(path) {
   selectedFile.value = path
@@ -271,12 +286,25 @@ async function createFile() {
   let name = newFileName.value.trim()
   if (!name) return
   if (!name.endsWith('.conf')) name += '.conf'
-  const ok = await actions.createConfigFile(name)
+  const ok = await actions.createConfigFile(name, newFileTemplate.value)
   if (ok) {
     showNewFile.value = false
     newFileName.value = ''
+    newFileTemplate.value = 'empty'
     const f = files.value.find(f => f.name === name)
     if (f) selectFile(f.path)
+  }
+}
+
+// Ленивая подгрузка каталога шаблонов при первом открытии формы создания
+// файла. Если бекенд недоступен — fallback на ["empty"] в store.loadConfigTemplates.
+let templatesLoaded = false
+function openNewFileForm() {
+  showNewFile.value = true
+  newFileTemplate.value = 'empty'
+  if (!templatesLoaded) {
+    templatesLoaded = true
+    actions.loadConfigTemplates()
   }
 }
 </script>
