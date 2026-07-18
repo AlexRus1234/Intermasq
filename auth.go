@@ -122,13 +122,36 @@ func loadUsers() {
 		os.MkdirAll(filepath.Dir(*DBPath), 0700)
 		return
 	}
-	data, _ := os.ReadFile(*DBPath)
-	json.Unmarshal(data, &users)
+	data, err := os.ReadFile(*DBPath)
+	if err != nil {
+		// Не区别 «нет прав» от «файл пропал между Stat и Read» — любое
+		// повреждение базы пользователей должно блокировать старт, иначе
+		// authMiddleware увидит пустую map и любой POST /api/setup создаст
+		// нового admin'а (см. statusHandler → setup_required).
+		fmt.Fprintf(os.Stderr, "[FATAL] Cannot read user database %s: %v\n", *DBPath, err)
+		os.Exit(1)
+	}
+	if err := json.Unmarshal(data, &users); err != nil {
+		// Повреждённый JSON — та же логика: лучше упасть, чем тихо
+		// обнулить базу и открыть /api/setup.
+		fmt.Fprintf(os.Stderr, "[FATAL] Cannot parse user database %s: %v\n", *DBPath, err)
+		os.Exit(1)
+	}
 }
 
+// saveUsers writes the user database atomically: tmp file in the same
+// directory + rename.Crash mid-write leaves the previous file intact.
 func saveUsers() error {
 	data, _ := json.MarshalIndent(users, "", "  ")
-	return os.WriteFile(*DBPath, data, 0600)
+	dir := filepath.Dir(*DBPath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	tmp := *DBPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, *DBPath)
 }
 
 func makeToken(user string) string {

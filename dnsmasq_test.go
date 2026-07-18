@@ -1925,3 +1925,521 @@ func TestCreateConfigFileHandlerTemplateAuditWritten(t *testing.T) {
 		t.Errorf("expected user=admin, got %q", entry.User)
 	}
 }
+
+// ========== Bug 1+2: loadUsers / loadTemplates fatal on read errors ==========
+
+// TestLoadUsersFailsOnCorruptJSON — повреждённый JSON в users.json должен
+// вызвать os.Exit, а не оставить users пустым (что открывает /api/setup).
+// Проверяем через subprocess, чтобы перехватить exit code.
+func TestLoadUsersFailsOnCorruptJSON(t *testing.T) {
+	if os.Getenv("INTERMASQ_TEST_FATAL") == "1" {
+		// Внутренний прогоhн: corrupt users.json, ждём fatal.
+		dir := t.TempDir()
+		*DBPath = filepath.Join(dir, "users.json")
+		os.WriteFile(*DBPath, []byte("{not json"), 0600)
+		loadUsers()
+		// loadUsers должна была вызвать os.Exit — эта строка недостижима.
+		t.Fatal("loadUsers should have called os.Exit on corrupt JSON")
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=TestLoadUsersFailsOnCorruptJSON")
+	cmd.Env = append(os.Environ(), "INTERMASQ_TEST_FATAL=1", "INTERMASQ_SECRET=test-secret-32-bytes-long-for-ci-0001")
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("expected non-zero exit code on corrupt users.json")
+	}
+}
+
+// TestLoadTemplatesFailsOnCorruptJSON — аналогично для templates.json.
+func TestLoadTemplatesFailsOnCorruptJSON(t *testing.T) {
+	if os.Getenv("INTERMASQ_TEST_FATAL") == "1" {
+		dir := t.TempDir()
+		*TemplatesPath = filepath.Join(dir, "templates.json")
+		os.WriteFile(*TemplatesPath, []byte("definitely not json"), 0600)
+		loadTemplates()
+		t.Fatal("loadTemplates should have called os.Exit on corrupt JSON")
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=TestLoadTemplatesFailsOnCorruptJSON")
+	cmd.Env = append(os.Environ(), "INTERMASQ_TEST_FATAL=1", "INTERMASQ_SECRET=test-secret-32-bytes-long-for-ci-0001")
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("expected non-zero exit code on corrupt templates.json")
+	}
+}
+
+// TestLoadUsersMissingFileIsOK — отсутствие файла (первый запуск) остаётся
+// нормальным сценарием: setup_required=true, /api/setup доступен.
+func TestLoadUsersMissingFileIsOK(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "absent.json")
+	users = make(map[string]string)
+	loadUsers()
+	if len(users) != 0 {
+		t.Errorf("expected empty users map on missing file, got %d", len(users))
+	}
+}
+
+// TestSaveUsersAtomic — после сохранения users.json файл существует и
+// парсится; tmp-файла после rename не остаётся.
+func TestSaveUsersAtomic(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	users = map[string]string{"admin": "$2a$10$hash", "bob": "$2a$10$another"}
+	if err := saveUsers(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(*DBPath); err != nil {
+		t.Fatalf("users.json not written: %v", err)
+	}
+	if _, err := os.Stat(*DBPath + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf(".tmp file should not remain after atomic save")
+	}
+	data, _ := os.ReadFile(*DBPath)
+	var got map[string]string
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("users.json not valid JSON after atomic save: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("expected 2 users, got %d", len(got))
+	}
+}
+
+// TestSaveUsersAtomicPreservesExistingOnFailure — подтвердить наличие
+// tmp+rename: если записать в read-only dir, saveUsers вернёт ошибку, но
+// исходный файл не должен быть повреждён.
+func TestSaveUsersAtomicPreservesExistingOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	original := []byte(`{"admin":"$2a$10$orig"}`)
+	os.WriteFile(*DBPath, original, 0600)
+
+	// Делаем родительский каталог read-only, чтобы rename провалился.
+	// (WriteFile в read-only dir тоже упадёт — это и есть «crash mid-write».)
+	os.Chmod(dir, 0500)
+	defer os.Chmod(dir, 0755) // восстановим для t.TempDir cleanup
+
+	users = map[string]string{"admin": "$2a$10$new"}
+	err := saveUsers()
+	if err == nil {
+		t.Skip("saveUsers succeeded despite read-only dir (root or permissive FS)")
+	}
+	// Исходный файл должен остаться нетронутым.
+	data, _ := os.ReadFile(*DBPath)
+	if string(data) != string(original) {
+		t.Errorf("original users.json was modified on failed save:\nwant: %s\ngot:  %s", original, data)
+	}
+}
+
+// ========== Feature 3: optional IP/hostname in dhcp-host ==========
+
+func TestValidateHostFieldsAllCombinations(t *testing.T) {
+	cases := []struct {
+		name     string
+		mac      string
+		ip       string
+		hostname string
+		want     bool
+	}{
+		{"full valid", "aa:bb:cc:dd:ee:ff", "192.168.1.10", "nas", true},
+		{"mac only", "aa:bb:cc:dd:ee:ff", "", "", true},
+		{"mac + hostname", "aa:bb:cc:dd:ee:ff", "", "phone", true},
+		{"mac + ip", "aa:bb:cc:dd:ee:ff", "192.168.1.10", "", true},
+		{"mac + bad ip", "aa:bb:cc:dd:ee:ff", "not-an-ip", "", false},
+		{"mac + bad hostname", "aa:bb:cc:dd:ee:ff", "", "with space", false},
+		{"bad mac", "not-a-mac", "1.2.3.4", "host", false},
+		{"empty mac", "", "1.2.3.4", "host", false},
+		{"empty all", "", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := validateHostFields(tc.mac, tc.ip, tc.hostname)
+			if got != tc.want {
+				t.Errorf("validateHostFields(%q,%q,%q) = %v, want %v", tc.mac, tc.ip, tc.hostname, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAddHostHandlerMacOnly — POST /api/hosts только с MAC создаёт строку
+// dhcp-host=<mac> (infinite lease без имени и IP).
+func TestAddHostHandlerMacOnly(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(file, []byte(""), 0644)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := fmt.Sprintf(`{"mac":"aa:bb:cc:dd:ee:ff","file":%q}`, file)
+	c.Request = httptest.NewRequest("POST", "/api/hosts", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	addHostHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for MAC-only host, got %d: %s", w.Code, w.Body.String())
+	}
+	content, _ := os.ReadFile(file)
+	if !strings.Contains(string(content), "dhcp-host=aa:bb:cc:dd:ee:ff\n") {
+		t.Errorf("MAC-only line not written correctly:\n%s", content)
+	}
+	if strings.Contains(string(content), ",") {
+		t.Errorf("MAC-only line should have no commas:\n%s", content)
+	}
+}
+
+// TestAddHostHandlerMacPlusHostname — DHCP-выданный IP + DNS-имя.
+func TestAddHostHandlerMacPlusHostname(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(file, []byte(""), 0644)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := fmt.Sprintf(`{"mac":"aa:bb:cc:dd:ee:ff","hostname":"phone","file":%q}`, file)
+	c.Request = httptest.NewRequest("POST", "/api/hosts", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	addHostHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for MAC+hostname host, got %d: %s", w.Code, w.Body.String())
+	}
+	content, _ := os.ReadFile(file)
+	if !strings.Contains(string(content), "dhcp-host=aa:bb:cc:dd:ee:ff,phone\n") {
+		t.Errorf("MAC+hostname line not written correctly:\n%s", content)
+	}
+}
+
+// TestAddHostHandlerMacPlusIP — статический IP без DNS-имени.
+func TestAddHostHandlerMacPlusIP(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(file, []byte(""), 0644)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := fmt.Sprintf(`{"mac":"aa:bb:cc:dd:ee:ff","ip":"192.168.1.10","file":%q}`, file)
+	c.Request = httptest.NewRequest("POST", "/api/hosts", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	addHostHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for MAC+IP host, got %d: %s", w.Code, w.Body.String())
+	}
+	content, _ := os.ReadFile(file)
+	if !strings.Contains(string(content), "dhcp-host=aa:bb:cc:dd:ee:ff,192.168.1.10\n") {
+		t.Errorf("MAC+IP line not written correctly:\n%s", content)
+	}
+}
+
+// TestAddHostHandlerRejectsBadIP — опциональность не означает «пропустить
+// мусор»: невалидный IP всё ещё отвергается.
+func TestAddHostHandlerRejectsBadIP(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(file, []byte(""), 0644)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := fmt.Sprintf(`{"mac":"aa:bb:cc:dd:ee:ff","ip":"not-an-ip","file":%q}`, file)
+	c.Request = httptest.NewRequest("POST", "/api/hosts", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	addHostHandler(c)
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for invalid IP, got %d", w.Code)
+	}
+}
+
+// TestAddHostHandlerIPDuplicateStillChecked — если IP указан, duplicate check
+// работает как раньше.
+func TestAddHostHandlerIPDuplicateStillChecked(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(file, []byte("dhcp-host=11:22:33:44:55:66,existing,192.168.1.10\n"), 0644)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := fmt.Sprintf(`{"mac":"aa:bb:cc:dd:ee:ff","ip":"192.168.1.10","hostname":"new","file":%q}`, file)
+	c.Request = httptest.NewRequest("POST", "/api/hosts", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	addHostHandler(c)
+	if w.Code != 409 {
+		t.Fatalf("expected 409 for IP conflict, got %d", w.Code)
+	}
+}
+
+// TestParseCSVHostsAcceptsMACOnly — CSV import тоже ослаблен: строки без IP
+// и/или без hostname принимаются.
+func TestParseCSVHostsAcceptsMACOnly(t *testing.T) {
+	csv := "mac,ip,hostname\naa:bb:cc:dd:ee:ff,,\n"
+	hosts, err := parseCSVHosts(strings.NewReader(csv), "/tmp/x.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host (MAC only), got %d", len(hosts))
+	}
+	if hosts[0].Mac != "aa:bb:cc:dd:ee:ff" || hosts[0].Ip != "" || hosts[0].Hostname != "" {
+		t.Errorf("unexpected host: %+v", hosts[0])
+	}
+}
+
+func TestParseCSVHostsMACPlusHostname(t *testing.T) {
+	csv := "mac,ip,hostname\naa:bb:cc:dd:ee:ff,,phone\n"
+	hosts, err := parseCSVHosts(strings.NewReader(csv), "/tmp/x.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	}
+	if hosts[0].Hostname != "phone" || hosts[0].Ip != "" {
+		t.Errorf("unexpected host: %+v", hosts[0])
+	}
+}
+
+// ========== Feature 4+5: PTR and TXT aliases ==========
+
+func TestParseAliasLinePTR(t *testing.T) {
+	e, ok := parseAliasLine("ptr-record=10.1.168.192.in-addr.arpa,nas.lan", "/etc/dnsmasq.d/x.conf", false)
+	if !ok {
+		t.Fatal("expected parse success for PTR")
+	}
+	if e.Type != "PTR" || e.Domain != "10.1.168.192.in-addr.arpa" || e.Target != "nas.lan" {
+		t.Errorf("unexpected PTR entry: %+v", e)
+	}
+}
+
+func TestParseAliasLineTXT(t *testing.T) {
+	e, ok := parseAliasLine("txt-record=wiki.lan,v=spf1 -all", "/etc/dnsmasq.d/x.conf", false)
+	if !ok {
+		t.Fatal("expected parse success for TXT")
+	}
+	if e.Type != "TXT" || e.Domain != "wiki.lan" || e.Target != "v=spf1 -all" {
+		t.Errorf("unexpected TXT entry: %+v", e)
+	}
+}
+
+// TestParseAliasLineTXTMultiComma — TXT-значение может содержать запятые
+// (например, DKIM с k=rsa; p=…), сплит должен быть только по первой.
+func TestParseAliasLineTXTMultiComma(t *testing.T) {
+	e, ok := parseAliasLine("txt-record=dkim._domainkey,k=rsa; p=MIGfMA0,a=test", "/etc/dnsmasq.d/x.conf", false)
+	if !ok {
+		t.Fatal("expected parse success for TXT with multiple commas")
+	}
+	if e.Target != "k=rsa; p=MIGfMA0,a=test" {
+		t.Errorf("TXT value split on wrong comma: %q", e.Target)
+	}
+}
+
+func TestAliasToLinePTR(t *testing.T) {
+	got := aliasToLine(DnsAliasEntry{Type: "PTR", Domain: "10.1.168.192.in-addr.arpa", Target: "nas.lan"})
+	if got != "ptr-record=10.1.168.192.in-addr.arpa,nas.lan" {
+		t.Errorf("PTR serialization wrong: %q", got)
+	}
+}
+
+func TestAliasToLineTXT(t *testing.T) {
+	got := aliasToLine(DnsAliasEntry{Type: "TXT", Domain: "wiki.lan", Target: "v=spf1 -all"})
+	if got != "txt-record=wiki.lan,v=spf1 -all" {
+		t.Errorf("TXT serialization wrong: %q", got)
+	}
+}
+
+func TestAliasRoundTripPTR(t *testing.T) {
+	in := DnsAliasEntry{Type: "PTR", Domain: "5.0.168.192.in-addr.arpa", Target: "host.lan"}
+	out, ok := parseAliasLine(aliasToLine(in), "", false)
+	if !ok {
+		t.Fatal("PTR round-trip failed")
+	}
+	out.File = in.File
+	if out != in {
+		t.Errorf("PTR round-trip mismatch:\n in=%+v\nout=%+v", in, out)
+	}
+}
+
+func TestAliasRoundTripTXT(t *testing.T) {
+	in := DnsAliasEntry{Type: "TXT", Domain: "host.lan", Target: "some text value"}
+	out, ok := parseAliasLine(aliasToLine(in), "", false)
+	if !ok {
+		t.Fatal("TXT round-trip failed")
+	}
+	out.File = in.File
+	if out != in {
+		t.Errorf("TXT round-trip mismatch:\n in=%+v\nout=%+v", in, out)
+	}
+}
+
+func TestIsAliasDirectiveRecognizesNewTypes(t *testing.T) {
+	if !isAliasDirective("ptr-record=foo,bar") {
+		t.Error("ptr-record= not recognized as alias directive")
+	}
+	if !isAliasDirective("txt-record=foo,bar") {
+		t.Error("txt-record= not recognized as alias directive")
+	}
+}
+
+func TestReadAllAliasesIncludesPTRAndTXT(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	content := []byte("address=/nas.lan/192.168.1.10\n" +
+		"cname=wiki,nas.lan\n" +
+		"ptr-record=10.1.168.192.in-addr.arpa,nas.lan\n" +
+		"txt-record=nas.lan,v=spf1 -all\n" +
+		"server=8.8.8.8\n")
+	if err := os.WriteFile(filepath.Join(dir, "dns.conf"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	aliases := readAllAliases()
+	if len(aliases) != 4 {
+		t.Fatalf("expected 4 aliases (A, CNAME, PTR, TXT), got %d: %+v", len(aliases), aliases)
+	}
+	types := map[string]bool{}
+	for _, a := range aliases {
+		types[a.Type] = true
+	}
+	if !types["A"] || !types["CNAME"] || !types["PTR"] || !types["TXT"] {
+		t.Errorf("missing types in readAllAliases result: %+v", types)
+	}
+}
+
+func TestValidateAliasEntryPTRAndTXT(t *testing.T) {
+	cases := []struct {
+		name  string
+		entry DnsAliasEntry
+		want  bool
+	}{
+		{"valid PTR", DnsAliasEntry{Type: "PTR", Domain: "10.in-addr.arpa", Target: "nas.lan"}, true},
+		{"valid TXT", DnsAliasEntry{Type: "TXT", Domain: "nas.lan", Target: "v=spf1 -all"}, true},
+		{"TXT empty target", DnsAliasEntry{Type: "TXT", Domain: "nas.lan", Target: ""}, false},
+		{"TXT with newline", DnsAliasEntry{Type: "TXT", Domain: "nas.lan", Target: "a\nb"}, false},
+		{"unknown type", DnsAliasEntry{Type: "MX", Domain: "x", Target: "y"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := validateAliasEntry(tc.entry); got != tc.want {
+				t.Errorf("validateAliasEntry(%+v) = %v, want %v", tc.entry, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRemoveAliasLinePTR(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dns.conf")
+	content := []byte("ptr-record=10.1.168.192.in-addr.arpa,nas.lan\naddress=/other/10.0.0.1\n")
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := removeAliasLine(path, "PTR", "10.1.168.192.in-addr.arpa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !removed {
+		t.Fatal("expected PTR line to be removed")
+	}
+	out, _ := os.ReadFile(path)
+	if strings.Contains(string(out), "ptr-record=") {
+		t.Errorf("PTR not removed:\n%s", out)
+	}
+	if !strings.Contains(string(out), "address=/other/10.0.0.1") {
+		t.Errorf("A record should be preserved:\n%s", out)
+	}
+}
+
+func TestRemoveAliasLineTXT(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dns.conf")
+	content := []byte("txt-record=nas.lan,v=spf1 -all\ncname=wiki,nas.lan\n")
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := removeAliasLine(path, "TXT", "nas.lan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !removed {
+		t.Fatal("expected TXT line to be removed")
+	}
+	out, _ := os.ReadFile(path)
+	if strings.Contains(string(out), "txt-record=") {
+		t.Errorf("TXT not removed:\n%s", out)
+	}
+	if !strings.Contains(string(out), "cname=wiki,nas.lan") {
+		t.Errorf("CNAME should be preserved:\n%s", out)
+	}
+}
+
+// TestAddAliasHandlerPTR — end-to-end: POST /api/aliases с type=PTR
+// создаёт ptr-record= строку в файле.
+func TestAddAliasHandlerPTR(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "dns.conf")
+	os.WriteFile(file, []byte(""), 0644)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := fmt.Sprintf(`{"type":"PTR","domain":"10.1.168.192.in-addr.arpa","target":"nas.lan","file":%q}`, file)
+	c.Request = httptest.NewRequest("POST", "/api/aliases", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	addAliasHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for PTR alias, got %d: %s", w.Code, w.Body.String())
+	}
+	content, _ := os.ReadFile(file)
+	if !strings.Contains(string(content), "ptr-record=10.1.168.192.in-addr.arpa,nas.lan") {
+		t.Errorf("PTR line not written:\n%s", content)
+	}
+}
+
+// TestAddAliasHandlerTXT — end-to-end: POST /api/aliases с type=TXT
+// создаёт txt-record= строку.
+func TestAddAliasHandlerTXT(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "dns.conf")
+	os.WriteFile(file, []byte(""), 0644)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := fmt.Sprintf(`{"type":"TXT","domain":"nas.lan","target":"v=spf1 -all","file":%q}`, file)
+	c.Request = httptest.NewRequest("POST", "/api/aliases", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	addAliasHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for TXT alias, got %d: %s", w.Code, w.Body.String())
+	}
+	content, _ := os.ReadFile(file)
+	if !strings.Contains(string(content), "txt-record=nas.lan,v=spf1 -all") {
+		t.Errorf("TXT line not written:\n%s", content)
+	}
+}
+
+func TestParseCSVAliasesIncludesPTRAndTXT(t *testing.T) {
+	csv := "type,domain,target\n" +
+		"A,nas.lan,192.168.1.10\n" +
+		"PTR,10.in-addr.arpa,nas.lan\n" +
+		"TXT,nas.lan,v=spf1 -all\n"
+	aliases, err := parseCSVAliases(strings.NewReader(csv), "/tmp/x.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(aliases) != 3 {
+		t.Fatalf("expected 3 aliases, got %d: %+v", len(aliases), aliases)
+	}
+	if aliases[1].Type != "PTR" {
+		t.Errorf("second row should be PTR, got %s", aliases[1].Type)
+	}
+	if aliases[2].Type != "TXT" {
+		t.Errorf("third row should be TXT, got %s", aliases[2].Type)
+	}
+}

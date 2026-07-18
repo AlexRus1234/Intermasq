@@ -52,7 +52,7 @@
     "filePlaceholder": "Файл (/etc/...)",
     "save": "Сохранить",
     "add": "Добавить",
-    "bulkPlaceholder": "Вставьте текст (MAC IP Hostname) через пробел или Tab. Каждое устройство с новой строки.",
+    "bulkPlaceholder": "Вставьте текст (MAC [IP] [Hostname]) через пробел. Каждое устройство с новой строки. IP и hostname опциональны.",
     "parsed": "Распознано:",
     "devices": "устройств",
     "destFile": "Файл назначения",
@@ -75,7 +75,9 @@
     "tagsPlaceholder": "set:iot,tag:guest",
     "tagsTitle": "DHCP-теги через запятую",
     "tagsHint": "теги позволяют dhcp-option=tag:... нацеливаться на этот хост",
-    "tagsCol": "Теги"
+    "tagsCol": "Теги",
+    "ipOptional": "IP (опц.)",
+    "hostnameOptional": "Имя (опц.)"
   },
   "leases": {
     "title": "Активные устройства в сети (DHCP Leases)",
@@ -260,7 +262,7 @@
     "filePlaceholder": "Файл (/etc/...)",
     "save": "Сохранить",
     "add": "Добавить",
-    "bulkPlaceholder": "Вставьте записи. Поддерживаемые форматы:\nA nas.lan 192.168.1.10\nCNAME wiki nas.lan\naddress=/nas.lan/192.168.1.10\ncname=wiki,nas.lan\nОдна запись на строку.",
+    "bulkPlaceholder": "Вставьте записи. Поддерживаемые форматы:\nA nas.lan 192.168.1.10\nCNAME wiki nas.lan\nPTR 10.in-addr.arpa nas.lan\nTXT nas.lan v=spf1 -all\naddress=/nas.lan/192.168.1.10\ncname=wiki,nas.lan\nptr-record=10.in-addr.arpa,nas.lan\ntxt-record=nas.lan,v=spf1 -all\nОдна запись на строку.",
     "parsed": "Распознано:",
     "aliases": "записей",
     "destFile": "Файл назначения",
@@ -280,6 +282,7 @@
     "empty": "Список DNS-записей пуст",
     "domainPlaceholder": "nas.lan",
     "targetIpPlaceholder": "192.168.1.10",
+    "targetTxtPlaceholder": "v=spf1 -all",
     "targetDomainPlaceholder": "target.lan"
   },
   "newDevices": {

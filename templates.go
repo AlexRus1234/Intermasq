@@ -31,13 +31,30 @@ func loadTemplates() {
 		os.MkdirAll(filepath.Dir(*TemplatesPath), 0700)
 		return
 	}
-	data, _ := os.ReadFile(*TemplatesPath)
-	json.Unmarshal(data, &templates)
+	data, err := os.ReadFile(*TemplatesPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[FATAL] Cannot read templates file %s: %v\n", *TemplatesPath, err)
+		os.Exit(1)
+	}
+	if err := json.Unmarshal(data, &templates); err != nil {
+		fmt.Fprintf(os.Stderr, "[FATAL] Cannot parse templates file %s: %v\n", *TemplatesPath, err)
+		os.Exit(1)
+	}
 }
 
+// saveTemplates writes templates atomically (tmp + rename). Same rationale
+// as saveUsers: corrupted templates.json must not silently zero the map.
 func saveTemplates() error {
 	data, _ := json.MarshalIndent(templates, "", "  ")
-	return os.WriteFile(*TemplatesPath, data, 0600)
+	dir := filepath.Dir(*TemplatesPath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	tmp := *TemplatesPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, *TemplatesPath)
 }
 
 func genHostnameFromPattern(pattern string, index int) string {

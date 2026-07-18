@@ -423,7 +423,11 @@ func addHostHandler(c *gin.Context) {
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
-	if !macRegex.MatchString(req.Mac) || net.ParseIP(req.Ip) == nil || !validHostname(req.Hostname) || !isSafePath(req.File) {
+	if !isSafePath(req.File) {
+		c.JSON(400, gin.H{"error": "invalid_data"})
+		return
+	}
+	if !validateHostFields(req.Mac, req.Ip, req.Hostname) {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
 	}
@@ -433,11 +437,13 @@ func addHostHandler(c *gin.Context) {
 	}
 	req.Tags = normalizeHostTags(req.Tags)
 
-	conflicts := findHostsByIP(req.Ip, req.Mac)
-	if len(conflicts) > 0 {
-		fmt.Printf("[VALIDATION] IP duplicate detected: %d conflicts for IP %s\n", len(conflicts), req.Ip)
-		c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
-		return
+	if req.Ip != "" {
+		conflicts := findHostsByIP(req.Ip, req.Mac)
+		if len(conflicts) > 0 {
+			fmt.Printf("[VALIDATION] IP duplicate detected: %d conflicts for IP %s\n", len(conflicts), req.Ip)
+			c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
+			return
+		}
 	}
 
 	macConflicts := findHostsByMac(req.Mac)
@@ -446,7 +452,7 @@ func addHostHandler(c *gin.Context) {
 		c.JSON(409, gin.H{"error": "mac_duplicate", "conflicts": macConflicts})
 		return
 	}
-	fmt.Printf("[VALIDATION] IP %s and MAC %s are unique, proceeding\n", req.Ip, req.Mac)
+	fmt.Printf("[VALIDATION] MAC %s accepted (ip=%q hostname=%q)\n", req.Mac, req.Ip, req.Hostname)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -533,11 +539,20 @@ func bulkAddHostsHandler(c *gin.Context) {
 	}
 
 	for i, h1 := range req.Hosts {
-		if !macRegex.MatchString(h1.Mac) || net.ParseIP(h1.Ip) == nil || !validHostname(h1.Hostname) {
-			continue
+		if !macRegex.MatchString(h1.Mac) {
+			c.JSON(400, gin.H{"error": "invalid_mac", "mac": h1.Mac})
+			return
+		}
+		if h1.Ip != "" && net.ParseIP(h1.Ip) == nil {
+			c.JSON(400, gin.H{"error": "invalid_ip", "mac": h1.Mac})
+			return
+		}
+		if h1.Hostname != "" && !validHostname(h1.Hostname) {
+			c.JSON(400, gin.H{"error": "invalid_hostname", "mac": h1.Mac})
+			return
 		}
 		for j, h2 := range req.Hosts {
-			if i != j && h2.Ip == h1.Ip && strings.ToLower(h2.Mac) != strings.ToLower(h1.Mac) {
+			if i != j && h1.Ip != "" && h2.Ip == h1.Ip && strings.ToLower(h2.Mac) != strings.ToLower(h1.Mac) {
 				c.JSON(409, gin.H{"error": "ip_duplicate_bulk", "ip": h1.Ip, "mac1": h1.Mac, "mac2": h2.Mac})
 				return
 			}
@@ -545,13 +560,12 @@ func bulkAddHostsHandler(c *gin.Context) {
 	}
 
 	for _, h := range req.Hosts {
-		if !macRegex.MatchString(h.Mac) || net.ParseIP(h.Ip) == nil || !validHostname(h.Hostname) {
-			continue
-		}
-		conflicts := findHostsByIP(h.Ip, h.Mac)
-		if len(conflicts) > 0 {
-			c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
-			return
+		if h.Ip != "" {
+			conflicts := findHostsByIP(h.Ip, h.Mac)
+			if len(conflicts) > 0 {
+				c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
+				return
+			}
 		}
 		macConflicts := findHostsByMac(h.Mac)
 		if len(macConflicts) > 0 {
@@ -576,7 +590,7 @@ func bulkAddHostsHandler(c *gin.Context) {
 
 	newMacs := make(map[string]bool)
 	for _, h := range req.Hosts {
-		if macRegex.MatchString(h.Mac) && net.ParseIP(h.Ip) != nil && validHostname(h.Hostname) {
+		if validateHostFields(h.Mac, h.Ip, h.Hostname) {
 			newMacs[strings.ToLower(h.Mac)] = true
 		}
 	}
@@ -1091,16 +1105,25 @@ func resolveAliasesTargetFile(reqFile string) (string, bool) {
 }
 
 func validateAliasEntry(a DnsAliasEntry) bool {
-	if a.Type != "A" && a.Type != "CNAME" {
+	if a.Type != "A" && a.Type != "CNAME" && a.Type != "PTR" && a.Type != "TXT" {
 		return false
 	}
 	if !aliasDomainRegex.MatchString(a.Domain) {
 		return false
 	}
-	if a.Type == "A" {
+	switch a.Type {
+	case "A":
 		return net.ParseIP(a.Target) != nil
+	case "CNAME", "PTR":
+		// И alias, и target — доменные имена.
+		return aliasDomainRegex.MatchString(a.Target)
+	case "TXT":
+		// TXT-значение может быть произвольным текстом (DKIM, SPF, метки).
+		// Единственное ограничение — непустое и без новых строк (иначе
+		// serializeConfigFile даст несколько строк, ломая формат conf-файла).
+		return a.Target != "" && !strings.Contains(a.Target, "\n")
 	}
-	return aliasDomainRegex.MatchString(a.Target)
+	return false
 }
 
 func getAliasesHandler(c *gin.Context) {

@@ -801,6 +801,31 @@ func hostsToCSV(hosts []HostEntry) []byte {
 	return buf.Bytes()
 }
 
+// validateHostFields проверяет поля dhcp-host записи без требования «все
+// три обязательны». Контракт:
+//   - MAC обязателен и валиден по macRegex.
+//   - Если IP указан — должен парситься net.ParseIP.
+//   - Если hostname указан — должен удовлетворять validHostname.
+//
+// Это позволяет поддержать четыре осмысленные формы dnsmasq:
+//
+//	dhcp-host=aa:bb:cc:dd:ee:ff                      (infinite lease)
+//	dhcp-host=aa:bb:cc:dd:ee:ff,hostname             (DNS-имя, IP от DHCP)
+//	dhcp-host=aa:bb:cc:dd:ee:ff,1.2.3.4              (статический IP, без DNS)
+//	dhcp-host=aa:bb:cc:dd:ee:ff,hostname,1.2.3.4     (полная запись)
+func validateHostFields(mac, ip, hostname string) bool {
+	if !macRegex.MatchString(mac) {
+		return false
+	}
+	if ip != "" && net.ParseIP(ip) == nil {
+		return false
+	}
+	if hostname != "" && !validHostname(hostname) {
+		return false
+	}
+	return true
+}
+
 func parseCSVHosts(r io.Reader, targetFile string) ([]HostEntry, error) {
 	reader := csv.NewReader(r)
 	records, err := reader.ReadAll()
@@ -819,8 +844,7 @@ func parseCSVHosts(r io.Reader, targetFile string) ([]HostEntry, error) {
 		mac := strings.TrimSpace(row[0])
 		ip := strings.TrimSpace(row[1])
 		hostname := strings.TrimSpace(row[2])
-
-		if macRegex.MatchString(mac) && net.ParseIP(ip) != nil && validHostname(hostname) {
+		if validateHostFields(mac, ip, hostname) {
 			hosts = append(hosts, HostEntry{Mac: mac, Ip: ip, Hostname: hostname, File: targetFile})
 		}
 	}
@@ -1171,14 +1195,26 @@ func directiveGroup(key string) int {
 // result via `dnsmasq --test`. If the test fails the previous content is
 // restored from the .bak backup created just before writing.
 // aliasLinePrefixes returns true if the given trimmed line is a managed
-// DNS alias directive (address= or cname=).
+// DNS alias directive (address= / cname= / ptr-record= / txt-record=).
 func isAliasDirective(line string) bool {
-	return strings.HasPrefix(line, "address=") || strings.HasPrefix(line, "cname=")
+	return strings.HasPrefix(line, "address=") ||
+		strings.HasPrefix(line, "cname=") ||
+		strings.HasPrefix(line, "ptr-record=") ||
+		strings.HasPrefix(line, "txt-record=")
 }
 
-// parseAliasLine parses a single "address=" or "cname=" line into a
-// DnsAliasEntry. Returns ok=false if the line is malformed or unsupported
-// (e.g. address=/#/IP wildcard is out of scope).
+// parseAliasLine parses a single "address=", "cname=", "ptr-record=" or
+// "txt-record=" line into a DnsAliasEntry. Returns ok=false if the line is
+// malformed or unsupported (e.g. address=/#/IP wildcard is out of scope).
+//
+// Supported forms:
+//
+//	address=/domain/IP              → A
+//	cname=alias,target              → CNAME
+//	cname=alias,target,tag:…        → CNAME (extra fields ignored)
+//	ptr-record=name,target          → PTR
+//	txt-record=name,value           → TXT
+//	txt-record=name,"multi word"    → TXT (quotes preserved as-is)
 func parseAliasLine(line, file string, hasBak bool) (DnsAliasEntry, bool) {
 	entry := DnsAliasEntry{File: file}
 	if hasBak {
@@ -1219,16 +1255,55 @@ func parseAliasLine(line, file string, hasBak bool) (DnsAliasEntry, bool) {
 		if entry.Domain == "" || entry.Target == "" {
 			return DnsAliasEntry{}, false
 		}
-		// Skip tagged cnames (cname=alias,target,tag:...) — keep alias/target only.
+		// Skip tagged cnames (cname=alias,target,tag:…) — keep alias/target only.
+		return entry, true
+	}
+	if strings.HasPrefix(line, "ptr-record=") {
+		val := strings.TrimPrefix(line, "ptr-record=")
+		// ptr-record=<name>[,<name>…],<target> — dnsmasq допускает несколько
+		// имён reverse-зоны, но UI работает с одним. Берём первое имя + target
+		// (последний токен).
+		parts := strings.Split(val, ",")
+		if len(parts) < 2 {
+			return DnsAliasEntry{}, false
+		}
+		entry.Type = "PTR"
+		entry.Domain = strings.TrimSpace(parts[0])
+		entry.Target = strings.TrimSpace(parts[len(parts)-1])
+		if entry.Domain == "" || entry.Target == "" {
+			return DnsAliasEntry{}, false
+		}
+		return entry, true
+	}
+	if strings.HasPrefix(line, "txt-record=") {
+		val := strings.TrimPrefix(line, "txt-record=")
+		// txt-record=<name>,<value>. Value может содержать запятые и пробелы
+		// (закавыченные или нет), поэтому сплитим только по первой запятой.
+		idx := strings.Index(val, ",")
+		if idx < 0 {
+			return DnsAliasEntry{}, false
+		}
+		entry.Type = "TXT"
+		entry.Domain = strings.TrimSpace(val[:idx])
+		entry.Target = strings.TrimSpace(val[idx+1:])
+		if entry.Domain == "" || entry.Target == "" {
+			return DnsAliasEntry{}, false
+		}
 		return entry, true
 	}
 	return DnsAliasEntry{}, false
 }
 
 func aliasToLine(a DnsAliasEntry) string {
-	if a.Type == "CNAME" {
+	switch a.Type {
+	case "CNAME":
 		return fmt.Sprintf("cname=%s,%s", a.Domain, a.Target)
+	case "PTR":
+		return fmt.Sprintf("ptr-record=%s,%s", a.Domain, a.Target)
+	case "TXT":
+		return fmt.Sprintf("txt-record=%s,%s", a.Domain, a.Target)
 	}
+	// "A" и всё неизвестное — address=/domain/IP (каноническая форма A-записи).
 	return fmt.Sprintf("address=/%s/%s", a.Domain, a.Target)
 }
 
@@ -1365,18 +1440,24 @@ func parseCSVAliases(r io.Reader, targetFile string) ([]DnsAliasEntry, error) {
 		t := strings.ToUpper(strings.TrimSpace(row[0]))
 		domain := strings.TrimSpace(row[1])
 		target := strings.TrimSpace(row[2])
-		if t != "A" && t != "CNAME" {
+		if t != "A" && t != "CNAME" && t != "PTR" && t != "TXT" {
 			continue
 		}
 		if !aliasDomainRegex.MatchString(domain) {
 			continue
 		}
-		if t == "A" {
+		switch t {
+		case "A":
 			if net.ParseIP(target) == nil {
 				continue
 			}
-		} else {
+		case "CNAME", "PTR":
 			if !aliasDomainRegex.MatchString(target) {
+				continue
+			}
+		case "TXT":
+			// Любой непустой текст без новой строки допустим.
+			if target == "" || strings.Contains(target, "\n") {
 				continue
 			}
 		}

@@ -21,11 +21,13 @@
               <select v-model="form.type" class="form-control">
                   <option value="A">A</option>
                   <option value="CNAME">CNAME</option>
+                  <option value="PTR">PTR</option>
+                  <option value="TXT">TXT</option>
               </select>
           </div>
           <div class="col-md-3"><input v-model="form.domain" :placeholder="$t('dns.domainPlaceholder')" class="form-control"></div>
           <div class="col-md-3">
-              <input v-model="form.target" :placeholder="form.type === 'A' ? $t('dns.targetIpPlaceholder') : $t('dns.targetDomainPlaceholder')" class="form-control">
+              <input v-model="form.target" :placeholder="targetPlaceholder" class="form-control">
           </div>
           <div class="col-md-4">
               <div class="input-group">
@@ -37,8 +39,7 @@
           </div>
           <div class="col-12">
               <span class="text-muted small">
-                  <code v-if="form.type === 'A'">address=/{{ form.domain || 'domain' }}/{{ form.target || 'IP' }}</code>
-                  <code v-else>cname={{ form.domain || 'alias' }},{{ form.target || 'target' }}</code>
+                  <code>{{ directivePreview }}</code>
               </span>
           </div>
       </div>
@@ -93,6 +94,28 @@ const form = ref({ type: 'A', domain: '', target: '', file: '' })
 
 const isEditing = computed(() => originalType.value !== '')
 
+const targetPlaceholder = computed(() => {
+    switch (form.value.type) {
+        case 'A': return t('dns.targetIpPlaceholder')
+        case 'TXT': return t('dns.targetTxtPlaceholder')
+        case 'CNAME':
+        case 'PTR':
+        default: return t('dns.targetDomainPlaceholder')
+    }
+})
+
+const directivePreview = computed(() => {
+    const d = form.value.domain || '<domain>'
+    const v = form.value.target || '<value>'
+    switch (form.value.type) {
+        case 'A': return `address=/${d}/${v}`
+        case 'CNAME': return `cname=${d},${v}`
+        case 'PTR': return `ptr-record=${d},${v}`
+        case 'TXT': return `txt-record=${d},${v}`
+        default: return ''
+    }
+})
+
 watch(() => props.selectedFile, (newFile) => {
     if (!isEditing.value) {
         form.value.file = newFile === 'all' ? (store.aliases[0]?.file.split('|')[0] || '') : newFile
@@ -140,10 +163,15 @@ const parsedBulkAliases = computed(() => {
     return bulkText.value.split('\n').map(line => {
         const raw = line.trim()
         if (!raw) return null
-        // Support two formats:
-        //   A nas.lan 192.168.1.10
-        //   address=/nas.lan/192.168.1.10
-        //   cname=wiki,nas.lan
+        // Поддерживаемые форматы (одна строка — одна запись):
+        //   address=/nas.lan/192.168.1.10       → A
+        //   cname=wiki,nas.lan                  → CNAME
+        //   ptr-record=10.in-addr.arpa,nas.lan  → PTR
+        //   txt-record=nas.lan,v=spf1 -all      → TXT
+        //   A nas.lan 192.168.1.10              → A (свободный текст)
+        //   CNAME wiki nas.lan                  → CNAME
+        //   PTR 10.in-addr.arpa nas.lan         → PTR
+        //   TXT nas.lan some-value              → TXT
         if (raw.startsWith('address=/')) {
             const m = raw.match(/^address=\/([^/]+)\/(.+)$/)
             if (m && ipRegex.test(m[2])) return { type: 'A', domain: m[1], target: m[2] }
@@ -154,6 +182,19 @@ const parsedBulkAliases = computed(() => {
                 return { type: 'CNAME', domain: parts[0].trim(), target: parts[1].trim() }
             }
         }
+        if (raw.startsWith('ptr-record=')) {
+            const parts = raw.replace(/^ptr-record=/, '').split(',')
+            if (parts.length >= 2 && domainRegex.test(parts[0]) && domainRegex.test(parts[parts.length - 1])) {
+                return { type: 'PTR', domain: parts[0].trim(), target: parts[parts.length - 1].trim() }
+            }
+        }
+        if (raw.startsWith('txt-record=')) {
+            const rest = raw.replace(/^txt-record=/, '')
+            const idx = rest.indexOf(',')
+            if (idx > 0 && domainRegex.test(rest.slice(0, idx).trim())) {
+                return { type: 'TXT', domain: rest.slice(0, idx).trim(), target: rest.slice(idx + 1).trim() }
+            }
+        }
         const p = raw.split(/\s+/)
         if (p.length >= 3) {
             const tp = p[0].toUpperCase()
@@ -162,6 +203,13 @@ const parsedBulkAliases = computed(() => {
             }
             if ((tp === 'CNAME' || tp === 'CN') && domainRegex.test(p[1]) && domainRegex.test(p[2])) {
                 return { type: 'CNAME', domain: p[1], target: p[2] }
+            }
+            if (tp === 'PTR' && domainRegex.test(p[1]) && domainRegex.test(p[2])) {
+                return { type: 'PTR', domain: p[1], target: p[2] }
+            }
+            if (tp === 'TXT' && domainRegex.test(p[1])) {
+                // TXT-значение может содержать пробелы — склеим обратно.
+                return { type: 'TXT', domain: p[1], target: p.slice(2).join(' ') }
             }
         }
         return null

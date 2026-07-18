@@ -52,7 +52,7 @@
     "filePlaceholder": "File (/etc/...)",
     "save": "Save",
     "add": "Add",
-    "bulkPlaceholder": "Paste text (MAC IP Hostname) separated by space or Tab. One device per line.",
+    "bulkPlaceholder": "Paste text (MAC [IP] [Hostname]) separated by space. One device per line. IP and hostname are optional.",
     "parsed": "Parsed:",
     "devices": "devices",
     "destFile": "Destination file",
@@ -75,7 +75,9 @@
     "tagsPlaceholder": "set:iot,tag:guest",
     "tagsTitle": "DHCP tags, comma separated",
     "tagsHint": "tags let dhcp-option=tag:... target this host",
-    "tagsCol": "Tags"
+    "tagsCol": "Tags",
+    "ipOptional": "IP (optional)",
+    "hostnameOptional": "Hostname (optional)"
   },
   "leases": {
     "title": "Active network devices (DHCP Leases)",
@@ -259,7 +261,7 @@
     "filePlaceholder": "File (/etc/...)",
     "save": "Save",
     "add": "Add",
-    "bulkPlaceholder": "Paste entries. Supported formats:\nA nas.lan 192.168.1.10\nCNAME wiki nas.lan\naddress=/nas.lan/192.168.1.10\ncname=wiki,nas.lan\nOne entry per line.",
+    "bulkPlaceholder": "Paste entries. Supported formats:\nA nas.lan 192.168.1.10\nCNAME wiki nas.lan\nPTR 10.in-addr.arpa nas.lan\nTXT nas.lan v=spf1 -all\naddress=/nas.lan/192.168.1.10\ncname=wiki,nas.lan\nptr-record=10.in-addr.arpa,nas.lan\ntxt-record=nas.lan,v=spf1 -all\nOne entry per line.",
     "parsed": "Parsed:",
     "aliases": "entries",
     "destFile": "Destination file",
@@ -279,6 +281,7 @@
     "empty": "DNS entries list is empty",
     "domainPlaceholder": "nas.lan",
     "targetIpPlaceholder": "192.168.1.10",
+    "targetTxtPlaceholder": "v=spf1 -all",
     "targetDomainPlaceholder": "target.lan"
   },
   "newDevices": {

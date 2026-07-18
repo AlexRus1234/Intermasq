@@ -11,15 +11,15 @@
           </tr>
       </thead>
       <tbody>
-          <tr v-for="a in sortedAliases" :key="a.type + '|' + a.domain + '|' + cleanPath(a.file)">
-              <td>
-                  <span :class="['badge', a.type === 'A' ? 'bg-primary' : 'bg-info']">{{ a.type }}</span>
-              </td>
-              <td class="font-monospace">
-                  <span v-if="store.searchQuery && a.domain.toLowerCase().includes(store.searchQuery.toLowerCase())" class="bg-warning text-dark px-1 rounded">{{ a.domain }}</span>
-                  <span v-else>{{ a.domain }}</span>
-              </td>
-              <td class="fw-bold" :class="a.type === 'A' ? 'text-primary' : 'text-info'">{{ a.target }}</td>
+           <tr v-for="a in sortedAliases" :key="a.type + '|' + a.domain + '|' + cleanPath(a.file)">
+               <td>
+                   <span :class="['badge', typeBadgeClass(a.type)]">{{ a.type }}</span>
+               </td>
+               <td class="font-monospace">
+                   <span v-if="store.searchQuery && a.domain.toLowerCase().includes(store.searchQuery.toLowerCase())" class="bg-warning text-dark px-1 rounded">{{ a.domain }}</span>
+                   <span v-else>{{ a.domain }}</span>
+               </td>
+               <td class="fw-bold" :class="typeTextClass(a.type)">{{ a.target }}</td>
               <td v-if="selectedFile==='all'" class="small text-muted">{{ cleanPath(a.file).split('/').pop() }}</td>
               <td class="text-end">
                   <div class="btn-group">
@@ -97,5 +97,27 @@ const sortedAliases = computed(() => {
 async function deleteAlias(a) {
     if (!confirm(t('confirm.deleteAlias', { domain: a.domain }))) return
     await actions.deleteAlias(a.type, a.domain, cleanPath(a.file))
+}
+
+// Цвета бейджей и текста для разных типов DNS-записей. Пресет не критичный,
+// чисто для визуального разделения A/CNAME/PTR/TXT.
+function typeBadgeClass(type) {
+    switch (type) {
+        case 'A': return 'bg-primary'
+        case 'CNAME': return 'bg-info'
+        case 'PTR': return 'bg-success'
+        case 'TXT': return 'bg-secondary'
+        default: return 'bg-secondary'
+    }
+}
+
+function typeTextClass(type) {
+    switch (type) {
+        case 'A': return 'text-primary'
+        case 'CNAME': return 'text-info'
+        case 'PTR': return 'text-success'
+        case 'TXT': return 'text-secondary'
+        default: return 'text-info'
+    }
 }
 </script>

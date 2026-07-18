@@ -24,10 +24,10 @@
               </select>
               <button @click="showTemplatesModal = true" class="btn btn-sm btn-outline-secondary" type="button">⚙️</button>
           </div>
-          <div class="col-md-3"><input v-model="form.mac" :placeholder="'MAC (aa:bb...)'" class="form-control"></div>
+           <div class="col-md-3"><input v-model="form.mac" :placeholder="'MAC (aa:bb...)'" class="form-control"></div>
            <div class="col-md-3">
                <div class="input-group">
-                   <input v-model="form.ip" placeholder="IP (172.20...)" class="form-control">
+                   <input v-model="form.ip" :placeholder="$t('hosts.ipOptional', 'IP (optional)')" class="form-control">
                    <button @click="autoIP" class="btn btn-outline-secondary" :disabled="autoIPLoading" :title="$t('hosts.autoIpTooltip', 'Auto pick free IP')" type="button">
                        <span v-if="autoIPLoading">…</span><span v-else>🎲</span>
                    </button>
@@ -40,7 +40,7 @@
                    <input v-if="store.dhcpRanges.length === 0 || ipRange === ''" v-model="manualRange" :placeholder="$t('hosts.ipRangePlaceholder', 'CIDR 10.0.0.0/24')" class="form-control form-control-sm mt-1">
                </div>
            </div>
-          <div class="col-md-3"><input v-model="form.hostname" placeholder="Hostname" class="form-control"></div>
+           <div class="col-md-3"><input v-model="form.hostname" :placeholder="$t('hosts.hostnameOptional', 'Hostname (optional)')" class="form-control"></div>
           <div class="col-md-3">
               <input v-model="tagsInput" :placeholder="$t('hosts.tagsPlaceholder', 'set:iot,set:guest')" class="form-control font-monospace" :title="$t('hosts.tagsTitle', 'DHCP tags (comma separated)')">
               <div class="form-text small">{{ $t('hosts.tagsHint', 'tags let dhcp-option=tag:... target this host') }}</div>
@@ -208,6 +208,9 @@ async function saveHost() {
   const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/i;
   if (!macRegex.test(form.value.mac)) { alert(t('alert.invalidMac')); return; }
   if (!form.value.file) { alert(t('alert.fileRequired')); return; }
+  // IP и hostname опциональны: dnsmasq допускает dhcp-host=<mac>,
+  // dhcp-host=<mac>,<hostname>, dhcp-host=<mac>,<ip>, dhcp-host=<mac>,<hostname>,<ip>.
+  // Валидация формата (если поле заполнено) делается на бэке.
   const tags = parseTagsInput(tagsInput.value)
   for (const tag of tags) {
     if (!/^(set|tag|id):[a-zA-Z0-9_][a-zA-Z0-9_-]*$/.test(tag)) {
@@ -221,30 +224,36 @@ async function saveHost() {
         await api.delete(`/hosts/${originalMac.value}?file=${encodeURIComponent(originalFile.value)}`)
     }
     await api.post('/hosts', { ...form.value, tags })
-    
+
     emit('cancel-edit')
     form.value.mac = ''; form.value.ip = ''; form.value.hostname = ''
     form.value.tags = []
     tagsInput.value = ''
     actions.loadData()
-  } catch (e) { 
+  } catch (e) {
     const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.saveError')
     alert(msg)
   }
 }
 
 const parsedBulkHosts = computed(() => {
+    // Поддерживаемые форматы одной строки (пробел как разделитель):
+    //   <mac>                                → infinite lease
+    //   <mac> <hostname>                     → DNS-имя, IP от DHCP
+    //   <mac> <ip>                           → статический IP без DNS
+    //   <mac> <hostname> <ip>                → полная запись (порядок любой,
+    //                                            но hostname без точек/двоеточий)
+    //   <mac> <ip> <hostname>                → то же самое
     return bulkText.value.split('\n').map(line => {
-        const p = line.trim().split(/\s+/)
-        if(p.length >= 3) {
-            return { 
-                mac: p.find(x => /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/i.test(x)) || '', 
-                ip: p.find(x => /^(\d{1,3}\.){3}\d{1,3}$/.test(x)) || '', 
-                hostname: p.find(x => !x.includes(':') && !x.includes('.')) || p[p.length-1] 
-            }
-        }
-        return null
-    }).filter(e => e && e.mac && e.ip)
+        const p = line.trim().split(/\s+/).filter(Boolean)
+        if (p.length === 0) return null
+        const mac = p.find(x => /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/i.test(x))
+        if (!mac) return null
+        const ip = p.find(x => x !== mac && /^(\d{1,3}\.){3}\d{1,3}$/.test(x))
+        const remaining = p.filter(x => x !== mac && x !== ip)
+        const hostname = remaining.length > 0 ? remaining[0] : ''
+        return { mac, ip: ip || '', hostname: hostname || '' }
+    }).filter(e => e && e.mac)
 })
 
 async function saveBulkHosts() {

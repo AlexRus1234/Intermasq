@@ -1,14 +1,17 @@
-# DNS aliases (A / CNAME)
+# DNS aliases (A / CNAME / PTR / TXT)
 
 Начиная с v3.0 в Intermasq добавлена отдельная вкладка «DNS» для управления
-локальными DNS-записями dnsmasq двух типов:
+локальными DNS-записями dnsmasq четырёх типов:
 
-- **A**     — `address=/domain/IP`     (домен → IPv4-адрес)
-- **CNAME** — `cname=alias,target`     (алиас → другой домен)
+- **A**     — `address=/domain/IP`         (домен → IPv4-адрес)
+- **CNAME** — `cname=alias,target`         (алиас → другой домен)
+- **PTR**   — `ptr-record=name,target`     (reverse DNS: IP → домен)
+- **TXT**   — `txt-record=name,value`      (произвольный текст: SPF/DKIM/метки)
 
 Это типичный HomeLab-кейс: вместо того чтобы держать в голове IP-адрес
 сервера, вы задаёте ему имя `nas.lan` и обращаетесь по нему из браузера,
-`dig`, мессенджеров и т.д.
+`dig`, мессенджеров и т.д. PTR и TXT закрывают оставшиеся сценарии —
+reverse DNS для почтовых релеев и TXT-значения для SPF/DKIM/ACME.
 
 ---
 
@@ -23,7 +26,8 @@
 ## Что появилось
 
 - **Вкладка «DNS»** в шапке (между «Статика» и «Аренды»).
-- CRUD для двух типов записей с валидацией и проверкой дублей.
+- CRUD для четырёх типов записей (A / CNAME / PTR / TXT) с валидацией и
+  проверкой дублей.
 - **Bulk-импорт** сырым текстом и CSV.
 - **CSV-экспорт** (кнопка `📥 CSV` на вкладке DNS).
 - **Файл по умолчанию** `10-dns-aliases.conf` — создаётся автоматически
@@ -69,6 +73,55 @@
 > «Настройки dnsmasq» (там `cname=` как директива) или редактируйте файл
 > вручную.
 
+### PTR-запись (`ptr-record=name,target`)
+
+| Поле dnsmasq | Пример                                |
+|--------------|---------------------------------------|
+| `ptr-record=` | `ptr-record=10.1.168.192.in-addr.arpa,nas.lan` |
+
+В UI:
+- **Domain** — `10.1.168.192.in-addr.arpa` (имя reverse-зоны для IP).
+- **Target** — `nas.lan` (FQDN, на который указывает PTR).
+
+Это позволяет `dig -x 192.168.1.10` возвращать `nas.lan` вместо
+`10.1.168.192.in-addr.arpa`. Требуется для:
+- Postfix / sendmail с GSSAPI-аутентификацией.
+- Kerberos realm discovery.
+- Любых self-hosted приложений, проверяющих соответствие прямого и
+  обратного резолва (FcrDNS).
+
+> Формула имени reverse-зоны: перевернуть октеты IP и добавить
+> `.in-addr.arpa`. Для `192.168.1.10` → `10.1.168.192.in-addr.arpa`.
+
+> dnsmasq допускает несколько имён reverse-зоны в одной директиве
+> (`ptr-record=name1,name2,target`). UI работает с одним именем —
+> парсер берёт первый и последний токены. Если нужно несколько,
+> редактируйте файл вручную.
+
+### TXT-запись (`txt-record=name,value`)
+
+| Поле dnsmasq | Пример                            |
+|--------------|-----------------------------------|
+| `txt-record=` | `txt-record=nas.lan,v=spf1 -all` |
+
+В UI:
+- **Domain** — `nas.lan` (домен, к которому привязывается запись).
+- **Target** — `v=spf1 -all` (произвольный текст).
+
+Сценарии:
+- **SPF**: `txt-record=example.lan,v=spf1 mx -all`
+- **DKIM**: `txt-record=dkim._domainkey,k=rsa; p=MIGfMA0GCSqGSIb3...`
+- **ACME DNS-01**: `txt-record=_acme-challenge.nas.lan,<token>`
+- **mDNS-SD / Service Discovery** метаданные.
+
+> TXT-значение может содержать запятые (например, DKIM с `k=rsa; p=…`).
+> Парсер сплитит только по первой запятой, остаток — значение целиком.
+
+> dnsmasq допускает значения с пробелами только в кавычках
+> (`txt-record=name,"multi word"`). UI принимает произвольный текст
+> без новой строки — если нужно работать с multi-line значениями,
+> редактируйте файл вручную.
+
 ---
 
 ## Добавление записей
@@ -76,11 +129,16 @@
 ### Одиночное добавление
 
 1. Перейдите на вкладку «DNS».
-2. В форме сверху выберите тип (**A** или **CNAME**).
-3. Заполните **Domain** и **Target**.
+2. В форме сверху выберите тип (**A** / **CNAME** / **PTR** / **TXT**).
+3. Заполните **Domain** и **Target**. Placeholder подскажет формат:
+   - A → IP-адрес (`192.168.1.10`)
+   - CNAME / PTR → целевой домен (`nas.lan`)
+   - TXT → текстовое значение (`v=spf1 -all`)
 4. Под формой отображается live-превью итоговой строки:
    - `address=/nas.lan/192.168.1.10`
    - `cname=wiki,nas.lan`
+   - `ptr-record=10.1.168.192.in-addr.arpa,nas.lan`
+   - `txt-record=nas.lan,v=spf1 -all`
 5. Поле **File** можно оставить пустым — будет создан
    `10-dns-aliases.conf`. Либо выберите существующий файл через
    nav-tabs под формой.
@@ -106,13 +164,17 @@
 ### Raw-текст
 
 1. В форме выберите режим «Импорт списком».
-2. Вставьте текст в textarea. Поддерживается 4 формата на строку:
+2. Вставьте текст в textarea. Поддерживается 8 форматов на строку:
 
 ```
 A nas.lan 192.168.1.10
 CNAME wiki nas.lan
+PTR 10.1.168.192.in-addr.arpa nas.lan
+TXT nas.lan v=spf1 -all
 address=/nas.lan/192.168.1.10
 cname=wiki,nas.lan
+ptr-record=10.1.168.192.in-addr.arpa,nas.lan
+txt-record=nas.lan,v=spf1 -all
 ```
 
 3. Счётчик «Распознано: N записей» обновляется live.
@@ -129,7 +191,8 @@ type,domain,target
 A,nas.lan,192.168.1.10
 A,printer.lan,192.168.1.20
 CNAME,wiki,nas.lan
-CNAME,cloud,nas.lan
+PTR,10.1.168.192.in-addr.arpa,nas.lan
+TXT,nas.lan,v=spf1 -all
 ```
 
 3. Укажите файл назначения.
@@ -154,7 +217,9 @@ Header-строка (`type,domain,target`) пропускается автома
   - Domain: `^[a-zA-Z0-9]([a-zA-Z0-9-.]*[a-zA-Z0-9])?$` (принимает
     `nas`, `nas.lan`, `a-b.c.d`; отвергает `.nas`, `nas.`, `..`).
   - Target для A: валидный IPv4 (через `net.ParseIP`).
-  - Target для CNAME: тот же regex, что и для domain.
+  - Target для CNAME / PTR: тот же regex, что и для domain.
+  - Target для TXT: любой непустой текст без символа новой строки
+    (принимает `v=spf1 -all`, `k=rsa; p=…`, URI, произвольные значения).
 - **`createLocalBackup`** перед каждым изменением → `.bak`-копия файла.
 - **Кнопка «Откат»** восстанавливает файл из `.bak` (одна операция).
 - **Audit-лог:** действия `alias_add`, `alias_delete`, `alias_bulk_add`
@@ -163,9 +228,9 @@ Header-строка (`type,domain,target`) пропускается автома
   только внутри `-conf-dir`).
 - **Pre-flight `dnsmasq --test`** **не вызывается** на каждое
   добавление/удаление alias (как и для `dhcp-host`). Синтаксис
-  `address=`/`cname=` прост и валидируется regex'ом. Проверка происходит
-  при нажатии кнопки «Применить» в шапке — она запускает
-  `dnsmasq --test` и перезапускает демон только при успехе.
+  `address=`/`cname=`/`ptr-record=`/`txt-record=` прост и валидируется
+  regex'ом. Проверка происходит при нажатии кнопки «Применить» в шапке —
+  она запускает `dnsmasq --test` и перезапускает демон только при успехе.
 
 ---
 
