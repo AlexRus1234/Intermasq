@@ -67,6 +67,11 @@ var (
 	macRegex         = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
 	hostnameRegex    = regexp.MustCompile(`^[a-zA-Z0-9-.]+$`)
 	aliasDomainRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-.]*[a-zA-Z0-9])?$`)
+	// dhcpTagRegex validates a single dhcp-host tag qualifier. dnsmasq
+	// accepts "set:<name>" (assigns a tag to the host) and "tag:<name>"
+	// (host matches only if that tag is already set by dhcp-match).
+	// "id:..." (client-id) is intentionally out of scope for the UI.
+	dhcpTagRegex     = regexp.MustCompile(`^(set|tag):[a-zA-Z0-9_][a-zA-Z0-9_-]*$`)
 	mu               sync.Mutex
 	loadedPlugins    []PluginManifest
 )
@@ -78,8 +83,14 @@ type PluginManifest struct {
 }
 
 func init() {
+	// SECURITY: refuse to start with the default/well-known signing key.
+	// Without this, an attacker who reads the source can forge any JWT.
+	// Operator MUST set INTERMASQ_SECRET (e.g. `openssl rand -hex 32`).
 	if len(SecretKey) == 0 {
-		SecretKey = []byte("default-secret")
+		fmt.Fprintln(os.Stderr, "[FATAL] INTERMASQ_SECRET environment variable is not set.")
+		fmt.Fprintln(os.Stderr, "        Generate one with:  openssl rand -hex 32")
+		fmt.Fprintln(os.Stderr, "        and export it before starting intermasq.")
+		os.Exit(1)
 	}
 }
 
@@ -173,6 +184,12 @@ func main() {
 
 	loadPlugins(r)
 	startSSEBroadcaster()
+	startDNSHealthChecker()
+
+	// /metrics is exposed outside the /api group so Prometheus can scrape it
+	// at the conventional URL. Authentication is handled inside the handler
+	// (Bearer / X-API-Key / ?token=) so the scrape_url can stay self-contained.
+	r.GET("/metrics", metricsHandler)
 
 	api := r.Group("/api")
 	{

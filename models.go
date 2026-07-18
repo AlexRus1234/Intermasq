@@ -17,10 +17,14 @@
 package main
 
 type HostEntry struct {
-	Mac      string `json:"mac"`
-	Ip       string `json:"ip"`
-	Hostname string `json:"hostname"`
-	File     string `json:"file"`
+	Mac      string   `json:"mac"`
+	Ip       string   `json:"ip"`
+	Hostname string   `json:"hostname"`
+	File     string   `json:"file"`
+	// Tags holds dhcp-host qualifiers "set:<tag>" and "tag:<tag>" so that
+	// group-based DHCP options (dhcp-option=tag:<tag>,...) can target this
+	// host. Tags are serialized AFTER the IP, in their original form.
+	Tags []string `json:"tags,omitempty"`
 }
 
 // НОВОЕ: Для массового импорта

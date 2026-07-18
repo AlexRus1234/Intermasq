@@ -42,6 +42,10 @@
            </div>
           <div class="col-md-3"><input v-model="form.hostname" placeholder="Hostname" class="form-control"></div>
           <div class="col-md-3">
+              <input v-model="tagsInput" :placeholder="$t('hosts.tagsPlaceholder', 'set:iot,set:guest')" class="form-control font-monospace" :title="$t('hosts.tagsTitle', 'DHCP tags (comma separated)')">
+              <div class="form-text small">{{ $t('hosts.tagsHint', 'tags let dhcp-option=tag:... target this host') }}</div>
+          </div>
+          <div class="col-md-3">
               <div class="input-group">
                   <input v-model="form.file" :readonly="selectedFile !== 'all' && !isEditing" :class="['form-control', (selectedFile !== 'all' && !isEditing) ? 'bg-light' : '']" :placeholder="$t('hosts.filePlaceholder')">
                   <button @click="saveHost" class="btn fw-bold" :class="isEditing ? 'btn-warning' : 'btn-success'">
@@ -100,7 +104,8 @@ const csvInput = ref(null)
 const bulkText = ref('')
 const originalMac = ref('')
 const originalFile = ref('')
-const form = ref({ mac: '', ip: '', hostname: '', file: '' })
+const form = ref({ mac: '', ip: '', hostname: '', file: '', tags: [] })
+const tagsInput = ref('')
 const ipRange = ref('')
 const manualRange = ref('')
 const showRangeInput = ref(false)
@@ -109,6 +114,14 @@ const selectedTemplateId = ref('')
 const showTemplatesModal = ref(false)
 
 const isEditing = computed(() => originalMac.value !== '')
+
+function parseTagsInput(raw) {
+    // Accept "set:iot,tag:guest" or "set:iot, tag:guest" or newline-separated.
+    return raw
+        .split(/[,\n]/)
+        .map(s => s.trim())
+        .filter(s => s !== '')
+}
 
 watch(() => props.selectedFile, (newFile) => {
     if (!isEditing.value) {
@@ -121,11 +134,14 @@ watch(() => props.editData, (newData) => {
         importMode.value = 'single'
         originalMac.value = newData.mac
         originalFile.value = newData.file
-        form.value = { mac: newData.mac, ip: newData.ip, hostname: newData.hostname, file: newData.file }
+        form.value = { mac: newData.mac, ip: newData.ip, hostname: newData.hostname, file: newData.file, tags: [...(newData.tags || [])] }
+        tagsInput.value = (newData.tags || []).join(',')
     } else {
         originalMac.value = ''
         originalFile.value = ''
         form.value.mac = ''; form.value.ip = ''; form.value.hostname = ''
+        form.value.tags = []
+        tagsInput.value = ''
         form.value.file = props.selectedFile === 'all' ? (store.hosts[0]?.file.split('|')[0] || '') : props.selectedFile
     }
 })
@@ -137,6 +153,8 @@ watch(() => store.transferData, (data) => {
         form.value.mac = data.mac
         form.value.ip = data.ip
         form.value.hostname = data.hostname
+        form.value.tags = []
+        tagsInput.value = ''
         store.transferData = null
     }
 }, { immediate: true })
@@ -190,15 +208,24 @@ async function saveHost() {
   const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/i;
   if (!macRegex.test(form.value.mac)) { alert(t('alert.invalidMac')); return; }
   if (!form.value.file) { alert(t('alert.fileRequired')); return; }
-  
+  const tags = parseTagsInput(tagsInput.value)
+  for (const tag of tags) {
+    if (!/^(set|tag|id):[a-zA-Z0-9_][a-zA-Z0-9_-]*$/.test(tag)) {
+      alert(t('alert.invalidTag', 'Invalid tag (must be set:NAME, tag:NAME or id:NAME)') + ': ' + tag)
+      return
+    }
+  }
+
   try {
     if (isEditing.value) {
         await api.delete(`/hosts/${originalMac.value}?file=${encodeURIComponent(originalFile.value)}`)
     }
-    await api.post('/hosts', form.value)
+    await api.post('/hosts', { ...form.value, tags })
     
     emit('cancel-edit')
     form.value.mac = ''; form.value.ip = ''; form.value.hostname = ''
+    form.value.tags = []
+    tagsInput.value = ''
     actions.loadData()
   } catch (e) { 
     const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.saveError')

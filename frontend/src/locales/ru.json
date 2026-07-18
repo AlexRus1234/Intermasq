@@ -19,6 +19,8 @@
     "tabDns": "DNS",
     "tabNewDevices": "Новые устройства",
     "tabUsers": "Пользователи",
+    "tabDiscovery": "Обнаружение",
+    "tabSafety": "Безопасность",
     "searchPlaceholder": "Поиск по MAC, IP, Имени...",
     "backup": "Бэкап",
     "restore": "Восстановить",
@@ -69,7 +71,11 @@
     "empty": "Список пуст",
     "selected": "Выбрано элементов:",
     "deleteSelected": "Удалить выбранные",
-    "offlineTooltip": "Офлайн"
+    "offlineTooltip": "Офлайн",
+    "tagsPlaceholder": "set:iot,tag:guest",
+    "tagsTitle": "DHCP-теги через запятую",
+    "tagsHint": "теги позволяют dhcp-option=tag:... нацеливаться на этот хост",
+    "tagsCol": "Теги"
   },
   "leases": {
     "title": "Активные устройства в сети (DHCP Leases)",
@@ -134,7 +140,8 @@
     "bulkLeaseToStaticSuccess": "Добавлено {count} устройств в статику",
     "bulkLeaseToStaticError": "Ошибка добавления устройств в статику",
     "restoreBackupSuccess": "Бэкап успешно восстановлен",
-    "restoreBackupError": "Ошибка восстановления бэкапа"
+    "restoreBackupError": "Ошибка восстановления бэкапа",
+    "invalidTag": "Неверный тег (нужно set:ИМЯ, tag:ИМЯ или id:ИМЯ)"
   },
   "api": {
     "already_setup": "Уже настроено",
@@ -181,6 +188,7 @@
   "config": {
     "groupDns": "DNS / Сеть",
     "groupDhcp": "DHCP",
+    "groupPxe": "PXE / Сетевая загрузка",
     "groupLog": "Логирование",
     "groupOther": "Прочее",
     "newFile": "Новый файл",
@@ -190,13 +198,18 @@
     "saveConfirm": "Применить изменения и проверить через dnsmasq --test?",
     "rollback": "Откатить файл",
     "addRange": "Добавить диапазон",
+    "addOption": "Добавить опцию DHCP",
     "addDirective": "Добавить директиву",
     "customKey": "своя директива...",
     "rangeStart": "Начало",
     "rangeEnd": "Конец",
     "rangeMask": "Маска/CIDR",
     "rangeLease": "Lease time",
-    "rangeTag": "Тег"
+    "rangeTag": "Тег",
+    "optionTag": "tag:имя",
+    "optionCustom": "другая опция...",
+    "forwardDomainHint": "домен (пусто = глобальный)",
+    "forwardUpstreamHint": "upstream IP или #"
   },
   "audit": {
     "title": "История изменений",
@@ -286,5 +299,16 @@
     "change": "Сменить",
     "createUser": "Создать пользователя",
     "create": "Создать"
+  },
+  "discovery": {
+    "unknownArp": "Неизвестные устройства (ARP, не настроены)",
+    "newLeases": "Новые DHCP-аренды"
+  },
+  "safety": {
+    "backupTitle": "Резервная копия и восстановление",
+    "backupHint": "Живой снимок всех .conf файлов из /etc/dnsmasq.d в виде ZIP. При восстановлении архив проверяется через dnsmasq --test, а текущие файлы сохраняются как .restore.bak перед перезаписью.",
+    "templatesTitle": "Шаблоны",
+    "manage": "Управлять",
+    "restoreConfirm": "Восстановить конфигурацию из бэкапа? Текущие файлы будут сохранены как .restore.bak"
   }
 }

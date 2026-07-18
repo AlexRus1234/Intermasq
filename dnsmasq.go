@@ -108,9 +108,14 @@ func checkDnsmasqStatus() bool {
 func reloadDnsmasq() error {
 	testCmd := exec.Command("/usr/bin/dnsmasq", "--test")
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
+		counters.TestFailures.Add(1)
 		return fmt.Errorf("%s", testOut)
 	}
-	return sysCaller.Restart("dnsmasq")
+	if err := sysCaller.Restart("dnsmasq"); err != nil {
+		return err
+	}
+	counters.Reloads.Add(1)
+	return nil
 }
 
 func getArpTable() map[string]bool {
@@ -348,6 +353,7 @@ func restoreHistoryVersion(filePath, version string) error {
 	}
 	testCmd := exec.Command("/usr/bin/dnsmasq", "--test")
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
+		counters.TestFailures.Add(1)
 		// Restore the pre-restore content. Best-effort.
 		if prev != nil {
 			_ = os.WriteFile(filePath, prev, 0644)
@@ -515,9 +521,9 @@ func removeHostLine(filePath, mac string) error {
 	return os.WriteFile(filePath, []byte(strings.Join(newLines, "\n")+"\n"), 0644)
 }
 
-func appendHostLine(filePath, mac, hostname, ip string) error {
+func appendHostLine(filePath string, h HostEntry) error {
 	content, _ := os.ReadFile(filePath)
-	line := fmt.Sprintf("dhcp-host=%s,%s,%s", mac, hostname, ip)
+	line := formatDhcpHostLine(h)
 	out := strings.TrimRight(string(content), "\n")
 	if out != "" {
 		out += "\n"
@@ -526,28 +532,76 @@ func appendHostLine(filePath, mac, hostname, ip string) error {
 	return os.WriteFile(filePath, []byte(out), 0644)
 }
 
+// parseDhcpHostLine parses a single "dhcp-host=..." line into a HostEntry.
+// This is the single canonical parser used everywhere in the codebase;
+// previously the same logic was duplicated in 5 places. It recognises:
+//   - MAC (any token matching macRegex)
+//   - IPv4/IPv6 (any token parseable by net.ParseIP)
+//   - tag qualifiers "set:<name>" / "tag:<name>"  -> collected into Tags
+//   - everything else                             -> Hostname
+//
+// "id:<client-id>" tokens are stored as Tags verbatim so they round-trip
+// without loss, but the UI does not surface them.
+func parseDhcpHostLine(raw, file string) (HostEntry, bool) {
+	line := strings.TrimSpace(raw)
+	if !strings.HasPrefix(line, "dhcp-host=") && !strings.HasPrefix(line, "dhcp-host:") {
+		return HostEntry{}, false
+	}
+	line = strings.TrimPrefix(line, "dhcp-host=")
+	line = strings.TrimPrefix(line, "dhcp-host:")
+	parts := strings.Split(line, ",")
+	entry := HostEntry{File: file}
+	var tags []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		switch {
+		case macRegex.MatchString(p):
+			entry.Mac = p
+		case net.ParseIP(p) != nil:
+			entry.Ip = p
+		case strings.HasPrefix(p, "set:"), strings.HasPrefix(p, "tag:"), strings.HasPrefix(p, "id:"):
+			tags = append(tags, p)
+		default:
+			entry.Hostname = p
+		}
+	}
+	if entry.Mac == "" {
+		return HostEntry{}, false
+	}
+	entry.Tags = tags
+	return entry, true
+}
+
+// formatDhcpHostLine renders a HostEntry back into the dnsmasq textual form.
+// Order is fixed: mac[, hostname][, ip][, tags...]. Tags come last because
+// that is the convention dnsmasq examples use and it keeps the human-readable
+// part of the line at the front.
+func formatDhcpHostLine(h HostEntry) string {
+	parts := make([]string, 0, 4+len(h.Tags))
+	parts = append(parts, h.Mac)
+	if h.Hostname != "" {
+		parts = append(parts, h.Hostname)
+	}
+	if h.Ip != "" {
+		parts = append(parts, h.Ip)
+	}
+	parts = append(parts, h.Tags...)
+	return "dhcp-host=" + strings.Join(parts, ",")
+}
+
 func readHostByMac(filePath, mac string) *HostEntry {
 	macLower := strings.ToLower(mac)
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil
 	}
-	for _, line := range strings.Split(string(content), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "dhcp-host=") {
+	for _, raw := range strings.Split(string(content), "\n") {
+		entry, ok := parseDhcpHostLine(raw, filePath)
+		if !ok {
 			continue
-		}
-		parts := strings.Split(strings.TrimPrefix(line, "dhcp-host="), ",")
-		entry := HostEntry{File: filePath}
-		for _, p := range parts {
-			p = strings.TrimSpace(p)
-			if macRegex.MatchString(p) {
-				entry.Mac = p
-			} else if net.ParseIP(p) != nil {
-				entry.Ip = p
-			} else {
-				entry.Hostname = p
-			}
 		}
 		if strings.ToLower(entry.Mac) == macLower {
 			return &entry
@@ -665,24 +719,10 @@ func findHostsByIP(ip, excludeMac string) []HostEntry {
 		if err != nil {
 			continue
 		}
-
-		lines := strings.Split(string(content), "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if !strings.HasPrefix(line, "dhcp-host=") {
+		for _, raw := range strings.Split(string(content), "\n") {
+			entry, ok := parseDhcpHostLine(raw, fullPath)
+			if !ok {
 				continue
-			}
-			parts := strings.Split(strings.TrimPrefix(line, "dhcp-host="), ",")
-			entry := HostEntry{File: fullPath}
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if macRegex.MatchString(p) {
-					entry.Mac = p
-				} else if net.ParseIP(p) != nil {
-					entry.Ip = p
-				} else {
-					entry.Hostname = p
-				}
 			}
 			if entry.Ip == ip && strings.ToLower(entry.Mac) != excludeMacLower {
 				result = append(result, entry)
@@ -710,24 +750,10 @@ func findHostsByMac(mac string) []HostEntry {
 		if err != nil {
 			continue
 		}
-
-		lines := strings.Split(string(content), "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if !strings.HasPrefix(line, "dhcp-host=") {
+		for _, raw := range strings.Split(string(content), "\n") {
+			entry, ok := parseDhcpHostLine(raw, fullPath)
+			if !ok {
 				continue
-			}
-			parts := strings.Split(strings.TrimPrefix(line, "dhcp-host="), ",")
-			entry := HostEntry{File: fullPath}
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if macRegex.MatchString(p) {
-					entry.Mac = p
-				} else if net.ParseIP(p) != nil {
-					entry.Ip = p
-				} else {
-					entry.Hostname = p
-				}
 			}
 			if strings.ToLower(entry.Mac) == macLower {
 				result = append(result, entry)
@@ -753,28 +779,12 @@ func readAllHosts() []HostEntry {
 		if err != nil {
 			continue
 		}
-
-		lines := strings.Split(string(content), "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if !strings.HasPrefix(line, "dhcp-host=") {
+		for _, raw := range strings.Split(string(content), "\n") {
+			entry, ok := parseDhcpHostLine(raw, fullPath)
+			if !ok {
 				continue
 			}
-			parts := strings.Split(strings.TrimPrefix(line, "dhcp-host="), ",")
-			entry := HostEntry{File: fullPath}
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if macRegex.MatchString(p) {
-					entry.Mac = p
-				} else if net.ParseIP(p) != nil {
-					entry.Ip = p
-				} else {
-					entry.Hostname = p
-				}
-			}
-			if entry.Mac != "" {
-				hosts = append(hosts, entry)
-			}
+			hosts = append(hosts, entry)
 		}
 	}
 	return hosts
@@ -1457,6 +1467,7 @@ func writeConfigWithTest(path string, content []byte) error {
 	}
 	testCmd := exec.Command("/usr/bin/dnsmasq", "--test")
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
+		counters.TestFailures.Add(1)
 		_ = rollbackFile(path)
 		return fmt.Errorf("dnsmasq_test_failed: %s", testOut)
 	}
@@ -1480,6 +1491,7 @@ func writeFileRaw(path string, content []byte) error {
 	}
 	testCmd := exec.Command("/usr/bin/dnsmasq", "--test")
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
+		counters.TestFailures.Add(1)
 		_ = rollbackFile(path)
 		return fmt.Errorf("dnsmasq_test_failed: %s", testOut)
 	}
@@ -1534,6 +1546,7 @@ func restoreBackupZip(zipData []byte) error {
 
 	testCmd := exec.Command("/usr/bin/dnsmasq", "--test")
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
+		counters.TestFailures.Add(1)
 		for _, name := range restoredFiles {
 			fullPath := filepath.Join(*ConfigDir, name)
 			bakPath := fullPath + ".restore.bak"

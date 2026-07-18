@@ -13,13 +13,14 @@
       <table class="table table-hover mb-0 align-middle">
       <thead class="table-light">
           <tr>
-              <th style="width: 40px;"><input type="checkbox" class="form-check-input" v-model="allSelected"></th>
-              <th style="width: 50px;">{{ $t('hosts.online') }}</th>
-              <th @click="sortBy('mac')" style="cursor:pointer">MAC ↕</th>
-              <th @click="sortBy('ip')" style="cursor:pointer">IP ↕</th>
-              <th @click="sortBy('hostname')" style="cursor:pointer">Hostname ↕</th>
-              <th v-if="selectedFile==='all'">{{ $t('hosts.fileCol') }}</th>
-              <th class="text-end">{{ $t('hosts.actions') }}</th>
+               <th style="width: 40px;"><input type="checkbox" class="form-check-input" v-model="allSelected"></th>
+               <th style="width: 50px;">{{ $t('hosts.online') }}</th>
+               <th @click="sortBy('mac')" style="cursor:pointer">MAC ↕</th>
+               <th @click="sortBy('ip')" style="cursor:pointer">IP ↕</th>
+               <th @click="sortBy('hostname')" style="cursor:pointer">Hostname ↕</th>
+               <th>{{ $t('hosts.tagsCol', 'Tags') }}</th>
+               <th v-if="selectedFile==='all'">{{ $t('hosts.fileCol') }}</th>
+               <th class="text-end">{{ $t('hosts.actions') }}</th>
           </tr>
       </thead>
       <tbody>
@@ -31,13 +32,19 @@
                   <span v-if="store.arpTable[h.mac.toLowerCase()]" :title="$t('hosts.onlineTooltip')" class="text-success">🟢</span>
                   <span v-else :title="$t('hosts.offlineTooltip')" class="text-muted" style="opacity: 0.3;">🔴</span>
               </td>
-              <td class="font-monospace">{{ h.mac }}</td>
-              <td class="fw-bold text-primary">
-                  <span v-if="store.searchQuery && h.ip.includes(store.searchQuery)" class="bg-warning text-dark px-1 rounded">{{ h.ip }}</span>
-                  <span v-else>{{ h.ip }}</span>
-              </td>
-              <td>{{ h.hostname }}</td>
-              <td v-if="selectedFile==='all'" class="small text-muted">{{ cleanPath(h.file).split('/').pop() }}</td>
+               <td class="font-monospace">{{ h.mac }}</td>
+               <td class="fw-bold text-primary">
+                   <span v-if="store.searchQuery && h.ip.includes(store.searchQuery)" class="bg-warning text-dark px-1 rounded">{{ h.ip }}</span>
+                   <span v-else>{{ h.ip }}</span>
+               </td>
+               <td>{{ h.hostname }}</td>
+               <td>
+                   <template v-if="h.tags && h.tags.length">
+                       <span v-for="tag in h.tags" :key="tag" class="badge bg-secondary me-1 font-monospace small">{{ tag }}</span>
+                   </template>
+                   <span v-else class="text-muted">—</span>
+               </td>
+               <td v-if="selectedFile==='all'" class="small text-muted">{{ cleanPath(h.file).split('/').pop() }}</td>
               <td class="text-end">
                   <div class="btn-group">
                       <button @click="$emit('edit-host', h)" class="btn btn-sm btn-outline-secondary" :title="$t('hosts.editTooltip')">✏️</button>
@@ -46,7 +53,7 @@
               </td>
           </tr>
           <tr v-if="sortedHosts.length === 0">
-              <td colspan="7" class="text-center p-4 text-muted">
+              <td :colspan="selectedFile==='all' ? 8 : 7" class="text-center p-4 text-muted">
                   {{ store.searchQuery ? $t('hosts.searchEmpty') : $t('hosts.empty') }}
               </td>
           </tr>
@@ -95,10 +102,11 @@ const sortedHosts = computed(() => {
   
   if (store.searchQuery) {
       const q = store.searchQuery.toLowerCase()
-      data = data.filter(h => 
-          (h.mac && h.mac.toLowerCase().includes(q)) || 
-          (h.ip && h.ip.toLowerCase().includes(q)) || 
-          (h.hostname && h.hostname.toLowerCase().includes(q))
+      data = data.filter(h =>
+          (h.mac && h.mac.toLowerCase().includes(q)) ||
+          (h.ip && h.ip.toLowerCase().includes(q)) ||
+          (h.hostname && h.hostname.toLowerCase().includes(q)) ||
+          (h.tags && h.tags.some(t => t.toLowerCase().includes(q)))
       )
   }
 

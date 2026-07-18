@@ -94,12 +94,26 @@
                 <DhcpRangeRow :directive="d" @remove="removeDirective(d)" />
               </div>
             </template>
+
+            <template v-else-if="schemaFor(d.key).type === 'dhcpoption'">
+              <div class="col-12">
+                <DhcpOptionRow :directive="d" @remove="removeDirective(d)" />
+              </div>
+            </template>
+
+            <template v-else-if="schemaFor(d.key).type === 'forwarding'">
+              <div class="col-12">
+                <ForwardingRow :directive="d" @remove="removeDirective(d)" />
+              </div>
+            </template>
           </div>
 
           <div class="mt-2 d-flex gap-2 flex-wrap">
             <button @click="addDirective(g.group, 'dns')" v-if="g.group==='dns'" class="btn btn-sm btn-outline-primary">+ {{ $t('config.addDirective') }}</button>
             <button @click="addDhcpRange" v-if="g.group==='dhcp'" class="btn btn-sm btn-outline-primary">+ {{ $t('config.addRange') }}</button>
+            <button @click="addDhcpOption" v-if="g.group==='dhcp'" class="btn btn-sm btn-outline-primary">+ {{ $t('config.addOption') }}</button>
             <button @click="addDirective(g.group, 'dhcp')" v-if="g.group==='dhcp'" class="btn btn-sm btn-outline-primary">+ {{ $t('config.addDirective') }}</button>
+            <button @click="addDirective(g.group, 'pxe')" v-if="g.group==='pxe'" class="btn btn-sm btn-outline-primary">+ {{ $t('config.addDirective') }}</button>
             <button @click="addDirective(g.group, 'log')" v-if="g.group==='log'" class="btn btn-sm btn-outline-primary">+ {{ $t('config.addDirective') }}</button>
             <button @click="addDirective(g.group, 'other')" v-if="g.group==='other'" class="btn btn-sm btn-outline-primary">+ {{ $t('config.addDirective') }}</button>
           </div>
@@ -134,6 +148,8 @@ import { store, api, actions } from '../../store.js'
 import { translateApiError } from '../../i18n.js'
 import { DIRECTIVE_SCHEMA, GROUP_ORDER, GROUP_LABELS, schemaFor } from './directives.js'
 import DhcpRangeRow from './DhcpRangeRow.vue'
+import DhcpOptionRow from './DhcpOptionRow.vue'
+import ForwardingRow from './ForwardingRow.vue'
 import HistoryModal from '../history/HistoryModal.vue'
 
 const { t } = useI18n()
@@ -215,6 +231,10 @@ function cancelAdd() {
 
 function addDhcpRange() {
   localDirectives.value.push({ key: 'dhcp-range', value: ',,,,', active: true, _uid: ++uidCounter })
+}
+
+function addDhcpOption() {
+  localDirectives.value.push({ key: 'dhcp-option', value: 'option:router,', active: true, _uid: ++uidCounter })
 }
 
 async function save() {

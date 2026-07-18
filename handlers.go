@@ -236,7 +236,7 @@ func bulkMoveHandler(c *gin.Context) {
 			c.JSON(500, gin.H{"error": "file_write_error", "mac": h.Mac})
 			return
 		}
-		if err := appendHostLine(req.Target, existing.Mac, existing.Hostname, existing.Ip); err != nil {
+		if err := appendHostLine(req.Target, *existing); err != nil {
 			c.JSON(500, gin.H{"error": "file_write_error", "mac": h.Mac})
 			return
 		}
@@ -283,6 +283,7 @@ func bulkEditHandler(c *gin.Context) {
 		oldEntry *HostEntry
 		newIP    string
 		newHost  string
+		newTags  []string
 	}
 
 	planned := []plannedChange{}
@@ -335,6 +336,7 @@ func bulkEditHandler(c *gin.Context) {
 			oldEntry: existing,
 			newIP:    newIP,
 			newHost:  newHostname,
+			newTags:  existing.Tags,
 		})
 	}
 
@@ -354,7 +356,9 @@ func bulkEditHandler(c *gin.Context) {
 			c.JSON(500, gin.H{"error": "file_write_error", "mac": p.mac})
 			return
 		}
-		if err := appendHostLine(p.file, p.mac, p.newHost, p.newIP); err != nil {
+		if err := appendHostLine(p.file, HostEntry{
+			Mac: p.mac, Hostname: p.newHost, Ip: p.newIP, File: p.file, Tags: p.newTags,
+		}); err != nil {
 			c.JSON(500, gin.H{"error": "file_write_error", "mac": p.mac})
 			return
 		}
@@ -390,30 +394,15 @@ func getHostsHandler(c *gin.Context) {
 		}
 
 		content, _ := os.ReadFile(fullPath)
-		lines := strings.Split(string(content), "\n")
-
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "dhcp-host=") {
-				parts := strings.Split(strings.TrimPrefix(line, "dhcp-host="), ",")
-				entry := HostEntry{File: fullPath}
-				for _, p := range parts {
-					p = strings.TrimSpace(p)
-					if macRegex.MatchString(p) {
-						entry.Mac = p
-					} else if net.ParseIP(p) != nil {
-						entry.Ip = p
-					} else {
-						entry.Hostname = p
-					}
-				}
-				if entry.Mac != "" {
-					if hasBak {
-						entry.File = fullPath + "|has_bak"
-					}
-					hosts = append(hosts, entry)
-				}
+		for _, raw := range strings.Split(string(content), "\n") {
+			entry, ok := parseDhcpHostLine(raw, fullPath)
+			if !ok {
+				continue
 			}
+			if hasBak {
+				entry.File = fullPath + "|has_bak"
+			}
+			hosts = append(hosts, entry)
 		}
 	}
 	c.JSON(200, hosts)
@@ -438,6 +427,11 @@ func addHostHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
 	}
+	if !validateHostTags(req.Tags) {
+		c.JSON(400, gin.H{"error": "invalid_tag", "detail": "tags must look like set:iot or tag:guest"})
+		return
+	}
+	req.Tags = normalizeHostTags(req.Tags)
 
 	conflicts := findHostsByIP(req.Ip, req.Mac)
 	if len(conflicts) > 0 {
@@ -475,7 +469,7 @@ func addHostHandler(c *gin.Context) {
 			newLines = append(newLines, line)
 		}
 	}
-	newLines = append(newLines, fmt.Sprintf("dhcp-host=%s,%s,%s", req.Mac, req.Hostname, req.Ip))
+	newLines = append(newLines, formatDhcpHostLine(req))
 
 	if err := os.WriteFile(req.File, []byte(strings.Join(newLines, "\n")+"\n"), 0644); err != nil {
 		c.JSON(500, gin.H{"error": "file_write_error"})
@@ -492,6 +486,39 @@ func addHostHandler(c *gin.Context) {
 	})
 
 	c.JSON(200, gin.H{"status": "ok"})
+}
+
+// validateHostTags returns false if any tag is not a recognized dhcp-host
+// qualifier ("set:<name>" / "tag:<name>"). "id:<client-id>" is also accepted
+// so existing configs round-trip without being rejected on edit.
+func validateHostTags(tags []string) bool {
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		if !dhcpTagRegex.MatchString(t) && !strings.HasPrefix(t, "id:") {
+			return false
+		}
+	}
+	return true
+}
+
+// normalizeHostTags drops empties and de-duplicates case-insensitively while
+// preserving the first-seen order (dnsmasq is order-insensitive but stable
+// output makes diffs readable).
+func normalizeHostTags(tags []string) []string {
+	seen := make(map[string]bool)
+	out := make([]string, 0, len(tags))
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[strings.ToLower(t)] {
+			continue
+		}
+		seen[strings.ToLower(t)] = true
+		out = append(out, t)
+	}
+	return out
 }
 
 func bulkAddHostsHandler(c *gin.Context) {
@@ -575,7 +602,7 @@ func bulkAddHostsHandler(c *gin.Context) {
 
 	for _, h := range req.Hosts {
 		if newMacs[strings.ToLower(h.Mac)] {
-			newLines = append(newLines, fmt.Sprintf("dhcp-host=%s,%s,%s", h.Mac, h.Hostname, h.Ip))
+			newLines = append(newLines, formatDhcpHostLine(h))
 		}
 	}
 
@@ -903,7 +930,7 @@ func importCSVHandler(c *gin.Context) {
 	}
 
 	for _, h := range hosts {
-		newLines = append(newLines, fmt.Sprintf("dhcp-host=%s,%s,%s", h.Mac, h.Hostname, h.Ip))
+		newLines = append(newLines, formatDhcpHostLine(h))
 	}
 
 	if err := os.WriteFile(targetFile, []byte(strings.Join(newLines, "\n")+"\n"), 0644); err != nil {
@@ -1567,7 +1594,9 @@ func bulkLeaseToStaticHandler(c *gin.Context) {
 		if hostname == "*" || hostname == "" {
 			hostname = "device-" + strings.ReplaceAll(strings.ToLower(l.Mac), ":", "")[:8]
 		}
-		newLines = append(newLines, fmt.Sprintf("dhcp-host=%s,%s,%s", l.Mac, hostname, l.Ip))
+		newLines = append(newLines, formatDhcpHostLine(HostEntry{
+			Mac: l.Mac, Hostname: hostname, Ip: l.Ip, File: req.File,
+		}))
 		count++
 	}
 

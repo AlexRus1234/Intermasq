@@ -5,11 +5,10 @@ import { store, actions } from './store.js'
 
 import AuthScreen from './components/AuthScreen.vue'
 import StaticView from './components/static/StaticView.vue'
-import LeasesTab from './components/leases/LeasesTab.vue'
-import AuditTab from './components/audit/AuditTab.vue'
+import DiscoveredTab from './components/DiscoveredTab.vue'
 import DnsmasqConfig from './components/config/DnsmasqConfig.vue'
 import DnsAliasesView from './components/dns/DnsAliasesView.vue'
-import NewDevicesTab from './components/NewDevicesTab.vue'
+import SafetyTab from './components/safety/SafetyTab.vue'
 import UsersTab from './components/UsersTab.vue'
 
 const { locale } = useI18n()
@@ -110,10 +109,9 @@ onUnmounted(() => { if (sseConnection) sseConnection.close() })
                     <div class="btn-group w-100">
                         <button @click="store.tab='static'" :class="['btn', store.tab==='static' ? 'btn-primary' : 'btn-outline-primary']">{{ $t('app.tabStatic') }}</button>
                         <button @click="store.tab='dns'" :class="['btn', store.tab==='dns' ? 'btn-primary' : 'btn-outline-primary']">🌐 {{ $t('app.tabDns') }}</button>
-                        <button @click="store.tab='leases'" :class="['btn', store.tab==='leases' ? 'btn-primary' : 'btn-outline-primary']">{{ $t('app.tabLeases') }}</button>
+                        <button @click="store.tab='discovery'; actions.loadNewDevices()" :class="['btn', store.tab==='discovery' ? 'btn-primary' : 'btn-outline-primary']">🔍 {{ $t('app.tabDiscovery') }}</button>
                         <button @click="store.tab='config'" :class="['btn', store.tab==='config' ? 'btn-primary' : 'btn-outline-primary']">⚙️ {{ $t('app.tabConfig') }}</button>
-                        <button @click="store.tab='audit'" :class="['btn', store.tab==='audit' ? 'btn-primary' : 'btn-outline-primary']">{{ $t('app.tabAudit') }}</button>
-                        <button @click="store.tab='newdevices'; actions.loadNewDevices()" :class="['btn', store.tab==='newdevices' ? 'btn-primary' : 'btn-outline-primary']">🔍 {{ $t('app.tabNewDevices') }}</button>
+                        <button @click="store.tab='safety'" :class="['btn', store.tab==='safety' ? 'btn-primary' : 'btn-outline-primary']">🛡️ {{ $t('app.tabSafety') }}</button>
                         <button @click="store.tab='users'; actions.loadUsers()" :class="['btn', store.tab==='users' ? 'btn-primary' : 'btn-outline-primary']">👥 {{ $t('app.tabUsers') }}</button>
                     </div>
                 </div>
@@ -130,10 +128,9 @@ onUnmounted(() => { if (sseConnection) sseConnection.close() })
 
             <StaticView v-if="store.tab === 'static'" />
             <DnsAliasesView v-if="store.tab === 'dns'" />
-            <LeasesTab v-if="store.tab === 'leases'" />
+            <DiscoveredTab v-if="store.tab === 'discovery'" />
             <DnsmasqConfig v-if="store.tab === 'config'" />
-            <AuditTab v-if="store.tab === 'audit'" />
-            <NewDevicesTab v-if="store.tab === 'newdevices'" />
+            <SafetyTab v-if="store.tab === 'safety'" />
             <UsersTab v-if="store.tab === 'users'" />
         </div>
 

@@ -19,6 +19,8 @@
     "tabDns": "DNS",
     "tabNewDevices": "New devices",
     "tabUsers": "Users",
+    "tabDiscovery": "Discovery",
+    "tabSafety": "Safety",
     "searchPlaceholder": "Search by MAC, IP, Hostname...",
     "backup": "Backup",
     "restore": "Restore",
@@ -69,7 +71,11 @@
     "empty": "List is empty",
     "selected": "Selected items:",
     "deleteSelected": "Delete selected",
-    "offlineTooltip": "Offline"
+    "offlineTooltip": "Offline",
+    "tagsPlaceholder": "set:iot,tag:guest",
+    "tagsTitle": "DHCP tags, comma separated",
+    "tagsHint": "tags let dhcp-option=tag:... target this host",
+    "tagsCol": "Tags"
   },
   "leases": {
     "title": "Active network devices (DHCP Leases)",
@@ -133,7 +139,8 @@
     "bulkLeaseToStaticSuccess": "Added {count} devices to static",
     "bulkLeaseToStaticError": "Failed to add devices to static",
     "restoreBackupSuccess": "Backup restored successfully",
-    "restoreBackupError": "Failed to restore backup"
+    "restoreBackupError": "Failed to restore backup",
+    "invalidTag": "Invalid tag (must be set:NAME, tag:NAME or id:NAME)"
   },
   "api": {
     "already_setup": "Already set up",
@@ -180,6 +187,7 @@
   "config": {
     "groupDns": "DNS / Network",
     "groupDhcp": "DHCP",
+    "groupPxe": "PXE / Netboot",
     "groupLog": "Logging",
     "groupOther": "Other",
     "newFile": "New file",
@@ -189,13 +197,18 @@
     "saveConfirm": "Apply changes and verify via dnsmasq --test?",
     "rollback": "Rollback file",
     "addRange": "Add range",
+    "addOption": "Add DHCP option",
     "addDirective": "Add directive",
     "customKey": "custom directive...",
     "rangeStart": "Start",
     "rangeEnd": "End",
     "rangeMask": "Mask/CIDR",
     "rangeLease": "Lease time",
-    "rangeTag": "Tag"
+    "rangeTag": "Tag",
+    "optionTag": "tag:name",
+    "optionCustom": "custom option...",
+    "forwardDomainHint": "domain (empty = global)",
+    "forwardUpstreamHint": "upstream IP or #"
   },
   "audit": {
     "title": "Change history",
@@ -285,5 +298,16 @@
     "change": "Change",
     "createUser": "Create user",
     "create": "Create"
+  },
+  "discovery": {
+    "unknownArp": "Unknown devices (ARP, not configured)",
+    "newLeases": "New DHCP leases"
+  },
+  "safety": {
+    "backupTitle": "Backup & Restore",
+    "backupHint": "A live snapshot of every .conf file in /etc/dnsmasq.d, downloaded as a ZIP. Restoring validates the archive with dnsmasq --test and backs up current files as .restore.bak before overwriting.",
+    "templatesTitle": "Templates",
+    "manage": "Manage",
+    "restoreConfirm": "Restore configuration from backup? Current files will be backed up as .restore.bak"
   }
 }
