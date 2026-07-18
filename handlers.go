@@ -313,7 +313,7 @@ func bulkEditHandler(c *gin.Context) {
 		if suffix := req.HostnameTransform.Suffix; suffix != "" {
 			newHostname = newHostname + suffix
 		}
-		if !hostnameRegex.MatchString(newHostname) {
+		if !validHostname(newHostname) {
 			c.JSON(400, gin.H{"error": "invalid_hostname", "mac": h.Mac, "hostname": newHostname})
 			return
 		}
@@ -423,7 +423,7 @@ func addHostHandler(c *gin.Context) {
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
-	if !macRegex.MatchString(req.Mac) || net.ParseIP(req.Ip) == nil || !hostnameRegex.MatchString(req.Hostname) || !isSafePath(req.File) {
+	if !macRegex.MatchString(req.Mac) || net.ParseIP(req.Ip) == nil || !validHostname(req.Hostname) || !isSafePath(req.File) {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
 	}
@@ -533,7 +533,7 @@ func bulkAddHostsHandler(c *gin.Context) {
 	}
 
 	for i, h1 := range req.Hosts {
-		if !macRegex.MatchString(h1.Mac) || net.ParseIP(h1.Ip) == nil || !hostnameRegex.MatchString(h1.Hostname) {
+		if !macRegex.MatchString(h1.Mac) || net.ParseIP(h1.Ip) == nil || !validHostname(h1.Hostname) {
 			continue
 		}
 		for j, h2 := range req.Hosts {
@@ -545,7 +545,7 @@ func bulkAddHostsHandler(c *gin.Context) {
 	}
 
 	for _, h := range req.Hosts {
-		if !macRegex.MatchString(h.Mac) || net.ParseIP(h.Ip) == nil || !hostnameRegex.MatchString(h.Hostname) {
+		if !macRegex.MatchString(h.Mac) || net.ParseIP(h.Ip) == nil || !validHostname(h.Hostname) {
 			continue
 		}
 		conflicts := findHostsByIP(h.Ip, h.Mac)
@@ -576,7 +576,7 @@ func bulkAddHostsHandler(c *gin.Context) {
 
 	newMacs := make(map[string]bool)
 	for _, h := range req.Hosts {
-		if macRegex.MatchString(h.Mac) && net.ParseIP(h.Ip) != nil && hostnameRegex.MatchString(h.Hostname) {
+		if macRegex.MatchString(h.Mac) && net.ParseIP(h.Ip) != nil && validHostname(h.Hostname) {
 			newMacs[strings.ToLower(h.Mac)] = true
 		}
 	}

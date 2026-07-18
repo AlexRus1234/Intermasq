@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import axios from 'axios'
+import { EventSourcePolyfill } from 'event-source-polyfill'
 import i18n, { translateApiError } from './i18n.js'
 
 const { t } = i18n.global
@@ -465,7 +466,11 @@ export const actions = {
 
     connectSSE() {
         if (!store.token) return
-        const eventSource = new EventSource('/api/events?token=' + encodeURIComponent(store.token))
+        // Token is sent via Authorization header instead of ?token= in URL
+        // to keep it out of access logs / referrer / browser history.
+        const eventSource = new EventSourcePolyfill('/api/events', {
+            headers: { Authorization: `Bearer ${store.token}` }
+        })
         eventSource.addEventListener('arp', (e) => {
             try { store.arpTable = JSON.parse(e.data) } catch (_) {}
         })

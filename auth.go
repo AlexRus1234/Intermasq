@@ -153,9 +153,11 @@ func authMiddleware(c *gin.Context) {
 	var tokenStr string
 	if strings.HasPrefix(authHeader, "Bearer ") {
 		tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
-	} else if q := c.Query("token"); q != "" {
-		tokenStr = q
 	} else {
+		// NOTE: ?token= query fallback was removed because it leaked JWTs
+		// into access logs and referrer headers (SSE used it via EventSource).
+		// /metrics still accepts ?token= because Prometheus scrape configs
+		// cannot easily send custom headers — see checkMetricsAuth.
 		c.AbortWithStatus(401)
 		return
 	}

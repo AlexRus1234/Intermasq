@@ -37,9 +37,9 @@ type SystemdSystemCaller struct {
 func (s *SystemdSystemCaller) IsActive(service string) bool {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command("/usr/bin/sudo", "-n", "/usr/bin/systemctl", "is-active", service)
+		cmd = exec.Command(sudoBin(), "-n", systemctlBin(), "is-active", service)
 	} else {
-		cmd = exec.Command("/usr/bin/systemctl", "is-active", service)
+		cmd = exec.Command(systemctlBin(), "is-active", service)
 	}
 	out, _ := cmd.Output()
 	return strings.TrimSpace(string(out)) == "active"
@@ -48,9 +48,9 @@ func (s *SystemdSystemCaller) IsActive(service string) bool {
 func (s *SystemdSystemCaller) Restart(service string) error {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command("/usr/bin/sudo", "/usr/bin/systemctl", "restart", service)
+		cmd = exec.Command(sudoBin(), systemctlBin(), "restart", service)
 	} else {
-		cmd = exec.Command("/usr/bin/systemctl", "restart", service)
+		cmd = exec.Command(systemctlBin(), "restart", service)
 	}
 	return cmd.Run()
 }
@@ -58,9 +58,9 @@ func (s *SystemdSystemCaller) Restart(service string) error {
 func (s *SystemdSystemCaller) RestartSelf() error {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command("/usr/bin/sudo", "/usr/bin/systemctl", "restart", "intermasq")
+		cmd = exec.Command(sudoBin(), systemctlBin(), "restart", "intermasq")
 	} else {
-		cmd = exec.Command("/usr/bin/systemctl", "restart", "intermasq")
+		cmd = exec.Command(systemctlBin(), "restart", "intermasq")
 	}
 	return cmd.Run()
 }
@@ -75,18 +75,18 @@ func (s *SystemdSystemCaller) String() string {
 type SystemdUserCaller struct{}
 
 func (s *SystemdUserCaller) IsActive(service string) bool {
-	cmd := exec.Command("/usr/bin/systemctl", "--user", "is-active", service)
+	cmd := exec.Command(systemctlBin(), "--user", "is-active", service)
 	out, _ := cmd.Output()
 	return strings.TrimSpace(string(out)) == "active"
 }
 
 func (s *SystemdUserCaller) Restart(service string) error {
-	cmd := exec.Command("/usr/bin/systemctl", "--user", "restart", service)
+	cmd := exec.Command(systemctlBin(), "--user", "restart", service)
 	return cmd.Run()
 }
 
 func (s *SystemdUserCaller) RestartSelf() error {
-	cmd := exec.Command("/usr/bin/systemctl", "--user", "restart", "intermasq")
+	cmd := exec.Command(systemctlBin(), "--user", "restart", "intermasq")
 	return cmd.Run()
 }
 
@@ -101,9 +101,9 @@ type OpenRCCaller struct {
 func (s *OpenRCCaller) IsActive(service string) bool {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command("/usr/bin/sudo", "-n", "/usr/bin/rc-service", service, "status")
+		cmd = exec.Command(sudoBin(), "-n", rcServiceBin(), service, "status")
 	} else {
-		cmd = exec.Command("/usr/bin/rc-service", service, "status")
+		cmd = exec.Command(rcServiceBin(), service, "status")
 	}
 	out, _ := cmd.Output()
 	return strings.Contains(strings.TrimSpace(string(out)), "started")
@@ -112,9 +112,9 @@ func (s *OpenRCCaller) IsActive(service string) bool {
 func (s *OpenRCCaller) Restart(service string) error {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command("/usr/bin/sudo", "/usr/bin/rc-service", service, "restart")
+		cmd = exec.Command(sudoBin(), rcServiceBin(), service, "restart")
 	} else {
-		cmd = exec.Command("/usr/bin/rc-service", service, "restart")
+		cmd = exec.Command(rcServiceBin(), service, "restart")
 	}
 	return cmd.Run()
 }
@@ -122,9 +122,9 @@ func (s *OpenRCCaller) Restart(service string) error {
 func (s *OpenRCCaller) RestartSelf() error {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command("/usr/bin/sudo", "/usr/bin/rc-service", "intermasq", "restart")
+		cmd = exec.Command(sudoBin(), rcServiceBin(), "intermasq", "restart")
 	} else {
-		cmd = exec.Command("/usr/bin/rc-service", "intermasq", "restart")
+		cmd = exec.Command(rcServiceBin(), "intermasq", "restart")
 	}
 	return cmd.Run()
 }
@@ -145,9 +145,9 @@ func (s *RunitCaller) IsActive(service string) bool {
 	var cmd *exec.Cmd
 	svcPath := s.ServiceDir + "/" + service
 	if s.UseSudo {
-		cmd = exec.Command("/usr/bin/sudo", "-n", "/usr/bin/sv", "status", svcPath)
+		cmd = exec.Command(sudoBin(), "-n", svBin(), "status", svcPath)
 	} else {
-		cmd = exec.Command("/usr/bin/sv", "status", svcPath)
+		cmd = exec.Command(svBin(), "status", svcPath)
 	}
 	out, _ := cmd.Output()
 	return strings.Contains(strings.TrimSpace(string(out)), "run")
@@ -157,9 +157,9 @@ func (s *RunitCaller) Restart(service string) error {
 	var cmd *exec.Cmd
 	svcPath := s.ServiceDir + "/" + service
 	if s.UseSudo {
-		cmd = exec.Command("/usr/bin/sudo", "/usr/bin/sv", "restart", svcPath)
+		cmd = exec.Command(sudoBin(), svBin(), "restart", svcPath)
 	} else {
-		cmd = exec.Command("/usr/bin/sv", "restart", svcPath)
+		cmd = exec.Command(svBin(), "restart", svcPath)
 	}
 	return cmd.Run()
 }
@@ -168,9 +168,9 @@ func (s *RunitCaller) RestartSelf() error {
 	var cmd *exec.Cmd
 	svcPath := s.ServiceDir + "/intermasq"
 	if s.UseSudo {
-		cmd = exec.Command("/usr/bin/sudo", "/usr/bin/sv", "restart", svcPath)
+		cmd = exec.Command(sudoBin(), svBin(), "restart", svcPath)
 	} else {
-		cmd = exec.Command("/usr/bin/sv", "restart", svcPath)
+		cmd = exec.Command(svBin(), "restart", svcPath)
 	}
 	return cmd.Run()
 }
@@ -189,9 +189,9 @@ type SysVinitCaller struct {
 func (s *SysVinitCaller) IsActive(service string) bool {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command("/usr/bin/sudo", "-n", "/usr/sbin/service", service, "status")
+		cmd = exec.Command(sudoBin(), "-n", serviceBin(), service, "status")
 	} else {
-		cmd = exec.Command("/usr/sbin/service", service, "status")
+		cmd = exec.Command(serviceBin(), service, "status")
 	}
 	return cmd.Run() == nil
 }
@@ -199,9 +199,9 @@ func (s *SysVinitCaller) IsActive(service string) bool {
 func (s *SysVinitCaller) Restart(service string) error {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command("/usr/bin/sudo", "/usr/sbin/service", service, "restart")
+		cmd = exec.Command(sudoBin(), serviceBin(), service, "restart")
 	} else {
-		cmd = exec.Command("/usr/sbin/service", service, "restart")
+		cmd = exec.Command(serviceBin(), service, "restart")
 	}
 	return cmd.Run()
 }
@@ -209,9 +209,9 @@ func (s *SysVinitCaller) Restart(service string) error {
 func (s *SysVinitCaller) RestartSelf() error {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command("/usr/bin/sudo", "/usr/sbin/service", "intermasq", "restart")
+		cmd = exec.Command(sudoBin(), serviceBin(), "intermasq", "restart")
 	} else {
-		cmd = exec.Command("/usr/sbin/service", "intermasq", "restart")
+		cmd = exec.Command(serviceBin(), "intermasq", "restart")
 	}
 	return cmd.Run()
 }
@@ -241,11 +241,6 @@ func (s *NoneCaller) String() string {
 	return "none"
 }
 
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
 func detectInitSystem() string {
 	comm, err := os.ReadFile("/proc/1/comm")
 	if err == nil {
@@ -256,23 +251,23 @@ func detectInitSystem() string {
 		case "runit":
 			return "runit"
 		case "init":
-			if fileExists("/usr/bin/rc-service") {
+			if rcServiceBin() != "" {
 				return "openrc"
 			}
 			return "sysvinit"
 		}
 	}
 
-	if fileExists("/usr/bin/systemctl") {
+	if systemctlBin() != "" {
 		return "systemd"
 	}
-	if fileExists("/usr/bin/rc-service") {
+	if rcServiceBin() != "" {
 		return "openrc"
 	}
-	if fileExists("/usr/bin/sv") {
+	if svBin() != "" {
 		return "runit"
 	}
-	if fileExists("/usr/sbin/service") {
+	if serviceBin() != "" {
 		return "sysvinit"
 	}
 
@@ -287,11 +282,11 @@ func detectSystemCaller() SystemCaller {
 		if os.Getuid() == 0 {
 			return &SystemdSystemCaller{UseSudo: false}
 		}
-		cmd := exec.Command("/usr/bin/sudo", "-n", "/usr/bin/systemctl", "is-active", "dnsmasq")
+		cmd := exec.Command(sudoBin(), "-n", systemctlBin(), "is-active", "dnsmasq")
 		if err := cmd.Run(); err == nil {
 			return &SystemdSystemCaller{UseSudo: true}
 		}
-		cmd = exec.Command("/usr/bin/systemctl", "--user", "is-active", "default.target")
+		cmd = exec.Command(systemctlBin(), "--user", "is-active", "default.target")
 		if err := cmd.Run(); err == nil {
 			return &SystemdUserCaller{}
 		}

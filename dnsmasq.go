@@ -106,7 +106,7 @@ func checkDnsmasqStatus() bool {
 }
 
 func reloadDnsmasq() error {
-	testCmd := exec.Command("/usr/bin/dnsmasq", "--test")
+	testCmd := exec.Command(dnsmasqBin(), "--test")
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
 		counters.TestFailures.Add(1)
 		return fmt.Errorf("%s", testOut)
@@ -351,7 +351,7 @@ func restoreHistoryVersion(filePath, version string) error {
 	if err := os.WriteFile(filePath, content, 0644); err != nil {
 		return err
 	}
-	testCmd := exec.Command("/usr/bin/dnsmasq", "--test")
+	testCmd := exec.Command(dnsmasqBin(), "--test")
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
 		counters.TestFailures.Add(1)
 		// Restore the pre-restore content. Best-effort.
@@ -820,7 +820,7 @@ func parseCSVHosts(r io.Reader, targetFile string) ([]HostEntry, error) {
 		ip := strings.TrimSpace(row[1])
 		hostname := strings.TrimSpace(row[2])
 
-		if macRegex.MatchString(mac) && net.ParseIP(ip) != nil && hostnameRegex.MatchString(hostname) {
+		if macRegex.MatchString(mac) && net.ParseIP(ip) != nil && validHostname(hostname) {
 			hosts = append(hosts, HostEntry{Mac: mac, Ip: ip, Hostname: hostname, File: targetFile})
 		}
 	}
@@ -1465,7 +1465,7 @@ func writeConfigWithTest(path string, content []byte) error {
 	if err := os.WriteFile(path, content, 0644); err != nil {
 		return err
 	}
-	testCmd := exec.Command("/usr/bin/dnsmasq", "--test")
+	testCmd := exec.Command(dnsmasqBin(), "--test")
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
 		counters.TestFailures.Add(1)
 		_ = rollbackFile(path)
@@ -1489,7 +1489,7 @@ func writeFileRaw(path string, content []byte) error {
 	if err := os.WriteFile(path, content, 0644); err != nil {
 		return err
 	}
-	testCmd := exec.Command("/usr/bin/dnsmasq", "--test")
+	testCmd := exec.Command(dnsmasqBin(), "--test")
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
 		counters.TestFailures.Add(1)
 		_ = rollbackFile(path)
@@ -1544,7 +1544,7 @@ func restoreBackupZip(zipData []byte) error {
 		return fmt.Errorf("no_valid_conf_files")
 	}
 
-	testCmd := exec.Command("/usr/bin/dnsmasq", "--test")
+	testCmd := exec.Command(dnsmasqBin(), "--test")
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
 		counters.TestFailures.Add(1)
 		for _, name := range restoredFiles {

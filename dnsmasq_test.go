@@ -104,6 +104,41 @@ func TestIsSafePath(t *testing.T) {
 	}
 }
 
+func TestValidHostname(t *testing.T) {
+	tests := []struct {
+		host     string
+		expected bool
+		reason   string
+	}{
+		{"host1", true, "simple"},
+		{"my-host", true, "single label with hyphen"},
+		{"a", true, "single char"},
+		{"a-b-c", true, "multiple hyphens"},
+		{"host.example.com", true, "fqdn"},
+		{"1host", true, "leading digit allowed by RFC 1123"},
+		{"h1-h2.h3-h4", true, "hyphens in multi-label"},
+
+		{"", false, "empty"},
+		{"-host", false, "leading hyphen"},
+		{"host-", false, "trailing hyphen"},
+		{".host", false, "leading dot"},
+		{"host.", false, "trailing dot"},
+		{"host..name", false, "consecutive dots"},
+		{"host name", false, "space"},
+		{"host_name", false, "underscore"},
+		{"host.name-", false, "trailing hyphen in label"},
+		{"-a.b", false, "leading hyphen in first label"},
+		{strings.Repeat("a", 254), false, "too long (>253)"},
+		{strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 60), true, "max total length (253)"},
+	}
+	for _, tt := range tests {
+		got := validHostname(tt.host)
+		if got != tt.expected {
+			t.Errorf("validHostname(%q) = %v, want %v (%s)", tt.host, got, tt.expected, tt.reason)
+		}
+	}
+}
+
 func TestResolveSystemCaller(t *testing.T) {
 	tests := []struct {
 		input   string
@@ -1476,7 +1511,9 @@ func TestAuthMiddlewareBearerHeader(t *testing.T) {
 	}
 }
 
-func TestAuthMiddlewareQueryToken(t *testing.T) {
+func TestAuthMiddlewareQueryTokenRejected(t *testing.T) {
+	// ?token= was removed from authMiddleware to avoid leaking JWTs into
+	// access logs via SSE. Only Bearer header / X-API-Key are accepted now.
 	setTestSecret(t)
 	users = map[string]string{"admin": "hash"}
 	token := makeToken("admin")
@@ -1484,41 +1521,8 @@ func TestAuthMiddlewareQueryToken(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/api/events?token="+token, nil)
 	authMiddleware(c)
-	if w.Code == 401 {
-		t.Fatalf("query token should be accepted for SSE, got 401")
-	}
-	if c.GetString("user") != "admin" {
-		t.Errorf("expected user admin, got %q", c.GetString("user"))
-	}
-}
-
-func TestAuthMiddlewareQueryTokenRevoked(t *testing.T) {
-	setTestSecret(t)
-	blacklist = make(map[string]time.Time)
-	users = map[string]string{"admin": "hash"}
-	token := makeToken("admin")
-	parsed, _ := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) { return SecretKey, nil })
-	claims := parsed.Claims.(jwt.MapClaims)
-	jti := claims["jti"].(string)
-	revokeToken(jti, time.Now().Add(time.Hour))
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("GET", "/api/events?token="+token, nil)
-	authMiddleware(c)
 	if w.Code != 401 {
-		t.Fatalf("revoked query token should be rejected, got %d", w.Code)
-	}
-}
-
-func TestAuthMiddlewareQueryTokenBad(t *testing.T) {
-	setTestSecret(t)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("GET", "/api/events?token=garbage", nil)
-	authMiddleware(c)
-	if w.Code != 401 {
-		t.Fatalf("bad query token should be rejected, got %d", w.Code)
+		t.Fatalf("query token should be rejected, got %d", w.Code)
 	}
 }
 
@@ -1560,7 +1564,7 @@ func TestEventsHandlerStreamsSSE(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("GET", "/api/events?token=x", nil).WithContext(ctx)
+	c.Request = httptest.NewRequest("GET", "/api/events", nil).WithContext(ctx)
 	eventsHandler(c)
 
 	if !strings.Contains(w.Header().Get("Content-Type"), "text/event-stream") {

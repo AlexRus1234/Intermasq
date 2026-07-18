@@ -51,6 +51,17 @@ var (
 	InitSystem    = flag.String("init-system", "auto", "Init system: auto, systemd, systemd-user, openrc, runit, sysvinit, none")
 	SystemdScope  = flag.String("systemd-scope", "", "Legacy flag: auto, system, user, none (overrides -init-system if set)")
 	CiMode        = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
+
+	// Binary path overrides. Empty value means: resolve via $PATH, then
+	// fall back to well-known absolute paths. Needed for distros (Alpine,
+	// older Debian) where these binaries live under /bin or /sbin rather
+	// than /usr/bin /usr/sbin.
+	DnsmasqBin   = flag.String("dnsmasq-bin", "", "Path to dnsmasq binary (auto-resolved via $PATH if empty)")
+	SudoBin      = flag.String("sudo-bin", "", "Path to sudo binary (auto-resolved if empty)")
+	SystemctlBin = flag.String("systemctl-bin", "", "Path to systemctl binary (auto-resolved if empty)")
+	ServiceBin   = flag.String("service-bin", "", "Path to sysvinit service binary (auto-resolved if empty)")
+	RcServiceBin = flag.String("rc-service-bin", "", "Path to OpenRC rc-service binary (auto-resolved if empty)")
+	SvBin        = flag.String("sv-bin", "", "Path to runit sv binary (auto-resolved if empty)")
 	AuditLogPath  = flag.String("audit-log", "/etc/intermasq/audit.log", "Path to audit log file")
 	TemplatesPath = flag.String("templates", "/etc/intermasq/templates.json", "Path to templates file")
 	HistoryDir    = flag.String("history-dir", "/etc/intermasq/history", "Directory for versioned config history")
@@ -65,7 +76,7 @@ var (
 
 var (
 	macRegex         = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
-	hostnameRegex    = regexp.MustCompile(`^[a-zA-Z0-9-.]+$`)
+	hostnameRegex    = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
 	aliasDomainRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-.]*[a-zA-Z0-9])?$`)
 	// dhcpTagRegex validates a single dhcp-host tag qualifier. dnsmasq
 	// accepts "set:<name>" (assigns a tag to the host) and "tag:<name>"
@@ -80,6 +91,17 @@ type PluginManifest struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Bin  string `json:"bin"`
+}
+
+// validHostname reports whether s is a syntactically valid DNS hostname
+// per RFC 952 / RFC 1123 / RFC 1034: each dot-separated label is 1-63 chars,
+// alphanumeric boundaries with hyphens allowed inside, total length <=253.
+// Used for dhcp-host hostnames written by the panel.
+func validHostname(s string) bool {
+	if len(s) == 0 || len(s) > 253 {
+		return false
+	}
+	return hostnameRegex.MatchString(s)
 }
 
 func init() {
@@ -160,6 +182,7 @@ func loadPlugins(r *gin.Engine) {
 
 func main() {
 	flag.Parse()
+	resolveBins()
 	loadUsers()
 	loadTemplates()
 	if err := ensureHistoryDir(); err != nil {
