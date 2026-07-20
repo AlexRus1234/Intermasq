@@ -1,7 +1,26 @@
+// Intermasq frontend store — reactive state + axios client + core actions
+// (auth, status, loadData, SSE, restart, apply config).
+//
+// Per-domain actions live in ./api/*.js and are merged into the actions
+// object below. Each api/*.js module imports store + api from THIS file;
+// ES module live bindings make that safe even though the import graph is
+// technically circular (store → api/* → store).
+//
+// Files in ./api/:
+//   hosts.js    templates, bulk-move/edit, CSV, lease→static, new devices
+//   dns.js      DNS aliases (A/CNAME/PTR/TXT)
+//   config.js   dnsmasq config editor, file delete, versioned history
+//   system.js   backup/restore, audit, users, logout
+
 import { reactive } from 'vue'
 import axios from 'axios'
 import { EventSourcePolyfill } from 'event-source-polyfill'
 import i18n, { translateApiError } from './i18n.js'
+
+import * as hostsApi from './api/hosts.js'
+import * as dnsApi from './api/dns.js'
+import * as configApi from './api/config.js'
+import * as systemApi from './api/system.js'
 
 const { t } = i18n.global
 
@@ -11,7 +30,7 @@ export const store = reactive({
     tab: 'static',
     isDnsmasqActive: false,
     searchQuery: '',
-    
+
     hosts: [],
     leases: [],
     arpTable: {},
@@ -24,7 +43,7 @@ export const store = reactive({
     newDevices: [],
     users: [],
     configTemplates: [],
-    
+
     transferData: null,
     history: [],
     historyDiff: '',
@@ -43,12 +62,13 @@ export const actions = {
         store.token = newToken
         localStorage.setItem('token', newToken)
     },
+
     logout() {
         store.token = ''
         localStorage.removeItem('token')
         store.view = 'login'
     },
-    
+
     async checkStatus() {
         try {
             const res = await api.get('/status')
@@ -62,8 +82,8 @@ export const actions = {
     async loadData() {
         try {
             const [hRes, lRes, aRes, pRes, auditRes, tRes, cfgRes, rangesRes, alRes] = await Promise.all([
-                api.get('/hosts'), 
-                api.get('/leases'), 
+                api.get('/hosts'),
+                api.get('/leases'),
                 api.get('/arp'),
                 api.get('/plugins').catch(() => ({ data: [] })),
                 api.get('/audit').catch(() => ({ data: [] })),
@@ -104,17 +124,6 @@ export const actions = {
         }
     },
 
-    async downloadBackup() {
-        try {
-            const res = await api.get('/backup', { responseType: 'blob' })
-            const url = window.URL.createObjectURL(new Blob([res.data]))
-            const link = document.createElement('a')
-            link.href = url
-            link.setAttribute('download', `dnsmasq_backup.zip`)
-            document.body.appendChild(link); link.click(); document.body.removeChild(link)
-        } catch (e) { alert(t('alert.backupError')) }
-    },
-
     async restartSystem() {
         if(!confirm(t('confirm.restartSystem'))) return
         try {
@@ -122,356 +131,6 @@ export const actions = {
             alert(t('alert.restartInProgress'))
             setTimeout(() => location.reload(), 5000)
         } catch (e) { alert(t('alert.restartError')) }
-    },
-
-    async loadAudit() {
-        try {
-            const res = await api.get('/audit')
-            store.auditLog = res.data.reverse()
-        } catch (e) {}
-    },
-
-    async downloadCSV() {
-        try {
-            const res = await api.get('/hosts/csv', { responseType: 'blob' })
-            const url = window.URL.createObjectURL(new Blob([res.data]))
-            const link = document.createElement('a')
-            link.href = url
-            link.setAttribute('download', 'intermasq_hosts.csv')
-            document.body.appendChild(link); link.click(); document.body.removeChild(link)
-        } catch (e) { alert(t('alert.csvExportError')) }
-    },
-
-    async importCSV(file, targetFile) {
-        const formData = new FormData()
-        formData.append('file', file)
-        formData.append('target_file', targetFile)
-        try {
-            const res = await api.post('/hosts/csv', formData)
-            alert(t('alert.csvImportSuccess', { count: res.data.count }))
-            this.loadData()
-            return true
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.csvImportError')
-            alert(msg)
-            return false
-        }
-    },
-
-    async loadTemplates() {
-        try {
-            const res = await api.get('/templates')
-            store.templates = res.data
-        } catch (e) {}
-    },
-
-    async createTemplate(template) {
-        try {
-            await api.post('/templates', template)
-            this.loadTemplates()
-            return true
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.templateCreateError', 'Failed to create template')
-            alert(msg)
-            return false
-        }
-    },
-
-    async deleteTemplate(id) {
-        try {
-            await api.delete(`/templates/${id}`)
-            this.loadTemplates()
-            return true
-        } catch (e) {
-            alert(t('alert.templateDeleteError', 'Failed to delete template'))
-            return false
-        }
-    },
-
-    async applyTemplate(mac, templateId) {
-        try {
-            const res = await api.post('/hosts/apply-template', { mac, template_id: templateId })
-            return res.data
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.templateApplyError', 'Failed to apply template')
-            alert(msg)
-            return null
-        }
-    },
-
-    async bulkMove(hosts, target) {
-        try {
-            const res = await api.post('/hosts/bulk-move', { hosts, target })
-            this.loadData()
-            return res.data
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.bulkMoveError', 'Failed to move hosts')
-            alert(msg)
-            return null
-        }
-    },
-
-    async bulkEdit(hosts, ipTransform, hostnameTransform) {
-        try {
-            const res = await api.post('/hosts/bulk-edit', { hosts, ip_transform: ipTransform, hostname_transform: hostnameTransform })
-            this.loadData()
-            return res.data
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.bulkEditError', 'Failed to edit hosts')
-            alert(msg)
-            return null
-        }
-    },
-
-    async loadConfig() {
-        try {
-            const res = await api.get('/config')
-            store.configSnapshot = res.data
-            const rRes = await api.get('/templates/ranges')
-            store.dhcpRanges = rRes.data.ranges || []
-        } catch (e) {
-            if (e.response?.status === 401) this.logout()
-        }
-    },
-
-    async saveConfig(file, directives) {
-        try {
-            const res = await api.put('/config', { file, directives })
-            store.configSnapshot = res.data
-            const rRes = await api.get('/templates/ranges')
-            store.dhcpRanges = rRes.data.ranges || []
-            return true
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.configSaveError')
-            if (e.response?.data?.detail) {
-                alert(msg + '\n\n' + e.response.data.detail)
-            } else {
-                alert(msg)
-            }
-            return false
-        }
-    },
-
-    async createConfigFile(name, template = 'empty') {
-        try {
-            const res = await api.post('/config/file', { name, template })
-            store.configSnapshot = res.data
-            return true
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.configCreateError')
-            alert(msg)
-            return false
-        }
-    },
-
-    async loadConfigTemplates() {
-        try {
-            const res = await api.get('/config/templates')
-            store.configTemplates = res.data.templates || []
-        } catch (e) {
-            store.configTemplates = [{ id: 'empty', preview: '# === Managed by Intermasq ===\n' }]
-        }
-    },
-
-    async loadDhcpRanges() {
-        try {
-            const res = await api.get('/templates/ranges')
-            store.dhcpRanges = res.data.ranges || []
-        } catch (e) {}
-    },
-
-    async loadAliases() {
-        try {
-            const res = await api.get('/aliases')
-            store.aliases = res.data
-        } catch (e) {}
-    },
-
-    async addAlias(alias) {
-        try {
-            await api.post('/aliases', alias)
-            this.loadData()
-            return true
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.aliasAddError')
-            alert(msg)
-            return false
-        }
-    },
-
-    async bulkAddAliases(aliases, file) {
-        try {
-            const res = await api.post('/aliases/bulk', { aliases, file })
-            this.loadData()
-            return res.data
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.aliasAddError')
-            alert(msg)
-            return null
-        }
-    },
-
-    async deleteAlias(type, domain, file) {
-        try {
-            await api.post('/aliases/delete', { type, domain, file })
-            this.loadData()
-            return true
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.aliasDeleteError')
-            alert(msg)
-            return false
-        }
-    },
-
-    async downloadAliasesCSV() {
-        try {
-            const res = await api.get('/aliases/csv', { responseType: 'blob' })
-            const url = window.URL.createObjectURL(new Blob([res.data]))
-            const link = document.createElement('a')
-            link.href = url
-            link.setAttribute('download', 'intermasq_aliases.csv')
-            document.body.appendChild(link); link.click(); document.body.removeChild(link)
-        } catch (e) { alert(t('alert.csvExportError')) }
-    },
-
-    async importAliasesCSV(file, targetFile) {
-        const formData = new FormData()
-        formData.append('file', file)
-        if (targetFile) formData.append('target_file', targetFile)
-        try {
-            const res = await api.post('/aliases/csv', formData)
-            alert(t('alert.csvImportSuccess', { count: res.data.count }))
-            this.loadData()
-            return true
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.csvImportError')
-            alert(msg)
-            return false
-        }
-    },
-
-    async loadHistory(file) {
-        try {
-            const res = await api.get('/history', { params: { file } })
-            store.history = res.data.versions || []
-            store.historyDiff = ''
-            return true
-        } catch (e) {
-            store.history = []
-            store.historyDiff = ''
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.historyLoadError')
-            alert(msg)
-            return false
-        }
-    },
-
-    async loadHistoryDiff(file, from, to) {
-        try {
-            const res = await api.get('/history/diff', { params: { file, from, to } })
-            store.historyDiff = res.data.diff || ''
-            return true
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.historyDiffError')
-            alert(msg)
-            return false
-        }
-    },
-
-    async restoreHistory(file, version) {
-        try {
-            await api.post('/history/restore', { file, version })
-            alert(t('alert.restoreSuccess'))
-            return true
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.restoreError')
-            alert(msg)
-            return false
-        }
-    },
-
-    async loadNewDevices() {
-        try {
-            const res = await api.get('/new-devices')
-            store.newDevices = res.data
-        } catch (e) {}
-    },
-
-    async loadUsers() {
-        try {
-            const res = await api.get('/users')
-            store.users = res.data.users || []
-        } catch (e) {}
-    },
-
-    async createUser(username, password) {
-        try {
-            await api.post('/users', { username, password })
-            this.loadUsers()
-            return true
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : 'Failed to create user'
-            alert(msg)
-            return false
-        }
-    },
-
-    async deleteUser(username) {
-        try {
-            await api.delete(`/users/${username}`)
-            this.loadUsers()
-            return true
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : 'Failed to delete user'
-            alert(msg)
-            return false
-        }
-    },
-
-    async changePassword(oldPassword, newPassword) {
-        try {
-            await api.post('/users/password', { old_password: oldPassword, new_password: newPassword })
-            alert(t('alert.passwordChanged'))
-            return true
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : 'Failed to change password'
-            alert(msg)
-            return false
-        }
-    },
-
-    async logoutRequest() {
-        try {
-            await api.post('/logout')
-        } catch (e) {}
-        this.logout()
-    },
-
-    async bulkLeaseToStatic(leases, file) {
-        try {
-            const res = await api.post('/leases/to-static', { leases, file })
-            alert(t('alert.bulkLeaseToStaticSuccess', { count: res.data.count }))
-            this.loadData()
-            return true
-        } catch (e) {
-            const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.bulkLeaseToStaticError')
-            alert(msg)
-            return false
-        }
-    },
-
-    async restoreBackup(file) {
-        const formData = new FormData()
-        formData.append('file', file)
-        try {
-            await api.post('/backup/restore', formData)
-            alert(t('alert.restoreBackupSuccess'))
-            this.loadData()
-            return true
-        } catch (e) {
-            const msg = e.response?.data?.detail || e.response?.data?.error || t('alert.restoreBackupError')
-            alert(msg)
-            return false
-        }
     },
 
     connectSSE() {
@@ -489,5 +148,11 @@ export const actions = {
         })
         eventSource.onerror = () => {}
         return eventSource
-    }
+    },
+
+    // ===== Per-domain actions (merged from ./api/*.js) =====
+    ...hostsApi,
+    ...dnsApi,
+    ...configApi,
+    ...systemApi,
 }

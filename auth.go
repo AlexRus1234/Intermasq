@@ -31,6 +31,14 @@ import (
 
 var users = make(map[string]string)
 
+// usersMu guards the in-memory `users` map against concurrent
+// read-modify-write sequences. Go's runtime panics if a map is read while
+// another goroutine is writing to it, so even len(users) needs a lock.
+// Held across read→modify→saveUsers() in handlers_users.go so two
+// concurrent POST /api/users cannot interleave and silently drop one of
+// the new records.
+var usersMu sync.RWMutex
+
 var (
 	blacklist   = make(map[string]time.Time)
 	blacklistMu sync.RWMutex
@@ -115,6 +123,17 @@ func rateLimitMiddleware(maxAttempts int, window time.Duration) gin.HandlerFunc 
 		}
 		c.Next()
 	}
+}
+
+// rateLimitReset clears the rate-limit counter for a single IP. Called
+// from loginHandler after a successful login so a legitimate user who
+// mistyped their password a few times is not left counting against the
+// cap. Brute-force protection is unchanged for failed attempts — they
+// keep accumulating until the window expires.
+func rateLimitReset(ip string) {
+	rateLimitMu.Lock()
+	delete(rateLimitStore, ip)
+	rateLimitMu.Unlock()
 }
 
 func loadUsers() {

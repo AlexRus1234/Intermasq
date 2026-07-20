@@ -95,17 +95,18 @@
     "searchEmpty": "По запросу «{query}» ничего не найдено.",
     "allInStatic": "Все подключенные устройства уже занесены в Статику!",
     "noLeases": "Нет активных DHCP аренд.",
-    "bulkToStatic": "Добавить {n} в статику"
+    "bulkToStatic": "Добавить {n} в статику",
+    "toStaticHint": "Массовое добавление в статику пишет dhcp-host строки без проверки dnsmasq --test. После добавления нажмите «Применить» для активации."
   },
   "confirm": {
     "deleteHost": "Удалить запись {mac}?",
     "deleteAlias": "Удалить DNS-запись {domain}?",
     "deleteCount": "Точно удалить {count} записей?",
     "rollback": "Отменить последнее изменение в файле {file}?",
-    "rollback": "Отменить последнее изменение в файле {file}?",
     "restore": "Восстановить файл из версии {version}? Текущее состояние будет сохранено в историю.",
     "restartSystem": "Перезагрузить службу Intermasq? (Нужно для активации новых плагинов)",
-    "deleteTemplate": "Удалить шаблон?"
+    "deleteTemplate": "Удалить шаблон?",
+    "deleteConfigFile": "Удалить файл {file}? Файл будет физически удалён из директории конфигов. Текущее состояние сохранится в историю версий — восстановить можно через модалку «🕒 История» на любом другом файле (путь файла известен)."
   },
   "alert": {
     "applySuccess": "Конфигурация проверена и успешно применена!",
@@ -135,12 +136,15 @@
     "configSaveSuccess": "Настройки сохранены и проверены через dnsmasq --test",
     "configSaveError": "Ошибка сохранения настроек",
     "configCreateError": "Ошибка создания файла",
+    "configDeleteSuccess": "Файл удалён. Нажмите «Применить», чтобы dnsmasq подхватил изменения.",
+    "configDeleteError": "Ошибка удаления файла",
     "invalidData": "Неверные данные",
     "aliasAddError": "Ошибка добавления DNS-записи",
     "aliasDeleteError": "Ошибка удаления DNS-записи",
     "passwordChanged": "Пароль успешно изменён",
     "bulkLeaseToStaticSuccess": "Добавлено {count} устройств в статику",
     "bulkLeaseToStaticError": "Ошибка добавления устройств в статику",
+    "applyReminder": "dnsmasq --test НЕ запускался. Нажмите «Применить», чтобы активировать изменения.",
     "restoreBackupSuccess": "Бэкап успешно восстановлен",
     "restoreBackupError": "Ошибка восстановления бэкапа",
     "invalidTag": "Неверный тег (нужно set:ИМЯ, tag:ИМЯ или id:ИМЯ)"
@@ -213,7 +217,8 @@
     "optionTag": "tag:имя",
     "optionCustom": "другая опция...",
     "forwardDomainHint": "домен (пусто = глобальный)",
-    "forwardUpstreamHint": "upstream IP или #"
+    "forwardUpstreamHint": "upstream IP или #",
+    "delete": "Удалить файл"
   },
   "audit": {
     "title": "История изменений",
@@ -235,9 +240,16 @@
     "action_reload": "Перезагрузка",
     "action_config_update": "Изменение настроек",
     "action_config_create_file": "Создание файла",
+    "action_config_delete_file": "Удаление файла",
+    "action_config_write_raw": "Ручное редактирование файла",
     "action_alias_add": "Добавление DNS",
     "action_alias_delete": "Удаление DNS",
-    "action_alias_bulk_add": "Массовое добавление DNS"
+    "action_alias_bulk_add": "Массовое добавление DNS",
+    "action_user_create": "Создание пользователя",
+    "action_user_delete": "Удаление пользователя",
+    "action_password_change": "Смена пароля",
+    "action_bulk_lease_to_static": "Перенос аренд в статику",
+    "action_backup_restore": "Восстановление из ZIP"
   },
   "history": {
     "title": "История версий файла",

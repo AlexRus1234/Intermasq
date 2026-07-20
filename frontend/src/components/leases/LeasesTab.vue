@@ -14,6 +14,11 @@
           </div>
       </div>
 
+      <div v-if="selectedLeases.length > 0" class="alert alert-warning d-flex align-items-center gap-2 mb-0 rounded-0 small">
+          <span>⚠️</span>
+          <span>{{ $t('leases.toStaticHint', 'Bulk "add to static" writes raw dhcp-host lines without dnsmasq --test validation. Click "Apply" afterwards to activate.') }}</span>
+      </div>
+
       <table class="table table-hover mb-0 align-middle">
           <thead class="table-light">
               <tr>

@@ -95,7 +95,8 @@
     "searchEmpty": "Nothing found for query \"{query}\".",
     "allInStatic": "All connected devices are already in Static!",
     "noLeases": "No active DHCP leases.",
-    "bulkToStatic": "Add {n} to Static"
+    "bulkToStatic": "Add {n} to Static",
+    "toStaticHint": "Bulk \"add to static\" writes raw dhcp-host lines without dnsmasq --test validation. Click \"Apply\" afterwards to activate."
   },
   "confirm": {
     "deleteHost": "Delete entry {mac}?",
@@ -104,7 +105,8 @@
     "rollback": "Undo last change in file {file}?",
     "restore": "Restore file from version {version}? Current state will be saved to history.",
     "restartSystem": "Restart Intermasq service? (Required to activate new plugins)",
-    "deleteTemplate": "Delete template?"
+    "deleteTemplate": "Delete template?",
+    "deleteConfigFile": "Delete file {file}? The file will be physically removed from the config directory. Current state is saved to version history — to recover, open the history modal on any other file (the file path is preserved)."
   },
   "alert": {
     "applySuccess": "Configuration verified and applied successfully!",
@@ -134,12 +136,15 @@
     "configSaveSuccess": "Settings saved and verified via dnsmasq --test",
     "configSaveError": "Failed to save settings",
     "configCreateError": "Failed to create file",
+    "configDeleteSuccess": "File deleted. Click \"Apply\" for dnsmasq to pick up the change.",
+    "configDeleteError": "Failed to delete file",
     "invalidData": "Invalid data",
     "aliasAddError": "Failed to add DNS entry",
     "aliasDeleteError": "Failed to delete DNS entry",
     "passwordChanged": "Password changed successfully",
     "bulkLeaseToStaticSuccess": "Added {count} devices to static",
     "bulkLeaseToStaticError": "Failed to add devices to static",
+    "applyReminder": "dnsmasq --test was NOT run. Click \"Apply\" to activate changes.",
     "restoreBackupSuccess": "Backup restored successfully",
     "restoreBackupError": "Failed to restore backup",
     "invalidTag": "Invalid tag (must be set:NAME, tag:NAME or id:NAME)"
@@ -212,7 +217,8 @@
     "optionTag": "tag:name",
     "optionCustom": "custom option...",
     "forwardDomainHint": "domain (empty = global)",
-    "forwardUpstreamHint": "upstream IP or #"
+    "forwardUpstreamHint": "upstream IP or #",
+    "delete": "Delete file"
   },
   "audit": {
     "title": "Change history",
@@ -234,9 +240,16 @@
     "action_reload": "Reload",
     "action_config_update": "Config update",
     "action_config_create_file": "File created",
+    "action_config_delete_file": "File deleted",
+    "action_config_write_raw": "Raw file edit",
     "action_alias_add": "DNS add",
     "action_alias_delete": "DNS delete",
-    "action_alias_bulk_add": "DNS bulk add"
+    "action_alias_bulk_add": "DNS bulk add",
+    "action_user_create": "User created",
+    "action_user_delete": "User deleted",
+    "action_password_change": "Password change",
+    "action_bulk_lease_to_static": "Lease to static",
+    "action_backup_restore": "Backup restored"
   },
   "history": {
     "title": "File version history",

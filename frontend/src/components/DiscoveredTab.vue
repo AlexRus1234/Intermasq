@@ -47,6 +47,10 @@
               <button @click="actions.loadData()" class="btn btn-sm btn-dark">🔄 {{ $t('newDevices.refresh') }}</button>
           </div>
       </div>
+      <div v-if="selectedLeases.length > 0" class="alert alert-warning d-flex align-items-center gap-2 mb-0 rounded-0 border-0 small">
+          <span>⚠️</span>
+          <span>{{ $t('leases.toStaticHint', 'Bulk "add to static" writes raw dhcp-host lines without dnsmasq --test validation. Click "Apply" afterwards to activate.') }}</span>
+      </div>
       <div class="card-body p-0">
           <table class="table table-hover mb-0 align-middle" v-if="newLeases.length > 0">
               <thead class="table-light">

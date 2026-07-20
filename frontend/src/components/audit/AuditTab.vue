@@ -58,10 +58,12 @@ function actionLabel(action) {
 function actionClass(action) {
     switch (action) {
         case 'add': case 'bulk_add': return 'bg-success'
-        case 'delete': case 'bulk_delete': return 'bg-danger'
+        case 'delete': case 'bulk_delete': case 'config_delete_file': return 'bg-danger'
         case 'rollback': case 'restore': return 'bg-warning text-dark'
         case 'reload': return 'bg-info'
-        case 'config_update': case 'config_create_file': return 'bg-primary'
+        case 'config_update': case 'config_create_file': case 'config_write_raw': return 'bg-primary'
+        case 'backup_restore': return 'bg-info'
+        case 'user_create': case 'user_delete': case 'password_change': return 'bg-secondary'
         default: return 'bg-secondary'
     }
 }

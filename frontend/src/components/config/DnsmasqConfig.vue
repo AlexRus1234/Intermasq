@@ -19,6 +19,9 @@
         <button v-if="currentFile && currentFile.has_bak" @click="rollback" class="btn btn-sm btn-outline-warning">
           ⏪ {{ $t('config.rollback') }}
         </button>
+        <button v-if="currentFile" @click="deleteFile" class="btn btn-sm btn-outline-danger" :title="$t('config.delete', 'Delete file')">
+          🗑 {{ $t('config.delete', 'Delete') }}
+        </button>
         <button @click="save" :disabled="!currentFile" class="btn btn-primary fw-bold">
           💾 {{ $t('config.save') }}
         </button>
@@ -293,6 +296,24 @@ async function createFile() {
     newFileTemplate.value = 'empty'
     const f = files.value.find(f => f.name === name)
     if (f) selectFile(f.path)
+  }
+}
+
+// deleteFile — physically removes the current .conf file from -conf-dir.
+// The backend takes a snapshot into versioned history before deletion, so
+// the file can still be recovered via the history modal if the operator
+// changes their mind. We do NOT run `dnsmasq --test` after deletion —
+// dnsmasq simply stops loading the absent file on next reload.
+async function deleteFile() {
+  if (!currentFile.value) return
+  // Two-step confirm: a deleted file is a more permanent change than a
+  // failed edit, and `.bak`-based rollback no longer applies (the file
+  // itself is gone). The versioned-history recovery flow is less obvious.
+  if (!confirm(t('confirm.deleteConfigFile', { file: currentFile.value.name }))) return
+  const ok = await actions.deleteConfigFile(selectedFile.value)
+  if (ok) {
+    selectedFile.value = ''
+    alert(t('alert.configDeleteSuccess', 'File deleted. Click "Apply" to activate.'))
   }
 }
 
