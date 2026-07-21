@@ -7,8 +7,12 @@
 intermask
 intermasq
 intermasq-linux
+intermasq-linux-*
+intermasq-ci
+*.sha256
 *.test
 *.out
+*.backup
 vendor/
 
 # Node/Vue
