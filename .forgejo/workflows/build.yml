@@ -29,8 +29,11 @@ jobs:
       GOPROXY: "https://nora.panelka.yadr01.internal/go,direct"
       GOSUMDB: "off"
       GOPRIVATE: "git.yadr00.internal/*"
-      SSL_CERT_FILE: "/etc/pki/ca-trust/source/anchors/step-ca.crt"
-      NODE_EXTRA_CA_CERTS: "/etc/pki/ca-trust/source/anchors/step-ca.crt"
+      # NOTE: do NOT set SSL_CERT_FILE / NODE_EXTRA_CA_CERTS to step-ca.crt
+      # directly — that overrides the system bundle and breaks public-CA
+      # trust (curl to go.dev / npm / etc fails with "unexpected end of file").
+      # The 'update-ca-trust' step adds step-ca to the system bundle, after
+      # which all tools trust both public CAs AND step-ca transparently.
       # Static test secret — only valid inside the CI job, never reuse in prod
       INTERMASQ_SECRET: "ci-test-secret-32-bytes-pad-XXXXXXXX"
 
@@ -67,7 +70,12 @@ jobs:
       - name: Install Go toolchain
         run: |
           # Fedora 44 ships Go 1.24; intermasq needs 1.25+. Tarball from go.dev.
-          curl -sL https://go.dev/dl/go1.26.0.linux-amd64.tar.gz | tar -C /usr/local -xz
+          # -f: fail on HTTP errors (don't pipe HTML error page into tar)
+          # Download first, then extract, so we get a clear error if URL is wrong.
+          curl -fsSL https://go.dev/dl/go1.26.0.linux-amd64.tar.gz -o /tmp/go.tar.gz
+          ls -lh /tmp/go.tar.gz
+          file /tmp/go.tar.gz
+          tar -C /usr/local -xzf /tmp/go.tar.gz
           echo "/usr/local/go/bin" >> $GITHUB_PATH
           /usr/local/go/bin/go version
 
