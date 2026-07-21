@@ -65,7 +65,8 @@ jobs:
             bash tar \
             nodejs npm \
             jq \
-            dnsmasq
+            dnsmasq \
+            gcc
 
       - name: Install Go toolchain
         run: |
@@ -107,6 +108,9 @@ jobs:
       - name: L1 + L2 — Go tests (unit + integration)
         env:
           RACE_FLAG: ${{ github.event.inputs.run_race_tests == 'true' && '-race' || '' }}
+          # -race requires CGO (and gcc). The binary itself is built with
+          # CGO_ENABLED=0 for static linking; tests opt back in here.
+          CGO_ENABLED: "1"
         run: |
           echo "Running: go test ./... $RACE_FLAG -count=1"
           go test ./... $RACE_FLAG -count=1
