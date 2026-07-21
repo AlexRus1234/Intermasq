@@ -35,6 +35,9 @@ jobs:
       INTERMASQ_SECRET: "ci-test-secret-32-bytes-pad-XXXXXXXX"
 
     steps:
+      - name: Install git first (minimal fedora image lacks it)
+        run: dnf install -y --setopt=install_weak_deps=False git curl
+
       - name: Trust Local CA
         run: |
           curl -k https://172.20.0.1:9000/roots.pem -o /etc/pki/ca-trust/source/anchors/step-ca.crt
@@ -53,10 +56,10 @@ jobs:
           sslverify=1
           EOF
 
-      - name: Install system dependencies
+      - name: Install remaining system dependencies
         run: |
           dnf install -y --setopt=install_weak_deps=False \
-            git curl bash tar \
+            bash tar \
             nodejs npm \
             jq \
             dnsmasq
