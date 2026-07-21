@@ -1,61 +1,180 @@
-name: Build
+name: Build and Test Intermasq
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      push_to_registry:
+        description: "Upload binary to Forgejo Packages on success?"
+        required: true
+        default: false
+        type: boolean
+      version_tag:
+        description: "Version tag for registry (e.g. v1.0-pre1). Defaults to sha-<short> if empty."
+        required: false
+        default: ""
+        type: string
+      run_race_tests:
+        description: "Run go test with -race (slower, more thorough)?"
+        required: true
+        default: true
+        type: boolean
 
 jobs:
-  build:
+  build-test:
     runs-on: docker
     container:
-      image: node:22-bookworm
+      image: fedora:44
     env:
-      NODE_EXTRA_CA_CERTS: /tmp/step-ca.crt
-      SSL_CERT_FILE: /tmp/step-ca.crt
+      # All external dependencies via Nora where possible
+      GOPROXY: "https://nora.panelka.yadr01.internal/go,direct"
+      GOSUMDB: "off"
+      GOPRIVATE: "git.yadr00.internal/*"
+      SSL_CERT_FILE: "/etc/pki/ca-trust/source/anchors/step-ca.crt"
+      NODE_EXTRA_CA_CERTS: "/etc/pki/ca-trust/source/anchors/step-ca.crt"
+      # Static test secret — only valid inside the CI job, never reuse in prod
+      INTERMASQ_SECRET: "ci-test-secret-32-bytes-pad-XXXXXXXX"
+
     steps:
-      - name: Trust Local CA & Configure Git
+      - name: Trust Local CA
         run: |
-          curl -k https://172.20.0.1:9000/roots.pem -o /tmp/step-ca.crt
-          git config --global http.sslCAInfo /tmp/step-ca.crt
+          curl -k https://172.20.0.1:9000/roots.pem -o /etc/pki/ca-trust/source/anchors/step-ca.crt
+          update-ca-trust
+          git config --global http.sslCAInfo /etc/pki/ca-trust/source/anchors/step-ca.crt
+
+      - name: Configure Nora RPM repo (custom packages if needed)
+        run: |
+          cat > /etc/yum.repos.d/nora.repo << 'EOF'
+          [nora-runner]
+          name=Nora Runner Dependencies
+          baseurl=https://nora.panelka.yadr01.internal/rpm/runner/
+          gpgcheck=0
+          enabled=1
+          priority=1
+          sslverify=1
+          EOF
+
+      - name: Install system dependencies
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            git curl bash tar \
+            nodejs npm \
+            jq \
+            dnsmasq
+
+      - name: Install Go toolchain
+        run: |
+          # Fedora 44 ships Go 1.24; intermasq needs 1.25+. Tarball from go.dev.
+          curl -sL https://go.dev/dl/go1.26.0.linux-amd64.tar.gz | tar -C /usr/local -xz
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
+          /usr/local/go/bin/go version
+
+      - name: Configure npm registry to Nora
+        run: npm config set registry https://nora.panelka.yadr01.internal/npm/
 
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Go
-        env:
-          GOPRIVATE: "git.yadr00.internal/*"
-          GONOSUMDB: "git.yadr00.internal/*"
-          GOPROXY: "http://172.20.5.17:10001,direct"
-          GOSUMDB: "off"
-        run: |
-          curl -sL https://go.dev/dl/go1.25.0.linux-amd64.tar.gz | tar -C /usr/local -xz
-          echo "/usr/local/go/bin" >> $GITHUB_PATH
-
       - name: Build frontend
         run: cd frontend && npm ci && npm run build
 
-      - name: Build Go binary
-        run: go build -o intermasq .
+      - name: Build binary
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+          go build -trimpath -ldflags="-s -w" -o intermasq-ci .
 
-      - name: Vet
+      - name: go vet
         run: go vet ./...
 
-      - name: Format check
-        run: test -z "$(gofmt -l .)"
-
-      - name: Test
-        run: go test ./...
-
-      - name: Smoke test
+      - name: gofmt check
         run: |
-          ./intermasq --ci-mode --systemd-scope none --port 0 &
-          sleep 2
-          kill %1 2>/dev/null || true
+          FMT_OUT="$(gofmt -l .)"
+          if [ -n "$FMT_OUT" ]; then
+            echo "::error::Files need gofmt:"
+            echo "$FMT_OUT"
+            exit 1
+          fi
+
+      - name: L1 + L2 — Go tests (unit + integration)
+        env:
+          RACE_FLAG: ${{ github.event.inputs.run_race_tests == 'true' && '-race' || '' }}
+        run: |
+          echo "Running: go test ./... $RACE_FLAG -count=1"
+          go test ./... $RACE_FLAG -count=1
+
+      - name: L3 — smoke tests against running binary
+        run: |
+          mkdir -p /tmp/conf /tmp/history
+          ./intermasq-ci \
+            -port 18081 \
+            -conf-dir /tmp/conf \
+            -db /tmp/users.json \
+            -audit-log /tmp/audit.log \
+            -history-dir /tmp/history \
+            -templates /tmp/templates.json \
+            -leases /tmp/leases \
+            -arp-file tests/fixtures/arp-sample.txt \
+            -init-system=none \
+            -ci-mode=true &
+          SERVER_PID=$!
+          # Wait for server to bind (max 10 sec)
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:18081/api/status >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          # Run smoke suite
+          set +e
+          BASE=http://localhost:18081 ./tests/smoke.sh
+          SMOKE_RC=$?
+          set -e
+          # Capture logs then kill server
+          kill $SERVER_PID 2>/dev/null || true
+          wait $SERVER_PID 2>/dev/null || true
+          # Smoke.sh exits 0 on clean pass OR all-fails-are-known-bugs.
+          if [ "$SMOKE_RC" -ne 0 ]; then
+            echo "::error::smoke.sh returned $SMOKE_RC (unexpected failures present)"
+            exit 1
+          fi
+
+      - name: Show binary info
+        run: |
+          ls -lh intermasq-ci
+          file intermasq-ci
+          sha256sum intermasq-ci | tee intermasq-ci.sha256
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: intermasq-linux-amd64
-          path: intermasq
+          name: intermasq-ci-${{ github.sha }}
+          path: |
+            intermasq-ci
+            intermasq-ci.sha256
+          retention-days: 14
+
+      - name: Publish to Forgejo Packages
+        if: success() && github.event.inputs.push_to_registry == 'true'
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version_tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$VERSION_INPUT" ]; then
+            VERSION="sha-${SHA:0:8}"
+          else
+            VERSION="$VERSION_INPUT"
+          fi
+          echo "Publishing as version: $VERSION"
+
+          curl -fSR --cacert /etc/pki/ca-trust/source/anchors/step-ca.crt \
+               --user "alexrus:${{ secrets.UPLOAD_TOKEN }}" \
+               --upload-file ./intermasq-ci \
+               "https://git.yadr00.internal/api/packages/AlexRus1234/generic/intermasq/${VERSION}/intermasq-ci"
+
+          curl -fSR --cacert /etc/pki/ca-trust/source/anchors/step-ca.crt \
+               --user "alexrus:${{ secrets.UPLOAD_TOKEN }}" \
+               --upload-file ./intermasq-ci.sha256 \
+               "https://git.yadr00.internal/api/packages/AlexRus1234/generic/intermasq/${VERSION}/intermasq-ci.sha256"
+
+          echo "✅ Published intermasq-ci v${VERSION}"
+
+      - name: Cleanup
+        if: always()
+        run: rm -f intermasq-ci intermasq-ci.sha256
