@@ -27,8 +27,8 @@ import (
 // resolveBins() (called from main after flag.Parse) with a lazy fallback so
 // tests that bypass main() still get sensible defaults via $PATH lookup.
 var (
-	dnsmasqBinPath string
-	sudoBinPath    string
+	dnsmasqBinPath   string
+	sudoBinPath      string
 	systemctlBinPath string
 	serviceBinPath   string
 	rcServiceBinPath string

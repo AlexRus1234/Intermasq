@@ -43,25 +43,25 @@ import (
 var staticFiles embed.FS
 
 var (
-	Port          = flag.String("port", "8081", "Port to listen on")
-	DBPath        = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
-	ConfigDir     = flag.String("conf-dir", "/etc/dnsmasq.d", "Directory with dnsmasq configs")
-	LeasesPath    = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
-	ArpPath       = flag.String("arp-file", "/proc/net/arp", "Path to ARP table file")
-	InitSystem    = flag.String("init-system", "auto", "Init system: auto, systemd, systemd-user, openrc, runit, sysvinit, none")
-	SystemdScope  = flag.String("systemd-scope", "", "Legacy flag: auto, system, user, none (overrides -init-system if set)")
-	CiMode        = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
+	Port         = flag.String("port", "8081", "Port to listen on")
+	DBPath       = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
+	ConfigDir    = flag.String("conf-dir", "/etc/dnsmasq.d", "Directory with dnsmasq configs")
+	LeasesPath   = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
+	ArpPath      = flag.String("arp-file", "/proc/net/arp", "Path to ARP table file")
+	InitSystem   = flag.String("init-system", "auto", "Init system: auto, systemd, systemd-user, openrc, runit, sysvinit, none")
+	SystemdScope = flag.String("systemd-scope", "", "Legacy flag: auto, system, user, none (overrides -init-system if set)")
+	CiMode       = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
 
 	// Binary path overrides. Empty value means: resolve via $PATH, then
 	// fall back to well-known absolute paths. Needed for distros (Alpine,
 	// older Debian) where these binaries live under /bin or /sbin rather
 	// than /usr/bin /usr/sbin.
-	DnsmasqBin   = flag.String("dnsmasq-bin", "", "Path to dnsmasq binary (auto-resolved via $PATH if empty)")
-	SudoBin      = flag.String("sudo-bin", "", "Path to sudo binary (auto-resolved if empty)")
-	SystemctlBin = flag.String("systemctl-bin", "", "Path to systemctl binary (auto-resolved if empty)")
-	ServiceBin   = flag.String("service-bin", "", "Path to sysvinit service binary (auto-resolved if empty)")
-	RcServiceBin = flag.String("rc-service-bin", "", "Path to OpenRC rc-service binary (auto-resolved if empty)")
-	SvBin        = flag.String("sv-bin", "", "Path to runit sv binary (auto-resolved if empty)")
+	DnsmasqBin    = flag.String("dnsmasq-bin", "", "Path to dnsmasq binary (auto-resolved via $PATH if empty)")
+	SudoBin       = flag.String("sudo-bin", "", "Path to sudo binary (auto-resolved if empty)")
+	SystemctlBin  = flag.String("systemctl-bin", "", "Path to systemctl binary (auto-resolved if empty)")
+	ServiceBin    = flag.String("service-bin", "", "Path to sysvinit service binary (auto-resolved if empty)")
+	RcServiceBin  = flag.String("rc-service-bin", "", "Path to OpenRC rc-service binary (auto-resolved if empty)")
+	SvBin         = flag.String("sv-bin", "", "Path to runit sv binary (auto-resolved if empty)")
 	AuditLogPath  = flag.String("audit-log", "/etc/intermasq/audit.log", "Path to audit log file")
 	TemplatesPath = flag.String("templates", "/etc/intermasq/templates.json", "Path to templates file")
 	HistoryDir    = flag.String("history-dir", "/etc/intermasq/history", "Directory for versioned config history")
@@ -82,9 +82,9 @@ var (
 	// accepts "set:<name>" (assigns a tag to the host) and "tag:<name>"
 	// (host matches only if that tag is already set by dhcp-match).
 	// "id:..." (client-id) is intentionally out of scope for the UI.
-	dhcpTagRegex     = regexp.MustCompile(`^(set|tag):[a-zA-Z0-9_][a-zA-Z0-9_-]*$`)
-	mu               sync.Mutex
-	loadedPlugins    []PluginManifest
+	dhcpTagRegex  = regexp.MustCompile(`^(set|tag):[a-zA-Z0-9_][a-zA-Z0-9_-]*$`)
+	mu            sync.Mutex
+	loadedPlugins []PluginManifest
 )
 
 type PluginManifest struct {
