@@ -152,7 +152,6 @@ jobs:
       - name: Show binary info
         run: |
           ls -lh intermasq-ci
-          file intermasq-ci
           sha256sum intermasq-ci | tee intermasq-ci.sha256
 
       - name: Upload artifact
