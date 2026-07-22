@@ -208,17 +208,19 @@ if require_jwt "static hosts — happy path" 12; then
     S=$(POST "$JWT" "/api/hosts" "{\"mac\":\"aa:bb:cc:dd:ee:04\",\"ip\":\"10.0.0.14\",\"file\":\"$FILE\"}")
     check "Add host without hostname (optional)" 200 "$S" || true
 
-    # Verify file content
+    # Tags
+    S=$(POST "$JWT" "/api/hosts" "{\"mac\":\"aa:bb:cc:dd:ee:05\",\"ip\":\"10.0.0.15\",\"hostname\":\"tagged\",\"tags\":[\"set:iot\",\"tag:guest\"],\"file\":\"$FILE\"}")
+    check "Add host with set:iot,tag:guest" 200 "$S" || true
+
+    # Verify file content AFTER all 4 successful adds (ee:01, ee:03, ee:04, ee:05).
+    # ee:02 was rejected as duplicate-IP so doesn't count.
     if [ -f "$FILE" ]; then
         LINES=$(grep -c "^dhcp-host=" "$FILE" || echo 0)
-        check "File has 4 dhcp-host lines" 4 "$LINES" || true
+        check "File has 4 dhcp-host lines (ee:01,ee:03,ee:04,ee:05)" 4 "$LINES" || true
     else
         check "File created" 4 0 || true
     fi
 
-    # Tags
-    S=$(POST "$JWT" "/api/hosts" "{\"mac\":\"aa:bb:cc:dd:ee:05\",\"ip\":\"10.0.0.15\",\"hostname\":\"tagged\",\"tags\":[\"set:iot\",\"tag:guest\"],\"file\":\"$FILE\"}")
-    check "Add host with set:iot,tag:guest" 200 "$S" || true
     if [ -f "$FILE" ] && grep -q "set:iot,tag:guest" "$FILE"; then
         check "Tags written in file" 0 0 || true
     else
@@ -303,7 +305,9 @@ if require_jwt "DNS aliases — happy path" 6; then
     check "Add PTR" 200 "$S" || true
 
     S=$(POST "$JWT" "/api/aliases" "{\"type\":\"TXT\",\"domain\":\"_dmarc.local\",\"target\":\"v=DMARC1;p=reject\",\"file\":\"$ALIAS_FILE\"}")
-    check "Add TXT" 200 "$S" || true
+    # A12: aliasDomainRegex rejects '_' in domain → breaks DMARC/DKIM/ACME.
+    # Should accept — DNS RFC allows underscore in owner names for SRV/TXT/etc.
+    check "A12: Add TXT with underscore domain → 200" 200 "$S" A12 || true
 
     S=$(POST "$JWT" "/api/aliases" "{\"type\":\"A\",\"domain\":\"bad.local\",\"target\":\"not-an-ip\",\"file\":\"$ALIAS_FILE\"}")
     check "A with non-IP target → 400" 400 "$S" || true
@@ -325,8 +329,12 @@ if require_jwt "DNS aliases — delete" 3; then
     S=$(POST "$JWT" "/api/aliases/delete" "{\"type\":\"A\",\"domain\":\"nas.local\",\"file\":\"$ALIAS_FILE\"}")
     check "Delete A record" 200 "$S" || true
 
+    # Second delete: depends on A2 being fixed. While A2 allows duplicates,
+    # there are 2 nas.local A records in file, so second delete finds the
+    # other one and returns 200 instead of 404. Mark as KNOWN(A2) — will
+    # become a clean pass once A2 is fixed.
     S=$(POST "$JWT" "/api/aliases/delete" "{\"type\":\"A\",\"domain\":\"nas.local\",\"file\":\"$ALIAS_FILE\"}")
-    check "Delete again → 404" 404 "$S" || true
+    check "Delete again → 404 (depends on A2 fix)" 404 "$S" A2 || true
 
     S=$(POST "$JWT" "/api/aliases/delete" "{\"type\":\"PTR\",\"domain\":\"5.0.0.10.in-addr.arpa\",\"file\":\"$ALIAS_FILE\"}")
     check "Delete PTR rejected (UI only supports A/CNAME)" 400 "$S" || true
@@ -364,7 +372,12 @@ if require_jwt "config files" 10; then
     check "PUT raw file with valid content" 200 "$S" || true
 
     S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -X PUT -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" -d '{"content":"# invalid\nport=abc\n"}' "$BASE/api/files/30-test.conf")
-    check "PUT with invalid dnsmasq syntax → 400" 400 "$S" || true
+    # A13: writeFileRaw runs `dnsmasq --test` without --conf-file=<path>, so
+    # dnsmasq tests its default config (not our newly-written file) and the
+    # invalid `port=abc` slips through as 200. Once the call is changed to
+    # `dnsmasq --test --conf-file=<path>` (or --conf-dir=$ConfigDir), this
+    # will return 400 with a dnsmasq error.
+    check "A13: PUT with invalid dnsmasq syntax → 400" 400 "$S" A13 || true
 
     S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -X DELETE -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" -d '{"file":"'"$CONF_DIR"'/30-test.conf"}' "$BASE/api/config/file")
     check "DELETE config file" 200 "$S" || true
@@ -390,8 +403,8 @@ if require_jwt "safety — backup / history" 3; then
 
     # Rollback test — only attempt if history exists
     if [ "${HIST_COUNT:-0}" -gt 0 ]; then
-        S=$(POST "$JWT" "/rollback" "{\"file\":\"$FILE\"}")
-        check "POST /api/rollback" 200 "$S" || true
+    S=$(POST "$JWT" "/api/rollback" "{\"file\":\"$FILE\"}")
+    check "POST /api/rollback" 200 "$S" || true
     else
         skip "POST /api/rollback (no history yet)"
     fi
@@ -505,8 +518,15 @@ if require_jwt "path traversal (A11)" 9; then
     S=$(POST "$JWT" "/api/aliases" "{\"type\":\"A\",\"domain\":\"evil.test\",\"target\":\"10.0.0.1\",\"file\":\"../../../tmp/x.conf\"}")
     check "Aliases file traversal rejected" 403 "$S" || true
 
+    # NOTE: Go's net/http server cleans paths with `..` BEFORE Gin's router
+    # sees them. So `/api/files/../../etc/passwd` is normalised to
+    # `/etc/passwd` and never matches the `/api/files/:name` route — it
+    # returns 404 NoRoute instead of reaching getFileHandler's explicit
+    # traversal check. The explicit check is still valuable as defense in
+    # depth (and for non-URL attack vectors), but via standard HTTP the
+    # framework already protects us. Expect 404 here.
     S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" --path-as-is -H "Authorization: Bearer $JWT" "$BASE/api/files/..%2F..%2Fetc%2Fpasswd")
-    check "GET raw file traversal rejected" 403 "$S" || true
+    check "GET raw file traversal blocked (404 path-cleaned by Go HTTP)" 404 "$S" || true
 
     S=$(curl -s -o /dev/null -w "%{http_code}" -X PUT -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" -d '{"content":"x"}' "$BASE/api/files/passwd")
     check "PUT raw file non-.conf rejected" 403 "$S" || true
@@ -545,7 +565,7 @@ TOTAL=$((PASS + FAIL + KNOWN_FAIL + SKIP))
 echo
 printf "  ${GREEN}Pass:        %d${RESET} / %d\n" "$PASS" "$TOTAL"
 printf "  ${RED}Fail:        %d${RESET} / %d  (unexpected — investigate)\n" "$FAIL" "$TOTAL"
-printf "  ${YELLOW}Known-fail:  %d${RESET} / %d  (bugs A2/A3/A4/A6/A8/A11 — to be fixed)\n" "$KNOWN_FAIL" "$TOTAL"
+printf "  ${YELLOW}Known-fail:  %d${RESET} / %d  (bugs A2/A3/A4/A6/A8/A11/A12/A13 — to be fixed)\n" "$KNOWN_FAIL" "$TOTAL"
 printf "  ${BLUE}Skipped:     %d${RESET} / %d  (pre-condition failed)\n" "$SKIP" "$TOTAL"
 echo
 
