@@ -154,15 +154,6 @@ jobs:
           ls -lh intermasq-ci
           sha256sum intermasq-ci | tee intermasq-ci.sha256
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: intermasq-ci-${{ github.sha }}
-          path: |
-            intermasq-ci
-            intermasq-ci.sha256
-          retention-days: 14
-
       - name: Publish to Forgejo Packages
         if: success() && github.event.inputs.push_to_registry == 'true'
         env:
