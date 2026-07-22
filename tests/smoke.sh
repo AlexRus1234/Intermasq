@@ -34,12 +34,30 @@ ADMIN_PASS="${ADMIN_PASS:-pass1234}"
 # matches .forgejo/workflows/build.yml. Override via env if running locally
 # against a different path.
 CONF_DIR="${CONF_DIR:-/tmp/conf}"
+# Path to the known-bugs list. Override via env if needed.
+KNOWN_BUGS_FILE="${KNOWN_BUGS_FILE:-$(dirname "$0")/known-bugs.txt}"
 
 PASS=0
 FAIL=0
 KNOWN_FAIL=0
 SKIP=0
 FATALS=()    # accumulated pre-condition failures (printed at the end)
+
+# Load known-bugs list into an associative array.
+# Each bug ID listed here means "test failures tagged with this ID are
+# expected". Remove the ID when the bug is fixed — the corresponding
+# check will then turn into a loud FAIL prompting you to update the test.
+declare -A KNOWN_BUGS=()
+if [ -f "$KNOWN_BUGS_FILE" ]; then
+    while IFS= read -r _line; do
+        _line="${_line%%#*}"                # strip comments
+        _line="$(echo "$_line" | xargs)"    # trim whitespace
+        [ -z "$_line" ] && continue
+        _id="${_line%%[[:space:]]*}"        # first token = bug ID
+        [ -n "$_id" ] && KNOWN_BUGS["$_id"]=1
+    done < "$KNOWN_BUGS_FILE"
+fi
+KNOWN_BUGS_LIST="$(echo "${!KNOWN_BUGS[@]}" | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')"
 
 # Colors (disabled if not a tty)
 if [ -t 1 ]; then
@@ -51,21 +69,36 @@ fi
 section() { printf "\n${CYAN}=== %s ===${RESET}\n" "$1"; }
 
 # check(desc, expected_status, actual_status, [bug_id])
-# Without bug_id:        pass if actual == expected
-# With bug_id:           known-fail if actual != expected (still counted as known issue)
-# Returns 0 on pass, 1 on any kind of fail (useful for branching).
+#
+# Without bug_id:                 pass if actual == expected, else FAIL (red).
+# With bug_id IN known-bugs.txt:  KNOWN-fail (yellow) if mismatch — pipeline
+#                                 stays green, but the bug is documented.
+# With bug_id NOT in known-bugs.txt and mismatch:
+#                                 loud FAIL (red) prompting test update —
+#                                 the bug was fixed but the test still
+#                                 asserts the old (broken) behaviour, OR
+#                                 the bug ID needs to be added to
+#                                 known-bugs.txt because it's a new issue.
+# Returns 0 on pass, 1 on any kind of fail.
 check() {
     local desc="$1" exp="$2" got="$3" bug="${4:-}"
     if [ "$exp" = "$got" ]; then
         printf "  ${GREEN}✓${RESET} %s\n" "$desc"
         PASS=$((PASS + 1)); return 0
-    elif [ -n "$bug" ]; then
-        printf "  ${YELLOW}✗ KNOWN(%s)${RESET} %s (got %s, want %s)\n" "$bug" "$desc" "$got" "$exp"
-        KNOWN_FAIL=$((KNOWN_FAIL + 1)); return 1
-    else
-        printf "  ${RED}✗${RESET} %s (got %s, want %s)\n" "$desc" "$got" "$exp"
-        FAIL=$((FAIL + 1)); return 1
     fi
+    if [ -n "$bug" ]; then
+        if [ "${KNOWN_BUGS[$bug]:-}" = "1" ]; then
+            printf "  ${YELLOW}✗ KNOWN(%s)${RESET} %s (got %s, want %s)\n" "$bug" "$desc" "$got" "$exp"
+            KNOWN_FAIL=$((KNOWN_FAIL + 1)); return 1
+        else
+            printf "  ${RED}✗ FAIL(%s)${RESET} %s (got %s, want %s)\n" "$bug" "$desc" "$got" "$exp"
+            printf "      ${RED}Bug %s not in known-bugs.txt${RESET} — either fix this test (bug already resolved)\n" "$bug"
+            printf "      or add %s to tests/known-bugs.txt (new bug found).\n" "$bug"
+            FAIL=$((FAIL + 1)); return 1
+        fi
+    fi
+    printf "  ${RED}✗${RESET} %s (got %s, want %s)\n" "$desc" "$got" "$exp"
+    FAIL=$((FAIL + 1)); return 1
 }
 
 # skip(desc): mark a test as skipped (pre-condition failed).
@@ -565,7 +598,7 @@ TOTAL=$((PASS + FAIL + KNOWN_FAIL + SKIP))
 echo
 printf "  ${GREEN}Pass:        %d${RESET} / %d\n" "$PASS" "$TOTAL"
 printf "  ${RED}Fail:        %d${RESET} / %d  (unexpected — investigate)\n" "$FAIL" "$TOTAL"
-printf "  ${YELLOW}Known-fail:  %d${RESET} / %d  (bugs A2/A3/A4/A6/A8/A11/A12/A13 — to be fixed)\n" "$KNOWN_FAIL" "$TOTAL"
+printf "  ${YELLOW}Known-fail:  %d${RESET} / %d  (bugs: %s)\n" "$KNOWN_FAIL" "$TOTAL" "${KNOWN_BUGS_LIST:-(none)}"
 printf "  ${BLUE}Skipped:     %d${RESET} / %d  (pre-condition failed)\n" "$SKIP" "$TOTAL"
 echo
 

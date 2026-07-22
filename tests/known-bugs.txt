@@ -1,0 +1,25 @@
+# Known bugs list for tests/smoke.sh.
+#
+# Format: <BUG_ID>  <short description>
+# Lines starting with # and blank lines are ignored.
+#
+# When a bug is fixed in code, REMOVE its ID from this file. If the
+# corresponding smoke.sh test still fails after the removal, the test
+# expectation needs to be updated (typically: was `check ... 400 ... A2`,
+# should become `check ... 200 ...` once the bug is fixed). The pipeline
+# will turn red and prompt you to do this — that is intentional.
+#
+# Adding a new bug: append ID + description here, add a `check ... <ID>`
+# line in smoke.sh. Pipeline stays yellow (KNOWN-fail).
+#
+# Removing a fixed bug: delete the ID here. Update the corresponding
+# check in smoke.sh to expect the fixed behaviour. Pipeline goes green.
+
+A2    DNS alias duplicate allowed — findAliasesByDomain excludes self when called for add flow
+A3    zero/broadcast MAC (00:00:00:00:00:00, ff:ff:ff:ff:ff:ff) accepted by macRegex
+A4    MAC with dash separator (aa-bb-cc-dd-ee-ff) saved verbatim — dnsmasq later rejects
+A6    bulk JSON /api/hosts/bulk response missing `count` field (CSV path returns it correctly)
+A8    /metrics 401 response has empty body — confusing for operators and Prometheus UI
+A11   path traversal battery (mostly caught; one vector blocked by Go HTTP path cleaning, not server logic)
+A12   aliasDomainRegex rejects `_` in domain — breaks _dmarc.local, _sip._tcp, DKIM/ACME challenge names
+A13   writeFileRaw's `dnsmasq --test` runs without --conf-file=<path> — tests default dnsmasq config, not the file being written
