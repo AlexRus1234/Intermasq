@@ -137,7 +137,7 @@ jobs:
           done
           # Run smoke suite
           set +e
-          BASE=http://localhost:18081 ./tests/smoke.sh
+          BASE=http://localhost:18081 CONF_DIR=/tmp/conf ./tests/smoke.sh
           SMOKE_RC=$?
           set -e
           # Capture logs then kill server

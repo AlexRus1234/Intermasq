@@ -30,7 +30,10 @@ BASE="${BASE:-http://localhost:8081}"
 SECRET="${INTERMASQ_SECRET:?INTERMASQ_SECRET must be set}"
 ADMIN_USER="${ADMIN_USER:-admin}"
 ADMIN_PASS="${ADMIN_PASS:-pass1234}"
-CONF_DIR="${CONF_DIR:-/tmp/intermasq-smoke-conf}"
+# MUST match the -conf-dir flag passed to the binary. Default /tmp/conf
+# matches .forgejo/workflows/build.yml. Override via env if running locally
+# against a different path.
+CONF_DIR="${CONF_DIR:-/tmp/conf}"
 
 PASS=0
 FAIL=0
@@ -360,7 +363,7 @@ if require_jwt "config files" 10; then
     S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -X PUT -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" -d '{"content":"# test\ndomain-needed\nbogus-priv\n"}' "$BASE/api/files/30-test.conf")
     check "PUT raw file with valid content" 200 "$S" || true
 
-    S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -X PUT -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" -d '{"content":"# broken\ndhcp-host=\n"}' "$BASE/api/files/30-test.conf")
+    S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -X PUT -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" -d '{"content":"# invalid\nport=abc\n"}' "$BASE/api/files/30-test.conf")
     check "PUT with invalid dnsmasq syntax → 400" 400 "$S" || true
 
     S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -X DELETE -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" -d '{"file":"'"$CONF_DIR"'/30-test.conf"}' "$BASE/api/config/file")
@@ -502,7 +505,7 @@ if require_jwt "path traversal (A11)" 9; then
     S=$(POST "$JWT" "/api/aliases" "{\"type\":\"A\",\"domain\":\"evil.test\",\"target\":\"10.0.0.1\",\"file\":\"../../../tmp/x.conf\"}")
     check "Aliases file traversal rejected" 403 "$S" || true
 
-    S=$(GET "$JWT" "/api/files/..%2F..%2Fetc%2Fpasswd")
+    S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" --path-as-is -H "Authorization: Bearer $JWT" "$BASE/api/files/..%2F..%2Fetc%2Fpasswd")
     check "GET raw file traversal rejected" 403 "$S" || true
 
     S=$(curl -s -o /dev/null -w "%{http_code}" -X PUT -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" -d '{"content":"x"}' "$BASE/api/files/passwd")
