@@ -28,8 +28,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
-	"net/url"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -759,12 +759,12 @@ func TestValidHostname_Unicode(t *testing.T) {
 		hostname string
 		want     bool
 	}{
-		{"host", true},         // ASCII baseline
-		{"höst", false},        // Latin Extended
-		{"сервер", false},      // Cyrillic
-		{"サーバ", false},       // Japanese
-		{"hōst", false},        // Maori macron
-		{"host₀₁", false},      // Unicode subscripts
+		{"host", true},    // ASCII baseline
+		{"höst", false},   // Latin Extended
+		{"сервер", false}, // Cyrillic
+		{"サーバ", false},    // Japanese
+		{"hōst", false},   // Maori macron
+		{"host₀₁", false}, // Unicode subscripts
 	}
 	for _, tc := range cases {
 		got := validHostname(tc.hostname)
