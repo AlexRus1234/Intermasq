@@ -28,6 +28,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
+	"mime/multipart"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -940,5 +941,517 @@ func TestRestoreBackupZip_ValidArchive(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "domain-needed") {
 		t.Error("restored content should contain 'domain-needed'")
+	}
+}
+
+// ===== Read-only GET handlers (L2) =====
+
+func TestGetHostsHandler_ReturnsHosts(t *testing.T) {
+	dir := newTestDir(t)
+	os.WriteFile(filepath.Join(dir, "hosts.conf"),
+		[]byte("dhcp-host=aa:bb:cc:dd:ee:01,h1,10.0.0.1\ndhcp-host=aa:bb:cc:dd:ee:02,h2,10.0.0.2\n"), 0644)
+
+	w, c := newJSONContext("GET", "/api/hosts", "")
+	getHostsHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "aa:bb:cc:dd:ee:01") {
+		t.Error("response should contain host MAC")
+	}
+}
+
+func TestGetHostsHandler_EmptyDir(t *testing.T) {
+	newTestDir(t)
+
+	w, c := newJSONContext("GET", "/api/hosts", "")
+	getHostsHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if w.Body.String() != "[]" {
+		t.Errorf("expected empty array, got %s", w.Body.String())
+	}
+}
+
+func TestGetAliasesHandler_ReturnsAliases(t *testing.T) {
+	dir := newTestDir(t)
+	os.WriteFile(filepath.Join(dir, "aliases.conf"),
+		[]byte("address=/nas.local/10.0.0.5\ncname=www.local,nas.local\n"), 0644)
+
+	w, c := newJSONContext("GET", "/api/aliases", "")
+	getAliasesHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "nas.local") {
+		t.Error("response should contain alias domain")
+	}
+}
+
+func TestGetConfigHandler_ReturnsSnapshot(t *testing.T) {
+	dir := newTestDir(t)
+	os.WriteFile(filepath.Join(dir, "test.conf"), []byte("domain-needed\nbogus-priv\n"), 0644)
+
+	w, c := newJSONContext("GET", "/api/config", "")
+	getConfigHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "files") {
+		t.Error("snapshot should have 'files' field")
+	}
+}
+
+func TestGetDhcpRangesHandler(t *testing.T) {
+	dir := newTestDir(t)
+	os.WriteFile(filepath.Join(dir, "dhcp.conf"),
+		[]byte("dhcp-range=192.168.1.50,192.168.1.150,255.255.255.0,12h\n"), 0644)
+
+	w, c := newJSONContext("GET", "/api/templates/ranges", "")
+	getDhcpRangesHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "ranges") {
+		t.Error("response should have 'ranges' field")
+	}
+}
+
+func TestGetTemplatesHandler_Empty(t *testing.T) {
+	templates = make(map[string]Template)
+
+	w, c := newJSONContext("GET", "/api/templates", "")
+	getTemplatesHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestGetUsersHandler_ReturnsUsers(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	users = map[string]string{"admin": "hash", "alice": "hash2"}
+
+	w, c := newJSONContext("GET", "/api/users", "")
+	getUsersHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "admin") {
+		t.Error("response should list admin user")
+	}
+}
+
+func TestGetArpHandler_ReturnsTable(t *testing.T) {
+	dir := t.TempDir()
+	arpFile := filepath.Join(dir, "arp.txt")
+	os.WriteFile(arpFile, []byte("IP address     HW type  Flags  HW address           Mask Device\n"+
+		"192.168.1.10   0x1      0x2    aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
+	*ArpPath = arpFile
+	newTestDir(t)
+
+	w, c := newJSONContext("GET", "/api/arp", "")
+	getArpHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "aa:bb:cc:dd:ee:ff") {
+		t.Error("response should contain ARP MAC")
+	}
+}
+
+func TestGetLeasesHandler_ReturnsLeases(t *testing.T) {
+	dir := t.TempDir()
+	leasesFile := filepath.Join(dir, "leases")
+	os.WriteFile(leasesFile, []byte("1000 aa:bb:cc:dd:ee:ff 192.168.1.10 phone *\n"), 0644)
+	*LeasesPath = leasesFile
+	newTestDir(t)
+
+	w, c := newJSONContext("GET", "/api/leases", "")
+	getLeasesHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "192.168.1.10") {
+		t.Error("response should contain lease IP")
+	}
+}
+
+func TestGetLeasesHandler_NoFile(t *testing.T) {
+	*LeasesPath = filepath.Join(t.TempDir(), "no-leases")
+	newTestDir(t)
+
+	w, c := newJSONContext("GET", "/api/leases", "")
+	getLeasesHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200 (empty array), got %d", w.Code)
+	}
+	if w.Body.String() != "[]" {
+		t.Errorf("expected empty array, got %s", w.Body.String())
+	}
+}
+
+func TestGetNewDevicesHandler(t *testing.T) {
+	dir := t.TempDir()
+	arpFile := filepath.Join(dir, "arp.txt")
+	os.WriteFile(arpFile, []byte("IP address     HW type  Flags  HW address           Mask Device\n"+
+		"192.168.1.10   0x1      0x2    11:22:33:44:55:01     *    eth0\n"), 0644)
+	*ArpPath = arpFile
+	*LeasesPath = filepath.Join(dir, "empty.leases")
+	newTestDir(t)
+
+	w, c := newJSONContext("GET", "/api/new-devices", "")
+	getNewDevicesHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	// 11:22:33:44:55:01 is in ARP but not in hosts or leases → new device.
+	if !strings.Contains(w.Body.String(), "11:22:33:44:55:01") {
+		t.Error("response should contain the unknown device MAC")
+	}
+}
+
+func TestNextIPHandler_Success(t *testing.T) {
+	newTestDir(t)
+
+	w, c := newJSONContext("GET", "/api/hosts/next-ip?range=10.99.0.0/24", "")
+	nextIPHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "10.99.0.") {
+		t.Errorf("expected IP in 10.99.0.x range, got %s", w.Body.String())
+	}
+}
+
+func TestNextIPHandler_MissingRange(t *testing.T) {
+	w, c := newJSONContext("GET", "/api/hosts/next-ip", "")
+	nextIPHandler(c)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for missing range, got %d", w.Code)
+	}
+}
+
+func TestNextIPHandler_InvalidCIDR(t *testing.T) {
+	w, c := newJSONContext("GET", "/api/hosts/next-ip?range=not-a-cidr", "")
+	nextIPHandler(c)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for invalid CIDR, got %d", w.Code)
+	}
+}
+
+func TestHistoryListHandler_ReturnsVersions(t *testing.T) {
+	dir := newTestDir(t)
+	*HistoryDir = t.TempDir()
+	*HistoryDepth = 10
+	file := filepath.Join(dir, "test.conf")
+	os.WriteFile(file, []byte("domain-needed\n"), 0644)
+
+	// Trigger a history save by calling createLocalBackup.
+	createLocalBackup(file)
+	createLocalBackup(file)
+
+	w, c := newJSONContext("GET", "/api/history?file="+url.QueryEscape(file), "")
+	historyListHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "versions") {
+		t.Error("response should have 'versions' field")
+	}
+}
+
+func TestHistoryListHandler_MissingFile(t *testing.T) {
+	w, c := newJSONContext("GET", "/api/history", "")
+	historyListHandler(c)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for missing file param, got %d", w.Code)
+	}
+}
+
+func TestAuditHandler_ReturnsEntries(t *testing.T) {
+	dir := t.TempDir()
+	auditPath := filepath.Join(dir, "audit.log")
+	entry := `{"timestamp":"2026-01-01T00:00:00Z","user":"admin","action":"add","mac":"aa:bb:cc:dd:ee:ff"}` + "\n"
+	os.WriteFile(auditPath, []byte(entry), 0644)
+	*AuditLogPath = auditPath
+
+	w, c := newJSONContext("GET", "/api/audit", "")
+	auditHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "add") {
+		t.Error("response should contain audit action")
+	}
+}
+
+func TestAuditHandler_NoLogFile(t *testing.T) {
+	*AuditLogPath = filepath.Join(t.TempDir(), "no-audit.log")
+
+	w, c := newJSONContext("GET", "/api/audit", "")
+	auditHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200 (empty array), got %d", w.Code)
+	}
+	if w.Body.String() != "[]" {
+		t.Errorf("expected empty array, got %s", w.Body.String())
+	}
+}
+
+func TestBackupHandler_ReturnsZip(t *testing.T) {
+	dir := newTestDir(t)
+	os.WriteFile(filepath.Join(dir, "hosts.conf"), []byte("domain-needed\n"), 0644)
+
+	w, c := newJSONContext("GET", "/api/backup", "")
+	backupHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	ct := w.Header().Get("Content-Type")
+	if !strings.Contains(ct, "application/zip") {
+		t.Errorf("expected application/zip content-type, got %s", ct)
+	}
+	if w.Body.Len() < 50 {
+		t.Errorf("zip body too small: %d bytes", w.Body.Len())
+	}
+}
+
+// ===== Setup handler =====
+
+func TestSetupHandler_Success(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	users = make(map[string]string)
+	origKey := SecretKey
+	SecretKey = []byte("test-secret-key-32-bytes-long!!")
+	t.Cleanup(func() { SecretKey = origKey })
+
+	w, c := newJSONContext("POST", "/api/setup", `{"username":"admin","password":"secret123"}`)
+	setupHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "token") {
+		t.Error("response should contain a token")
+	}
+	if _, ok := users["admin"]; !ok {
+		t.Error("admin user should be created")
+	}
+}
+
+func TestSetupHandler_AlreadySetup(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	users = map[string]string{"admin": "hash"}
+
+	w, c := newJSONContext("POST", "/api/setup", `{"username":"admin","password":"secret123"}`)
+	setupHandler(c)
+
+	if w.Code != 403 {
+		t.Fatalf("expected 403 when already set up, got %d", w.Code)
+	}
+}
+
+// ===== Export handlers =====
+
+func TestExportCSVHandler(t *testing.T) {
+	dir := newTestDir(t)
+	os.WriteFile(filepath.Join(dir, "hosts.conf"),
+		[]byte("dhcp-host=aa:bb:cc:dd:ee:ff,host1,192.168.1.10\n"), 0644)
+
+	w, c := newJSONContext("GET", "/api/hosts/csv", "")
+	exportCSVHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "aa:bb:cc:dd:ee:ff") {
+		t.Error("CSV should contain host MAC")
+	}
+	ct := w.Header().Get("Content-Type")
+	if !strings.Contains(ct, "text/csv") {
+		t.Errorf("expected text/csv, got %s", ct)
+	}
+}
+
+func TestExportAliasesCSVHandler(t *testing.T) {
+	dir := newTestDir(t)
+	os.WriteFile(filepath.Join(dir, "aliases.conf"),
+		[]byte("address=/nas.local/10.0.0.5\n"), 0644)
+
+	w, c := newJSONContext("GET", "/api/aliases/csv", "")
+	exportAliasesCSVHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "nas.local") {
+		t.Error("CSV should contain alias domain")
+	}
+}
+
+// ===== Import handlers (multipart) =====
+
+func TestImportCSVHandler_Success(t *testing.T) {
+	dir := newTestDir(t)
+	file := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(file, []byte(""), 0644)
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, _ := writer.CreateFormFile("file", "hosts.csv")
+	part.Write([]byte("mac,ip,hostname\naa:bb:cc:dd:ee:01,10.0.0.1,h1\n"))
+	writer.WriteField("target_file", file)
+	writer.Close()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/hosts/csv", body)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	c.Set("user", "admin")
+	importCSVHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "count") {
+		t.Error("response should have count field")
+	}
+}
+
+func TestImportCSVHandler_NoFile(t *testing.T) {
+	dir := newTestDir(t)
+	file := filepath.Join(dir, "hosts.conf")
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	writer.WriteField("target_file", file)
+	writer.Close()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/hosts/csv", body)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	c.Set("user", "admin")
+	importCSVHandler(c)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for missing file, got %d", w.Code)
+	}
+}
+
+func TestImportAliasesCSVHandler_Success(t *testing.T) {
+	dir := newTestDir(t)
+	file := filepath.Join(dir, "aliases.conf")
+	os.WriteFile(file, []byte(""), 0644)
+
+	bodyBuf := &bytes.Buffer{}
+	writer := multipart.NewWriter(bodyBuf)
+	part, _ := writer.CreateFormFile("file", "aliases.csv")
+	part.Write([]byte("type,domain,target\nA,a.test,10.0.0.1\n"))
+	writer.WriteField("target_file", file)
+	writer.Close()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/aliases/csv", bodyBuf)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	c.Set("user", "admin")
+	importAliasesCSVHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "count") {
+		t.Error("response should have count field")
+	}
+}
+
+func TestImportAliasesCSVHandler_NoFile(t *testing.T) {
+	dir := newTestDir(t)
+	file := filepath.Join(dir, "aliases.conf")
+
+	bodyBuf := &bytes.Buffer{}
+	writer := multipart.NewWriter(bodyBuf)
+	writer.WriteField("target_file", file)
+	writer.Close()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/api/aliases/csv", bodyBuf)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	c.Set("user", "admin")
+	importAliasesCSVHandler(c)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for missing file, got %d", w.Code)
+	}
+}
+
+// ===== Apply template handler =====
+
+func TestApplyTemplateHandler_Success(t *testing.T) {
+	dir := newTestDir(t)
+	targetFile := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(targetFile, []byte(""), 0644)
+
+	templates = map[string]Template{
+		"test-tpl": {ID: "test-tpl", Name: "Test", IPRange: "10.99.0.0/24", HostnamePattern: "dev-{NNN}", TargetFile: targetFile},
+	}
+
+	w, c := newJSONContext("POST", "/api/hosts/apply-template", `{"mac":"aa:bb:cc:dd:ee:ff","template_id":"test-tpl"}`)
+	applyTemplateHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "10.99.0.") {
+		t.Errorf("response should contain generated IP in 10.99.0.x: %s", w.Body.String())
+	}
+}
+
+func TestApplyTemplateHandler_NotFound(t *testing.T) {
+	newTestDir(t)
+	templates = make(map[string]Template)
+
+	w, c := newJSONContext("POST", "/api/hosts/apply-template", `{"mac":"aa:bb:cc:dd:ee:ff","template_id":"missing"}`)
+	applyTemplateHandler(c)
+
+	if w.Code != 404 {
+		t.Fatalf("expected 404 for missing template, got %d", w.Code)
+	}
+}
+
+func TestApplyTemplateHandler_BadMAC(t *testing.T) {
+	newTestDir(t)
+	templates = map[string]Template{"test-tpl": {ID: "test-tpl"}}
+
+	w, c := newJSONContext("POST", "/api/hosts/apply-template", `{"mac":"bad","template_id":"test-tpl"}`)
+	applyTemplateHandler(c)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for bad MAC, got %d", w.Code)
 	}
 }
