@@ -67,7 +67,7 @@ if ! code=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/status" 2>/dev/nul
 fi
 ok "server reachable at $BASE"
 
-PPOST "/api/status" >/dev/null
+PGET "/api/status" >/dev/null
 if [ "$(body | jval .setup_required)" = "true" ]; then
     S=$(PPOST "/api/setup" "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASS\"}")
 else
@@ -81,8 +81,6 @@ else
     printf "\n${RED}perf aborted (no auth).${RESET}\n"; exit 1
 fi
 rm -rf "$CONF_DIR"; mkdir -p "$CONF_DIR"
-
-export JWT BASE   # visible to the sh -c children spawned by xargs below
 
 # ============================================================================
 # Scenario 1 — read throughput against a large seeded dataset
@@ -99,8 +97,10 @@ if [ "${HOST_COUNT:-0}" -ge "$SEED_HOSTS" ]; then ok "seeded dataset visible"; e
 
 rm -f /tmp/perf.read.codes
 start=$(date +%s.%N)
+# xargs runs curl directly (no sh -c): $JWT/$BASE expand in this shell when
+# the argv is built, so there are no nested quotes for xargs to choke on.
 seq 1 "$READ_TOTAL" | xargs -P "$READ_CONCURRENCY" -I{} \
-    sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $JWT" "$BASE/api/hosts"' \
+    curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $JWT" "$BASE/api/hosts" \
     > /tmp/perf.read.codes
 end=$(date +%s.%N)
 
@@ -126,7 +126,7 @@ section "reload storm — POST /api/reload x$RELOAD_CONCURRENCY (concurrent)"
 
 rm -f /tmp/perf.reload.codes
 seq 1 "$RELOAD_CONCURRENCY" | xargs -P "$RELOAD_CONCURRENCY" -I{} \
-    sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -X POST -H "Authorization: Bearer $JWT" "$BASE/api/reload"' \
+    curl -s -o /dev/null -w "%{http_code}\n" -X POST -H "Authorization: Bearer $JWT" "$BASE/api/reload" \
     > /tmp/perf.reload.codes
 
 distinct=$(sort -u /tmp/perf.reload.codes | wc -l)
