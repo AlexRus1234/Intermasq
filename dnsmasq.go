@@ -41,6 +41,10 @@ import (
 	"strings"
 )
 
+// octetPrefixRegex matches 1-3 dot-separated octets (e.g. "10", "10.0",
+// "10.0.0") used as an IP-prefix transform in bulk-edit.
+var octetPrefixRegex = regexp.MustCompile(`^(\d{1,3}\.){0,2}\d{1,3}$`)
+
 // isSafePath reports whether path is the configured ConfigDir itself or a
 // file inside it. Used as the single chokepoint for path-traversal defence
 // across all subsystems that accept user-supplied paths.
@@ -224,8 +228,7 @@ func parseIPTransform(oldStr, newStr string) (*ipTransform, error) {
 		return &ipTransform{mode: ipTransformCIDR, oldNet: oldNet, newNet: newNet}, nil
 	}
 
-	octetRe := regexp.MustCompile(`^(\d{1,3}\.){0,2}\d{1,3}$`)
-	if !octetRe.MatchString(oldStr) || !octetRe.MatchString(newStr) {
+	if !octetPrefixRegex.MatchString(oldStr) || !octetPrefixRegex.MatchString(newStr) {
 		return nil, fmt.Errorf("invalid_prefix_format")
 	}
 	if strings.Count(oldStr, ".") != strings.Count(newStr, ".") {

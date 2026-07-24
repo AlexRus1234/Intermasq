@@ -90,6 +90,7 @@ import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { store, api, actions } from '../../store.js'
 import { translateApiError } from '../../i18n.js'
+import { toast } from '../../toast.js'
 import TemplatesModal from './TemplatesModal.vue'
 
 const { t } = useI18n()
@@ -183,7 +184,7 @@ async function autoIP() {
     showRangeInput.value = false
   } catch (e) {
     const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.autoIpError', 'Failed to get free IP')
-    alert(msg)
+    toast.error(msg)
     showRangeInput.value = true
   } finally {
     autoIPLoading.value = false
@@ -206,15 +207,15 @@ async function onTemplateChange() {
 
 async function saveHost() {
   const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/i;
-  if (!macRegex.test(form.value.mac)) { alert(t('alert.invalidMac')); return; }
-  if (!form.value.file) { alert(t('alert.fileRequired')); return; }
+    if (!macRegex.test(form.value.mac)) { toast.error(t('alert.invalidMac')); return; }
+    if (!form.value.file) { toast.error(t('alert.fileRequired')); return; }
   // IP и hostname опциональны: dnsmasq допускает dhcp-host=<mac>,
   // dhcp-host=<mac>,<hostname>, dhcp-host=<mac>,<ip>, dhcp-host=<mac>,<hostname>,<ip>.
   // Валидация формата (если поле заполнено) делается на бэке.
   const tags = parseTagsInput(tagsInput.value)
   for (const tag of tags) {
     if (!/^(set|tag|id):[a-zA-Z0-9_][a-zA-Z0-9_-]*$/.test(tag)) {
-      alert(t('alert.invalidTag', 'Invalid tag (must be set:NAME, tag:NAME or id:NAME)') + ': ' + tag)
+        toast.error(t('alert.invalidTag', 'Invalid tag (must be set:NAME, tag:NAME or id:NAME)') + ': ' + tag)
       return
     }
   }
@@ -232,7 +233,7 @@ async function saveHost() {
     actions.loadData()
   } catch (e) {
     const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.saveError')
-    alert(msg)
+    toast.error(msg)
   }
 }
 
@@ -262,10 +263,10 @@ async function saveBulkHosts() {
         await api.post('/hosts/bulk', { file: form.value.file, hosts: parsedBulkHosts.value })
         bulkText.value = ''
         actions.loadData()
-        alert(t('alert.importSuccess', { count: parsedBulkHosts.value.length }))
+        toast.success(t('alert.importSuccess', { count: parsedBulkHosts.value.length }))
     } catch (e) { 
         const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.importError')
-        alert(msg)
+        toast.error(msg)
     }
 }
 

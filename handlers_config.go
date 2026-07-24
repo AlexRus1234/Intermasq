@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -30,7 +29,7 @@ func updateConfigHandler(c *gin.Context) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
-	directiveKeyValidator := regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	directiveKeyValidator := directiveKeyRegex
 	for _, d := range req.Directives {
 		if !directiveKeyValidator.MatchString(d.Key) {
 			c.JSON(400, gin.H{"error": "invalid_directive_key", "key": d.Key})

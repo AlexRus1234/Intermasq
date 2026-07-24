@@ -10,6 +10,7 @@ import DnsmasqConfig from './components/config/DnsmasqConfig.vue'
 import DnsAliasesView from './components/dns/DnsAliasesView.vue'
 import SafetyTab from './components/safety/SafetyTab.vue'
 import UsersTab from './components/UsersTab.vue'
+import ToastContainer from './components/ToastContainer.vue'
 
 const { locale } = useI18n()
 
@@ -59,6 +60,7 @@ onUnmounted(() => { if (sseConnection) sseConnection.close() })
 
 <template>
   <div class="container-fluid mt-4 px-4 px-lg-5">
+    <ToastContainer />
     
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="fw-bold d-flex align-items-center mb-0">

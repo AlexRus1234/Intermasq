@@ -155,6 +155,7 @@
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { store, api, actions } from '../../store.js'
+import { toast } from '../../toast.js'
 import { translateApiError } from '../../i18n.js'
 import { DIRECTIVE_SCHEMA, GROUP_ORDER, GROUP_LABELS, schemaFor } from './directives.js'
 import DhcpRangeRow from './DhcpRangeRow.vue'
@@ -269,7 +270,7 @@ async function save() {
     if (f) {
       localDirectives.value = f.directives.map(d => ({ ...d, _uid: ++uidCounter }))
     }
-    alert(t('alert.configSaveSuccess'))
+        toast.success(t('alert.configSaveSuccess'))
   }
 }
 
@@ -278,10 +279,10 @@ async function rollback() {
   try {
     await api.post('/rollback', { file: selectedFile.value })
     await actions.loadConfig()
-    alert(t('alert.rollbackSuccess'))
+        toast.success(t('alert.rollbackSuccess'))
   } catch (e) {
     const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.rollbackError')
-    alert(msg)
+        toast.error(msg)
   }
 }
 
@@ -313,7 +314,7 @@ async function deleteFile() {
   const ok = await actions.deleteConfigFile(selectedFile.value)
   if (ok) {
     selectedFile.value = ''
-    alert(t('alert.configDeleteSuccess', 'File deleted. Click "Apply" to activate.'))
+        toast.success(t('alert.configDeleteSuccess', 'File deleted. Click "Apply" to activate.'))
   }
 }
 

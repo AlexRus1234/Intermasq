@@ -79,6 +79,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { store, actions } from '../../store.js'
+import { toast } from '../../toast.js'
 
 const showOnlyNewLeases = ref(false)
 const selectedLeases = ref([])
@@ -114,7 +115,7 @@ async function bulkAddToStatic() {
     const macs = new Set(selectedLeases.value.map(m => m.toLowerCase()))
     const leases = store.leases.filter(l => macs.has(l.mac.toLowerCase()))
     const file = store.hosts.length > 0 ? (store.hosts[0].file.includes('|') ? store.hosts[0].file.split('|')[0] : store.hosts[0].file) : null
-    if (!file) { alert('No target file found'); return }
+    if (!file) { toast.error('No target file found'); return }
     const ok = await actions.bulkLeaseToStatic(leases, file)
     if (ok) selectedLeases.value = []
 }

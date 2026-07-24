@@ -46,6 +46,7 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { store, api, actions } from '../../store.js'
+import { toast } from '../../toast.js'
 import { translateApiError } from '../../i18n.js'
 import HostForm from './HostForm.vue'
 import HostTable from './HostTable.vue'
@@ -82,10 +83,10 @@ async function rollbackFile() {
     try {
         await api.post('/rollback', { file: selectedFile.value })
         actions.loadData()
-        alert(t('alert.rollbackSuccess'))
+        toast.success(t('alert.rollbackSuccess'))
     } catch (e) {
         const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.rollbackError')
-        alert(msg)
+        toast.error(msg)
     }
 }
 </script>

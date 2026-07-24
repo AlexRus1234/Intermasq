@@ -69,6 +69,7 @@
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { store, api, actions } from '../../store.js'
+import { toast } from '../../toast.js'
 import { translateApiError } from '../../i18n.js'
 import BulkMoveModal from './BulkMoveModal.vue'
 import BulkEditModal from './BulkEditModal.vue'
@@ -149,7 +150,7 @@ async function deleteHost(mac, file) {
       actions.loadData() 
   } catch (e) { 
       const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.deleteError')
-      alert(msg)
+      toast.error(msg)
   }
 }
 
@@ -159,7 +160,7 @@ async function bulkDelete() {
     await Promise.all(selectedHosts.value.map(h => api.delete(`/hosts/${h.mac}?file=${encodeURIComponent(h.file)}`)))
     selectedHosts.value = []
     actions.loadData()
-  } catch (e) { alert(t('alert.bulkDeleteError')) }
+  } catch (e) { toast.error(t('alert.bulkDeleteError')) }
 }
 
 function onMoveDone() {

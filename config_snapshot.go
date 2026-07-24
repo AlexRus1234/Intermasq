@@ -38,6 +38,10 @@ import (
 // directives (e.g. "#no-resolv").
 var directiveKeyRegex = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
+// leaseTimeRegex matches a dnsmasq dhcp-range lease-time suffix: digits
+// optionally followed by s/m/h/d/w, or the literal "infinite".
+var leaseTimeRegex = regexp.MustCompile(`^\d+[smhdw]?$`)
+
 // directiveValueSeparator splits "key=value" into key and value. dnsmasq conf
 // files use '=' as the canonical separator. Keys may contain hyphens
 // (e.g. "no-resolv", "domain-needed"), so '-' is NOT treated as a separator.
@@ -200,8 +204,7 @@ func isLeaseTime(s string) bool {
 	if len(s) < 2 {
 		return false
 	}
-	leaseRe := regexp.MustCompile(`^\d+[smhdw]?$`)
-	return leaseRe.MatchString(s)
+	return leaseTimeRegex.MatchString(s)
 }
 
 // dhcpRangeToCIDR computes a CIDR string (network/prefix) from a DhcpRange

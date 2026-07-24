@@ -76,6 +76,7 @@
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { store, actions } from '../../store.js'
+import { toast } from '../../toast.js'
 
 const { t } = useI18n()
 
@@ -139,8 +140,8 @@ watch(() => props.editData, (newData) => {
 })
 
 async function saveAlias() {
-    if (!form.value.domain || !form.value.target) { alert(t('alert.invalidData')); return }
-    if (!form.value.file) { alert(t('alert.fileRequired')); return }
+    if (!form.value.domain || !form.value.target) { toast.error(t('alert.invalidData')); return }
+    if (!form.value.file) { toast.error(t('alert.fileRequired')); return }
 
     try {
         if (isEditing.value) {
@@ -152,7 +153,7 @@ async function saveAlias() {
             form.value.domain = ''; form.value.target = ''
         }
     } catch (e) {
-        alert(t('alert.aliasAddError'))
+        toast.error(t('alert.aliasAddError'))
     }
 }
 
@@ -221,7 +222,7 @@ async function saveBulkAliases() {
     const res = await actions.bulkAddAliases(parsedBulkAliases.value, form.value.file)
     if (res) {
         bulkText.value = ''
-        alert(t('alert.importSuccess', { count: res.count }))
+        toast.success(t('alert.importSuccess', { count: res.count }))
     }
 }
 
