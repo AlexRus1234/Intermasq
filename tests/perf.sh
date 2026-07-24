@@ -98,8 +98,10 @@ if [ "${HOST_COUNT:-0}" -ge "$SEED_HOSTS" ]; then ok "seeded dataset visible"; e
 rm -f /tmp/perf.read.codes
 start=$(date +%s.%N)
 # xargs runs curl directly (no sh -c): $JWT/$BASE expand in this shell when
-# the argv is built, so there are no nested quotes for xargs to choke on.
-seq 1 "$READ_TOTAL" | xargs -P "$READ_CONCURRENCY" -I{} \
+# the argv is built. tr + -0 feeds null-delimited input so xargs does NO quote
+# processing — kills the spurious "unmatched single quote" warning some xargs
+# builds emit, with no downside for plain-integer input.
+seq 1 "$READ_TOTAL" | tr '\n' '\0' | xargs -0 -P "$READ_CONCURRENCY" -I{} \
     curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $JWT" "$BASE/api/hosts" \
     > /tmp/perf.read.codes
 end=$(date +%s.%N)
@@ -125,7 +127,7 @@ awk "BEGIN{exit !($rps >= $READ_RPS_FLOOR)}" && ok "throughput ≥ ${READ_RPS_FL
 section "reload storm — POST /api/reload x$RELOAD_CONCURRENCY (concurrent)"
 
 rm -f /tmp/perf.reload.codes
-seq 1 "$RELOAD_CONCURRENCY" | xargs -P "$RELOAD_CONCURRENCY" -I{} \
+seq 1 "$RELOAD_CONCURRENCY" | tr '\n' '\0' | xargs -0 -P "$RELOAD_CONCURRENCY" -I{} \
     curl -s -o /dev/null -w "%{http_code}\n" -X POST -H "Authorization: Bearer $JWT" "$BASE/api/reload" \
     > /tmp/perf.reload.codes
 
@@ -157,7 +159,9 @@ CRUD_FILE="$CONF_DIR/perf-crud.conf"
 crud_fail=0
 for i in $(seq 1 "$CRUD_CYCLES"); do
     v=$i
-    mac=$(printf 'aa:bb:cc:%02x:%02x:%02x' $(( (v >> 16) & 0xFF )) $(( (v >> 8) & 0xFF )) $(( v & 0xFF )))
+    # aa:bb:dd (NOT aa:bb:cc) so CRUD MACs never collide with the seed.conf
+    # hosts from scenario 1: findHostsByMac scans ALL .conf in ConfigDir.
+    mac=$(printf 'aa:bb:dd:%02x:%02x:%02x' $(( (v >> 16) & 0xFF )) $(( (v >> 8) & 0xFF )) $(( v & 0xFF )))
     ip="10.99.99.$(( i % 254 + 1 ))"
     sc=$(POST "$JWT" "/api/hosts" "{\"mac\":\"$mac\",\"ip\":\"$ip\",\"hostname\":\"crud$i\",\"file\":\"$CRUD_FILE\"}")
     [ "$sc" = "200" ] || { crud_fail=$((crud_fail + 1)); continue; }
