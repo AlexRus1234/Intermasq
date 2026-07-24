@@ -167,7 +167,7 @@ jobs:
             exit 1
           fi
 
-      - name: L4 — perf/stress scenarios (Gap 5, opt-in)
+      - name: Perf/stress scenarios (Gap 5, opt-in)
         if: success() && github.event.inputs.run_perf_tests == 'true'
         # Separate server instance (own port/conf-dir) so it cannot collide
         # with the smoke run above. perf.sh only HARD-fails on clear functional

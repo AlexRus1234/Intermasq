@@ -8,26 +8,30 @@ Forgejo Actions, контейнер Fedora 44.
 
 Репозиторий: `B:\Repo\Intermasq\Intermasq`, ветка `main`.
 
-## Текущее состояние тестового покрытия (~87-90%)
+## Текущее состояние тестового покрытия (~90%)
 
 | Слой | Coverage | Детали |
 |---|---|---|
-| L1 Go unit | ~85% | 241 тест: `dnsmasq_test.go` (155), `new_features_test.go` (14), `handlers_test.go` (86). Все проходят с `-race`. |
+| L1 Go unit | ~85% | 241 тест: `dnsmasq_test.go` (155), `new_features_test.go` (14), `handlers_test.go` (86 — включая Gap 3 edge cases). Все проходят с `-race`. |
 | L2 Go handler (httptest) | ~85-90% | ~50 из 52 handlers покрыты. Skip: `eventsHandler` (SSE stream), `reloadHandler` (нужен dnsmasq binary). |
-| L3 smoke.sh | ~75-80% API | 136 проверок, 29 suite-файлов в `tests/suites/`. Архитектура: `tests/smoke.sh` (orchestrator) + `tests/lib/` + `tests/suites/NN-*.sh`. Все Gap 1 endpoints закрыты. |
+| L3 smoke.sh | ~75-80% API | 136 проверок, 29 suite-файлов в `tests/suites/`. Все Gap 1 endpoints закрыты. Плагин-прокси покрыт (`82-plugins.sh`). |
+| Perf/stress (opt-in) | реализован | `tests/perf.sh`: read-load, reload-storm, CRUD+RSS, SSE-endurance. Не coverage-слой — informational, soft thresholds. Opt-in через CI input `run_perf_tests`. |
 | L4 Playwright UI | 0% | Не начат. |
 | L5 Real VM | 0% | Не начат. |
 
 Тестовая инфраструктура:
 - `tests/smoke.sh` — entrypoint, source-ит suites в лексальном порядке
+- `tests/perf.sh` — отдельный perf-orchestrator (opt-in), НЕ в smoke.sh
 - `tests/lib/state.sh, common.sh, http.sh, auth.sh` — shared helpers
 - `tests/suites/` — 29 файлов по компонентам (00-preflight → 90-logout)
+- `tests/fixtures/` — `arp-sample.txt`, `gen-hosts.sh`, `plugins/hello/` (mock)
 - `tests/known-bugs.txt` — список ID известных багов (KNOW-fail маркеры)
-- `tests/bugreport/bugs.md` — детальные описания 11 багов (A1-A13)
+- `tests/bugreport/bugs.md` — детальные описания багов
 - `tests/ROADMAP.md` — дорожная карта покрытия с оценками
-- `.forgejo/workflows/build.yml` — CI pipeline (вручную `workflow_dispatch`)
+- `.forgejo/workflows/build.yml` — CI pipeline (вручную `workflow_dispatch`,
+  с opt-in `run_perf_tests`)
 
-## Известные баги (11 открытых, НЕ правим — собираем)
+## Известные баги (12 открытых, НЕ правим — собираем)
 
 | ID | Severity | Component | Описание |
 |---|---|---|---|
@@ -44,7 +48,11 @@ Forgejo Actions, контейнер Fedora 44.
 | A12 | HIGH | backend main.go | `aliasDomainRegex` отвергает `_` в домене (ломает DMARC/DKIM) |
 | A13 | HIGH | backend dnsmasq.go | `writeFileRaw` гоняет `dnsmasq --test` без `--conf-file=<path>` |
 
-Каждый баг имеет regression test в smoke.sh с тегом `check ... Axx`.
+**A1, A5, A7, A10** — frontend/feature, не представлены в `known-bugs.txt`
+(smoke.sh их в принципе не может поймать; для A1/A5/A7 нужен Gap 2 Playwright).
+**A2, A3, A4, A6, A8, A11, A12, A13** — в `known-bugs.txt`, имеют regression
+test в smoke.sh с тегом `check ... Axx`.
+
 Пока тег есть в `known-bugs.txt`, failure показывается как KNOWN-fail
 (жёлтый, pipeline зелёный). При фиксе бага: удалить ID из
 `known-bugs.txt`, обновить ожидание в smoke.sh.
@@ -53,10 +61,11 @@ Forgejo Actions, контейнер Fedora 44.
 
 ## Что осталось по тестам
 
-Все «лёгкие» приросты на Go и bash исчерпаны. Оставшиеся задачи требуют
-новой инфраструктуры.
+Gap 1 (smoke endpoints), Gap 3 (L2 edge cases), Gap 5 (perf), Gap 6 (plugins)
+— **закрыты** (см. `tests/ROADMAP.md` → «Уже закрыто»). Остались задачи,
+требующие новой инфраструктуры.
 
-### Gap 2 — Playwright (UI тесты), +20%
+### Gap 2 — Playwright (UI тесты), +20% — главный остаток
 
 **Что нужно:** Chromium в Fedora CI-контейнере, Playwright spec-тесты.
 
@@ -94,24 +103,8 @@ Forgejo Actions, контейнер Fedora 44.
 6. Отчёт
 
 **Где добавить:** nightly cron job, отдельный workflow или внешний
-скрипт.
-
-### Gap 5 — Performance/stress, +3%
-
-**Что нужно:**
-- `tests/fixtures/gen-hosts.sh` — генератор .conf с N хостами (N=200)
-- `hey` или `wrk` для load testing API endpoints
-- Тест: 50 параллельных SSE клиентов держатся 60с без обрыва
-- Тест: 10 одновременных reload не ломают dnsmasq
-- Тест: memory RSS стабилен после 1000 add/delete циклов
-
-### Gap 6 — Plugin system, +2%
-
-**Что нужно:** mock plugin в `tests/fixtures/plugins/hello/`:
-- `manifest.json`: `{"id":"hello","name":"Hello Plugin","bin":"hello.sh"}`
-- `hello.sh`: открывает unix socket, отвечает "hello" на любой запрос
-- smoke.sh: проверяет что `/api/plugins` показывает плагин, что
-  `/plugins/hello/` проксируется
+скрипт. Это также единственный способ покрыть rootless-режим (обычный
+юзер + sudo на `systemctl restart dnsmasq`/`intermasq`, см. `system.go`).
 
 ### Fuzzing, +2-3%
 
@@ -126,7 +119,7 @@ Forgejo Actions, контейнер Fedora 44.
 ## Архитектура кода
 
 ```
-main.go              flags, роуты, init
+main.go              flags, роуты, init, plugin loader
 handlers.go          root handlers (status, login, arp, leases, discovery, SSE)
 handlers_hosts.go    static host CRUD, bulk, CSV, templates
 handlers_aliases.go  DNS alias CRUD, bulk, CSV
@@ -159,15 +152,29 @@ frontend/src/
     config/          DnsmasqConfig, DhcpOptionRow, ForwardingRow
     safety/          SafetyTab, AuditTab
     DiscoveredTab.vue, UsersTab.vue
+
+tests/
+  smoke.sh           L3 functional orchestrator
+  perf.sh            perf/stress orchestrator (opt-in)
+  lib/               shared bash helpers (state/common/http/auth)
+  suites/            29 NN-*.sh functional suites
+  fixtures/          arp-sample.txt, gen-hosts.sh, plugins/hello/ (mock)
+  known-bugs.txt     expected-fail bug IDs
+  bugreport/bugs.md  detailed bug descriptions
+  ROADMAP.md         coverage roadmap
 ```
 
 ## Конвенции
 
 - Коммиты прямо в `main` (один разработчик)
-- Сообщения коммитов: `prefix: description` (smoke.sh:, Fix:, docs:, handlers_test.go:)
+- Сообщения коммитов: `prefix: description` (smoke.sh:, Fix:, docs:, tests:, handlers_test.go:)
 - gofmt обязателен (CI проверяет)
 - Go тесты: `go test -race -count=1` (CI)
 - smoke.sh: `KNOWN-fail` для багов из known-bugs.txt = pipeline зелёный
+- perf.sh: opt-in (CI input `run_perf_tests`), hard-fail только на функциональные
+  поломки; throughput/RSS — warnings
 - Логи сессий: `логи/<name>.md` (формат: контекст → что сделано → результат)
 - Frontend: Vue 3 `<script setup>`, Bootstrap 5 classes, vue-i18n (ru/en)
 - Секреты: `INTERMASQ_SECRET` env var (32+ bytes), CI имеет хардкод
+- Исходники продукта не правятся ради тестов — тестовая инфраструктура
+  живёт в `tests/` + workflow; fixture-плагин изолирован своим `go.mod`
