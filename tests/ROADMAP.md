@@ -8,14 +8,24 @@
 
 | Слой | Coverage | Статус |
 |---|---|---|
-| L1 — Go unit | ~85% pure logic | ✓ стабильный (`dnsmasq_test.go` + `new_features_test.go`) |
-| L2 — Go integration (httptest) | ~85-90% handlers | ✓ ~50/52 handlers; skip `eventsHandler` (SSE) и `reloadHandler` (нужен dnsmasq binary) |
-| L3 — smoke.sh | ~75-80% API | ✓ 29 suite-файлов, 136 проверок; плагин-прокси покрыт (`82-plugins.sh`) |
+| L1+L2 Go (unit + httptest) | **65.6%\*** (измерено) | один package `main` → L1/L2 совместно не делятся. Парсеры/handler'ы 80-100%; разрыв сосредоточен в init-system/bootstrap/goroutine-коде (см. сноску) |
+| L3 — smoke.sh | ~75-80% API | ✓ 29 suite-файлов, 136 проверок; плагин-прокси покрыт (`82-plugins.sh`). Иная метрика — доля эндпоинтов, не строки |
 | L4 — Playwright UI | 0% | ✗ не реализован |
 | L5 — Real VM (init/dnsmasq) | 0% | ✗ не реализован |
 | Perf/stress (opt-in) | реализовано, informational | ✓ `tests/perf.sh` (read/reload/CRUD+RSS/SSE); не coverage-слой |
 
-**Суммарно: ~90%** функционала покрыто автоматизированными тестами.
+> **\*** `65.6%` — измерено `go test -cover ./...` (241 тест, package `main`).
+> Раньше в доках фигурировали оценки «~85-90%», но то был подсчёт «handler'ов с
+> хотя бы одним тестом», а не statement-coverage. ~34% непокрытых строк
+> сосредоточены в: `system.go` (init-system exec — это и есть **Gap 4**),
+> `bins.go` (резолв linux-бинарных `sudo`/`systemctl`/`service`/`rc-service`/`sv`),
+> `main.go` (`main`/`loadPlugins` — bootstrap), `sse.go` (`startSSEBroadcaster`/
+> `reloadDnsmasq` — горутина + dnsmasq exec), `metrics.go` (`startDNSHealthChecker`/
+> `runDNSHealthPass`). Дотянуть до ~99% в текущем окружении **нереально** — нужно
+> закрывать Gap 4 (real VM) + рефакторить bootstrap (правка исходников).;
+
+**Суммарно:** Go-покрытие 65.6%\* (измерено); L3 API ~75-80% (иная метрика);
+L4/L5 — 0%. Метрики разных слоёв не суммируются в одно число.
 
 ---
 
@@ -71,7 +81,22 @@
 
 ## Что нужно для 95-100% (в реальности 98-99%)
 
-После Gap 2 + Gap 4: ~90-93%. Оставшееся до 95%+ — enterprise-grade:
+Go statement-coverage сейчас **65.6%\***. Реалистичный потолок **в текущем
+окружении — ~80-85%**: остаточные unit-тесты (+3-5%), `system.go` callers через
+fake-бинарники на PATH (+8-12%, но тест против моков), Linux-gated exec-тесты
+для `reloadDnsmasq`/DNS-health (+3-5%). Дальше — потолок:
+
+- **`main()`/`loadPlugins()`** — bootstrap, не юнит-тестируем без рефакторинга
+  исходников (вынос логики в тестируемые функции).
+- **`detectInitSystem` + реальное init-взаимодействие** — это **Gap 4 (real
+  VM)**; в Fedora-контейнере PID 1 не systemd.
+- **Фоновые горутины** (`startSSEBroadcaster`, `cleanBlacklistLoop`) — partial.
+
+То есть **~99% statement-coverage недостижимо без закрытия Gap 4 + правки
+исходников**. При этом statement-% `system.go` через фейки даёт число, но не
+реальную уверенность — функциональное покрытие (Gap 4 на VM) тут ценнее.
+
+Оставшееся сверх реалистичного потолка — enterprise-grade:
 
 - **Mutation testing** — `go-mutesting`, проверяют что тесты ловят мутации
 - **Compatibility matrix** — разные версии dnsmasq (2.80, 2.89, 2.90+)

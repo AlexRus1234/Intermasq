@@ -8,16 +8,24 @@ Forgejo Actions, контейнер Fedora 44.
 
 Репозиторий: `B:\Repo\Intermasq\Intermasq`, ветка `main`.
 
-## Текущее состояние тестового покрытия (~90%)
+## Текущее состояние тестового покрытия
 
 | Слой | Coverage | Детали |
 |---|---|---|
-| L1 Go unit | ~85% | 241 тест: `dnsmasq_test.go` (155), `new_features_test.go` (14), `handlers_test.go` (86 — включая Gap 3 edge cases). Все проходят с `-race`. |
-| L2 Go handler (httptest) | ~85-90% | ~50 из 52 handlers покрыты. Skip: `eventsHandler` (SSE stream), `reloadHandler` (нужен dnsmasq binary). |
-| L3 smoke.sh | ~75-80% API | 136 проверок, 29 suite-файлов в `tests/suites/`. Все Gap 1 endpoints закрыты. Плагин-прокси покрыт (`82-plugins.sh`). |
+| L1+L2 Go (unit + httptest) | **65.6%\*** (измерено) | один package `main` → L1/L2 совместно не делятся. Парсеры/handler'ы 80-100%; ~50/52 handlers покрыты (skip `eventsHandler` SSE, `reloadHandler`). 241 тест, все с `-race`. Разрыв — в init-system/bootstrap/goroutine-коде (см. сноску). |
+| L3 smoke.sh | ~75-80% API | 136 проверок, 29 suite-файлов в `tests/suites/`. Все Gap 1 endpoints закрыты. Плагин-прокси покрыт (`82-plugins.sh`). Иная метрика — доля эндпоинтов, не строки. |
 | Perf/stress (opt-in) | реализован | `tests/perf.sh`: read-load, reload-storm, CRUD+RSS, SSE-endurance. Не coverage-слой — informational, soft thresholds. Opt-in через CI input `run_perf_tests`. |
 | L4 Playwright UI | 0% | Не начат. |
 | L5 Real VM | 0% | Не начат. |
+
+> **\*** `65.6%` — измерено `go test -cover ./...` (package `main`). Раньше в
+> доках стояли оценки «~85-90%», но то был подсчёт «handler'ов с тестом», а не
+> statement-coverage. ~34% непокрытых строк сосредоточены в `system.go`
+> (init-system exec — это **Gap 4**), `bins.go` (резолв linux-бинарных),
+> `main.go` (`main`/`loadPlugins` — bootstrap), `sse.go` (`startSSEBroadcaster`/
+> `reloadDnsmasq`), `metrics.go` (`startDNSHealthChecker`/`runDNSHealthPass`).
+> **~99% в текущем окружении недостижимо** — нужен Gap 4 (real VM) + рефактор
+> bootstrap (правка исходников). Реалистичный потолок без них — ~80-85%.
 
 Тестовая инфраструктура:
 - `tests/smoke.sh` — entrypoint, source-ит suites в лексальном порядке
