@@ -18,6 +18,11 @@ on:
         required: true
         default: true
         type: boolean
+      run_perf_tests:
+        description: "Run perf/stress scenarios (tests/perf.sh)? Adds ~1-2 min; opt-in."
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   build-test:
@@ -115,6 +120,19 @@ jobs:
           echo "Running: go test ./... $RACE_FLAG -count=1"
           go test ./... $RACE_FLAG -count=1
 
+      - name: Build & install mock plugin (Gap 6)
+        # The plugin dir is hardcoded to /etc/intermasq/plugins in main.go
+        # (loadPlugins reads it on startup). CI runs as root in the ephemeral
+        # container, so we place the fixture there directly — no source change,
+        # no new flags. The mock honours the existing PLUGIN_SOCKET contract.
+        run: |
+          mkdir -p /etc/intermasq/plugins/hello
+          cd tests/fixtures/plugins/hello
+          go build -o /etc/intermasq/plugins/hello/hello .
+          cp manifest.json /etc/intermasq/plugins/hello/manifest.json
+          echo "Installed mock plugin:"
+          ls -la /etc/intermasq/plugins/hello/
+
       - name: L3 — smoke tests against running binary
         run: |
           mkdir -p /tmp/conf /tmp/history
@@ -146,6 +164,41 @@ jobs:
           # Smoke.sh exits 0 on clean pass OR all-fails-are-known-bugs.
           if [ "$SMOKE_RC" -ne 0 ]; then
             echo "::error::smoke.sh returned $SMOKE_RC (unexpected failures present)"
+            exit 1
+          fi
+
+      - name: L4 — perf/stress scenarios (Gap 5, opt-in)
+        if: success() && github.event.inputs.run_perf_tests == 'true'
+        # Separate server instance (own port/conf-dir) so it cannot collide
+        # with the smoke run above. perf.sh only HARD-fails on clear functional
+        # breaks (server death, all SSE clients dropped, >5% 5xx); throughput
+        # and RSS warnings are informational and don't fail the step.
+        run: |
+          mkdir -p /tmp/perf-conf /tmp/perf-history
+          ./intermasq-ci \
+            -port 18082 \
+            -conf-dir /tmp/perf-conf \
+            -db /tmp/perf-users.json \
+            -audit-log /tmp/perf-audit.log \
+            -history-dir /tmp/perf-history \
+            -templates /tmp/perf-templates.json \
+            -leases /tmp/perf-leases \
+            -arp-file tests/fixtures/arp-sample.txt \
+            -init-system=none \
+            -ci-mode=true &
+          SERVER_PID=$!
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:18082/api/status >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          set +e
+          BASE=http://localhost:18082 CONF_DIR=/tmp/perf-conf SERVER_PID=$SERVER_PID ./tests/perf.sh
+          PERF_RC=$?
+          set -e
+          kill $SERVER_PID 2>/dev/null || true
+          wait $SERVER_PID 2>/dev/null || true
+          if [ "$PERF_RC" -ne 0 ]; then
+            echo "::error::perf.sh returned $PERF_RC (hard failures present)"
             exit 1
           fi
 
