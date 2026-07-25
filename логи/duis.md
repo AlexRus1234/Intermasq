@@ -15,7 +15,7 @@ Forgejo Actions, контейнер Fedora 44.
 | L1+L2 Go (unit + httptest) | **65.6%\*** (измерено) | один package `main` → L1/L2 совместно не делятся. Парсеры/handler'ы 80-100%; ~50/52 handlers покрыты (skip `eventsHandler` SSE, `reloadHandler`). 241 тест, все с `-race`. Разрыв — в init-system/bootstrap/goroutine-коде (см. сноску). |
 | L3 smoke.sh | ~75-80% API | 136 проверок, 29 suite-файлов в `tests/suites/`. Все Gap 1 endpoints закрыты. Плагин-прокси покрыт (`82-plugins.sh`). Иная метрика — доля эндпоинтов, не строки. |
 | Perf/stress (opt-in) | реализован | `tests/perf.sh`: read-load, reload-storm, CRUD+RSS, SSE-endurance. Не coverage-слой — informational, soft thresholds. Opt-in через CI input `run_perf_tests`. |
-| L4 Playwright UI | 11 specs | батч 1+2 закрыты (auth/theme/i18n/hosts-sort/host-crud/host-add-ui/host-tags/search-filter/bulk-ops/config-files) + seed-хелпер `tests/e2e/lib/api.ts`. A5 воспроизведён (`test.fail`, root cause pinned). Остаток — SSE-live + A7-smoke + true A5-фикс. См. `логи/gap2-playwright-bootstrap.md`, `логи/gap2-batch2-ui-coverage.md` |
+| L4 Playwright UI | 16 specs | батч 1+2 + фаза А закрыты (auth/theme/i18n/hosts-sort/host-crud/host-add-ui/host-tags/search-filter/bulk-ops[move+edit+delete]/config-files/host-edit-ui/templates-modal/users-tab). Хелпер разбит: `lib/api.ts` → barrel + `api-auth.ts` + `api-hosts.ts`. A5 воспроизведён (`test.fail`, root cause pinned). Остаток — фазы Б, В + SSE + A5-фикс. См. `логи/gap2-batch3-phaseA.md` и предыдущие |
 | L5 Real VM | 0% | Не начат. |
 
 > **\*** `65.6%` — измерено `go test -cover ./...` (package `main`). Раньше в
@@ -76,25 +76,28 @@ Gap 1 (smoke endpoints), Gap 3 (L2 edge cases), Gap 5 (perf), Gap 6 (plugins),
 Gap 2 (1-я итерация Playwright) — **закрыты** (см. `tests/ROADMAP.md` → «Уже
 закрыто»). Остались задачи, требующие новой инфраструктуры.
 
-### Gap 2 — Playwright (UI тесты) — 2 батча ЗАКРЫТЫ, остаток = SSE + A5-фикс
+### Gap 2 — Playwright (UI тесты) — 2 батча + фаза А ЗАКРЫТЫ, остаток = фазы Б, В + SSE/A5
 
-**Закрыто (батч 1+2, 11 specs):** Playwright против `intermasq-ci` в CI
-(Fedora 44, opt-in `run_e2e_tests`), отдельный `tests/e2e/` со своим
+**Закрыто (батч 1+2 + фаза А, 16 specs):** Playwright против `intermasq-ci`
+в CI (Fedora 44, opt-in `run_e2e_tests`), отдельный `tests/e2e/` со своим
 `package.json`/lockfile (продуктовый `frontend/package.json` не тронут).
 Батч 1: auth/theme/i18n/hosts-sort (A1 guard)/host-crud. Батч 2:
 host-add-ui/host-tags/search-filter/bulk-ops (bulk-move + bulk-edit)/
-config-files + общий seed-хелпер `tests/e2e/lib/api.ts`.
-Логи: `логи/gap2-playwright-bootstrap.md`, `логи/gap2-batch2-ui-coverage.md`.
+config-files + seed-хелпер. Фаза А: host-edit-ui/bulk-delete/templates-modal
+(A7 smoke)/users-tab. Хелпер разбит на `api-auth.ts` + `api-hosts.ts` +
+barrel `api.ts`. Логи: `gap2-playwright-bootstrap.md`, `gap2-batch2-ui-coverage.md`,
+`gap2-batch3-phaseA.md`.
 
 **Бонус батча 2:** A5 пойман точным репродюсером — `bulk-ops.spec` (bulk-edit)
 помечен `test.fail()` (CI зелёный). Root cause: `BulkEditModal.vue:67`
 `store_hosts.find(...)` → `store_hosts.hosts.find(...)`.
 
-**Осталось (3-й батч / мелочь):**
-- SSE-live: либо smoke «EventSource на `/api/events` коннектится», либо
-  тест с мутацией arp-файла (вещатель шлёт только дельты, fixture статичен
-  → нужна правка CI: копировать fixture в writable путь).
-- A7 (TemplatesModal) — UI-smoke (cosmetic, не баг).
+**Осталось (до ~24 specs, потом батч 4):**
+- Фаза Б (4): dns-aliases-add, bulk-import-text, csv-import, reload-ui.
+- Фаза В (4): rollback-ui, history-modal, discovery-tab, backup-restore-ui.
+- Батч 4 (6 нишевых + 2 жёстких): audit/plugins-iframe/i18n-api-error/
+  config-template-fill/setup-screen + sse-live (мутация arp-файла) +
+  config-directive/raw (блок A13).
 - true A5-фикс (1 строка) → снять `test.fail` с bulk-edit-теста.
 
 ### Gap 4 — Real VM (init-system), +5%
