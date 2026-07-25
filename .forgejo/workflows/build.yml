@@ -23,6 +23,11 @@ on:
         required: true
         default: false
         type: boolean
+      run_e2e_tests:
+        description: "Run Playwright E2E (tests/e2e)? Installs chromium; opt-in."
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   build-test:
@@ -199,6 +204,44 @@ jobs:
           wait $SERVER_PID 2>/dev/null || true
           if [ "$PERF_RC" -ne 0 ]; then
             echo "::error::perf.sh returned $PERF_RC (hard failures present)"
+            exit 1
+          fi
+
+      - name: L4 — Playwright E2E (Gap 2, opt-in)
+        if: success() && github.event.inputs.run_e2e_tests == 'true'
+        # Separate server instance (own port/conf-dir) so it cannot collide
+        # with the smoke (18081) or perf (18082) runs. Own conf-dir also
+        # keeps seeded hosts isolated from other suites.
+        run: |
+          mkdir -p /tmp/e2e-conf /tmp/e2e-history
+          ./intermasq-ci \
+            -port 18083 \
+            -conf-dir /tmp/e2e-conf \
+            -db /tmp/e2e-users.json \
+            -audit-log /tmp/e2e-audit.log \
+            -history-dir /tmp/e2e-history \
+            -templates /tmp/e2e-templates.json \
+            -leases /tmp/e2e-leases \
+            -arp-file tests/fixtures/arp-sample.txt \
+            -init-system=none \
+            -ci-mode=true &
+          E2E_PID=$!
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:18083/api/status >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          cd tests/e2e
+          npm ci
+          npx playwright install --with-deps chromium
+          set +e
+          E2E_BASE_URL=http://localhost:18083 CONF_DIR=/tmp/e2e-conf \
+            ADMIN_USER=admin ADMIN_PASS=pass1234 npx playwright test
+          PW_RC=$?
+          set -e
+          kill $E2E_PID 2>/dev/null || true
+          wait $E2E_PID 2>/dev/null || true
+          if [ "$PW_RC" -ne 0 ]; then
+            echo "::error::playwright returned $PW_RC"
             exit 1
           fi
 
