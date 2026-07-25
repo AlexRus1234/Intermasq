@@ -26,7 +26,7 @@ test.beforeAll(async () => {
   // Capture a backup zip (contains e2e-restore.conf with R1) to a Node
   // temp path the filechooser can hand to the browser.
   const ctx = await request.newContext({ baseURL: BASE_URL })
-  const res = await ctx.get('/backup', { headers: { Authorization: `Bearer ${token}` } })
+  const res = await ctx.get('/api/backup', { headers: { Authorization: `Bearer ${token}` } })
   expect(res.ok(), `backup fetch failed: ${res.status()}`).toBeTruthy()
   writeFileSync(ZIP_PATH, await res.body())
   await ctx.dispose()
