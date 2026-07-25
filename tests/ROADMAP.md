@@ -10,7 +10,7 @@
 |---|---|---|
 | L1+L2 Go (unit + httptest) | **65.6%\*** (измерено) | один package `main` → L1/L2 совместно не делятся. Парсеры/handler'ы 80-100%; разрыв сосредоточен в init-system/bootstrap/goroutine-коде (см. сноску) |
 | L3 — smoke.sh | ~75-80% API | ✓ 29 suite-файлов, 136 проверок; плагин-прокси покрыт (`82-plugins.sh`). Иная метрика — доля эндпоинтов, не строки |
-| L4 — Playwright UI | 0% | ✗ не реализован |
+| L4 — Playwright UI | 5 specs (bootstrap) | ◐ 1-я итерация закрыта (auth/theme/i18n/hosts-sort/host-crud); 2-й батч (A5/A7/SSE/search) — следующий |
 | L5 — Real VM (init/dnsmasq) | 0% | ✗ не реализован |
 | Perf/stress (opt-in) | реализовано, informational | ✓ `tests/perf.sh` (read/reload/CRUD+RSS/SSE); не coverage-слой |
 
@@ -37,21 +37,26 @@ L4/L5 — 0%. Метрики разных слоёв не суммируются
 | **Gap 3** — Go edge cases (~5%) | +56 L2/edge тестов в `handlers_test.go` (IPv6, unicode, concurrent writes, empty/comment-only conf, ZIP edge cases) | `gap3-l2-handler-tests.md` |
 | **Gap 5** — Performance/stress (~3%) | `tests/perf.sh` + `tests/fixtures/gen-hosts.sh` + opt-in CI input `run_perf_tests` | `gap5-6-perf-and-plugins.md` |
 | **Gap 6** — Plugin system (~2%) | Mock-плагин `tests/fixtures/plugins/hello/` + расширение `82-plugins.sh` (presence + проксирование) | `gap5-6-perf-and-plugins.md` |
+| **Gap 2** (1-я итерация) — Playwright bootstrap | `tests/e2e/` (изолированный `@playwright/test`, `global-setup`, 5 specs: auth/theme/i18n/hosts-sort/host-crud) + opt-in CI input `run_e2e_tests`. A1 под regression-guard. | `gap2-playwright-bootstrap.md` |
 
 ---
 
 ## Что осталось
 
-### Gap 2: UI behavior (~+20%) — главный остаток
+### Gap 2: UI behavior (~+20%) — 1-я итерация закрыта, остаток = 2-й батч
 
-**Сценарии:** всё что делает Vue-реактивность и browser-side logic:
-- A1 — дубли строк при сортировке (Vue key collision)
-- A5 — bulk-edit modal behavior
+**Закрыто (1-я итерация):** Playwright поднят против `intermasq-ci` в CI
+(Fedora 44, opt-in `run_e2e_tests`), 5 specs: auth, theme, i18n, hosts-sort
+(regression-guard для A1), host-crud. См. `логи/gap2-playwright-bootstrap.md`.
+
+**Осталось (2-й батч, ~15-25 specs):**
+- A5 — bulk-edit modal behavior (reproducer)
 - A7 — templates UI
-- i18n переключение, dark/light темы
-- Live SSE updates, поиск и сортировка в таблице
+- Live SSE updates (подключение к `/api/events`, получение ARP update)
+- Поиск/фильтр в таблице
+- Tags badge, config editor, bulk-move/bulk-edit через UI
 
-**Решение:** Playwright. Bootstrap (Chromium в Fedora CI-контейнер) + 20-30 spec-тестов. ~2 дня.
+**Решение:** Playwright, расширение `tests/e2e/specs/`. ~1-2 дня.
 
 ### Gap 4: Real init-system integration (~+5%)
 
@@ -113,7 +118,7 @@ fake-бинарники на PATH (+8-12%, но тест против моков
 | Приоритет | Задача | Время | Дельта coverage |
 |---|---|---|---|
 | **P0** | Пофиксить баги A1-A4 + A12-A13 | 2-3 часа | (чистит красноту known-bugs) |
-| **P1** | Playwright (Gap 2) | 2 дня | +20% |
+| **P1** | Playwright (Gap 2) — 1-я итерация ✓, 2-й батч далее | +1 день | bootstrap закрыт; +15-20% — во 2-м батче |
 | **P2** | L5 Real VM nightly (Gap 4) | 1-2 дня | +5% |
 | **P2** | Fuzzing для парсеров | 0.5 дня | +2-3% |
 
