@@ -1,6 +1,7 @@
 // Bulk operations via the UI: select rows with checkboxes, then
 //   - bulk-move (📦): move hosts to another .conf file
-//   - bulk-edit (✏️): IP prefix transform (10.99.70 → 10.99.71)
+//   - bulk-edit (✏️): IP prefix transform (10.99.70 → 10.99.71) [A5, test.fail]
+//   - bulk-delete (🗑️): remove all selected hosts
 //
 // The bulk action bar (HostTable) only renders when >=1 row is selected.
 // It lives in a .bg-danger container with three .btn-light buttons
@@ -17,6 +18,7 @@ import { apiLogin, seedHosts, CONF_DIR } from '../lib/api'
 
 const MOVE_PREFIX = 'aa:66:77:88:99'
 const EDIT_PREFIX = 'aa:77:88:99:aa'
+const DELETE_PREFIX = 'aa:99:11:22:33'
 
 test.beforeAll(async () => {
   const token = await apiLogin()
@@ -25,6 +27,9 @@ test.beforeAll(async () => {
     { mac: `${MOVE_PREFIX}:02`, ip: '10.99.90.12', hostname: 'move-two', file: `${CONF_DIR}/e2e-bulk-a.conf` },
     { mac: `${EDIT_PREFIX}:01`, ip: '10.99.70.21', hostname: 'edit-one', file: `${CONF_DIR}/e2e-bulk-edit.conf` },
     { mac: `${EDIT_PREFIX}:02`, ip: '10.99.70.22', hostname: 'edit-two', file: `${CONF_DIR}/e2e-bulk-edit.conf` },
+    { mac: `${DELETE_PREFIX}:01`, ip: '10.99.60.31', hostname: 'del-one', file: `${CONF_DIR}/e2e-bulk-del.conf` },
+    { mac: `${DELETE_PREFIX}:02`, ip: '10.99.60.32', hostname: 'del-two', file: `${CONF_DIR}/e2e-bulk-del.conf` },
+    { mac: `${DELETE_PREFIX}:03`, ip: '10.99.60.33', hostname: 'del-three', file: `${CONF_DIR}/e2e-bulk-del.conf` },
   ])
 })
 
@@ -84,4 +89,20 @@ test.fail('bulk-edit: IP prefix transform changes IPs (A5 — modal crashes on o
   // IP cell (td.fw-bold.text-primary) must reflect the transformed IP.
   const row = page.locator('tbody tr', { hasText: `${EDIT_PREFIX}:01` })
   await expect(row.locator('td.fw-bold.text-primary')).toHaveText(/10\.99\.71\.21/, { timeout: 10000 })
+})
+
+test('bulk-delete: selected hosts are removed', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.locator('.dropdown-toggle')).toBeVisible({ timeout: 15000 })
+
+  const delMacs = [`${DELETE_PREFIX}:01`, `${DELETE_PREFIX}:02`, `${DELETE_PREFIX}:03`]
+  await selectRows(page, delMacs)
+
+  // bulkDelete() in HostTable uses confirm(); accept it.
+  page.on('dialog', (d) => d.accept())
+  await page.locator('.bg-danger .btn-group button', { hasText: '🗑️' }).click()
+
+  // All three rows must be gone (actions.loadData() re-fetches).
+  const remaining = page.locator('tbody tr td.font-monospace', { hasText: DELETE_PREFIX })
+  await expect(remaining).toHaveCount(0, { timeout: 10000 })
 })
