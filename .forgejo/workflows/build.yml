@@ -216,13 +216,20 @@ jobs:
         # NOTE on deps: `npx playwright install --with-deps` only knows apt
         # (Ubuntu/Debian). On this Fedora 44 container it falls back to the
         # ubuntu dep list and dies on `apt-get: command not found`. So we
-        # install chromium's shared-lib deps ourselves via dnf (gtk3 pulls in
-        # atk/pango/cairo/atspi transitively) and fetch the browser binary
-        # WITHOUT --with-deps.
+        # install chromium's shared-lib deps ourselves via dnf and fetch the
+        # browser binary WITHOUT --with-deps.
+        #
+        # Do NOT install full `gtk3` here: it drags in the whole desktop
+        # stack (pipewire/polkit/libcamera/openh264...), and openh264 lives
+        # on an external codec mirror unreachable from the container. Headless
+        # chromium only needs the specific libs below (atk/at-spi2-atk cover
+        # the ATK layer without the multimedia tree). install_weak_deps=False
+        # keeps recommended packages (and their codec repos) out.
         run: |
-          dnf install -y nss nspr cups-libs libdrm libxkbcommon libXcomposite \
-            libXdamage libXfixes libXrandr libXScrnSaver mesa-libgbm alsa-lib \
-            gtk3 libxshmfence
+          dnf install -y --setopt=install_weak_deps=False \
+            nss nspr atk at-spi2-atk cups-libs libdrm libxkbcommon \
+            libX11 libXcomposite libXdamage libXext libXfixes libXrandr \
+            mesa-libgbm pango alsa-lib libxshmfence
           mkdir -p /tmp/e2e-conf /tmp/e2e-history
           ./intermasq-ci \
             -port 18083 \
