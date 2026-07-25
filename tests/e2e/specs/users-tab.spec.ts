@@ -42,10 +42,15 @@ test('users: deleting self is rejected', async ({ page }) => {
   const adminRow = page.locator('tbody tr', { hasText: 'admin' })
   await expect(adminRow).toBeVisible({ timeout: 10000 })
 
-  // Confirm the delete; backend must refuse cannot_delete_self, so the
-  // admin row stays in the list.
-  page.on('dialog', (d) => d.accept())
+  // deleteUser() uses confirm(); on rejection it ALSO pops alert(msg)
+  // (api/system.js). We must accept BOTH dialogs and wait for the error
+  // alert — otherwise the alert fires after the test resolves and Playwright
+  // throws "dialog.accept: page has been closed" during teardown.
+  let dialogs = 0
+  page.on('dialog', (d) => { dialogs++; d.accept() })
   await adminRow.locator('button.btn-outline-danger').click()
+  await expect.poll(() => dialogs, { timeout: 10000 }).toBeGreaterThanOrEqual(2)
 
+  // Rejected (cannot_delete_self): the admin row stays in the list.
   await expect(adminRow).toBeVisible({ timeout: 10000 })
 })

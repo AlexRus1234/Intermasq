@@ -27,13 +27,15 @@ test('edit host via UI updates the row without reload', async ({ page }) => {
   // with the bulk-edit button in the .bg-danger bar.
   await row.locator('button.btn-outline-secondary').click()
 
-  // Edit mode confirmed by the Save button turning .btn-warning.
-  await expect(page.locator('.btn-warning')).toBeVisible({ timeout: 5000 })
+  // Edit mode confirmed by the Save button turning .btn-warning. Scope to
+  // .input-group so it can't be confused with the toolbar's "🔄 Apply"
+  // button, which is also .btn-warning.
+  await expect(page.locator('.input-group .btn-warning')).toBeVisible({ timeout: 5000 })
 
   // The IP input is the one grouped with the 🎲 auto-IP button.
   const ipInput = page.locator('.input-group:has(button:has-text("🎲")) input.form-control')
   await ipInput.fill(NEW_IP)
-  await page.locator('.btn-warning').click()
+  await page.locator('.input-group .btn-warning').click()
 
   // IP cell must reflect the new IP.
   await expect(row.locator('td.fw-bold.text-primary')).toHaveText(NEW_IP, { timeout: 10000 })
