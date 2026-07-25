@@ -15,7 +15,7 @@ Forgejo Actions, контейнер Fedora 44.
 | L1+L2 Go (unit + httptest) | **65.6%\*** (измерено) | один package `main` → L1/L2 совместно не делятся. Парсеры/handler'ы 80-100%; ~50/52 handlers покрыты (skip `eventsHandler` SSE, `reloadHandler`). 241 тест, все с `-race`. Разрыв — в init-system/bootstrap/goroutine-коде (см. сноску). |
 | L3 smoke.sh | ~75-80% API | 136 проверок, 29 suite-файлов в `tests/suites/`. Все Gap 1 endpoints закрыты. Плагин-прокси покрыт (`82-plugins.sh`). Иная метрика — доля эндпоинтов, не строки. |
 | Perf/stress (opt-in) | реализован | `tests/perf.sh`: read-load, reload-storm, CRUD+RSS, SSE-endurance. Не coverage-слой — informational, soft thresholds. Opt-in через CI input `run_perf_tests`. |
-| L4 Playwright UI | 5 specs | 1-я итерация закрыта (auth/theme/i18n/hosts-sort/host-crud); 2-й батч (A5/A7/SSE/search) — следующий. См. `логи/gap2-playwright-bootstrap.md` |
+| L4 Playwright UI | 11 specs | батч 1+2 закрыты (auth/theme/i18n/hosts-sort/host-crud/host-add-ui/host-tags/search-filter/bulk-ops/config-files) + seed-хелпер `tests/e2e/lib/api.ts`. A5 воспроизведён (`test.fail`, root cause pinned). Остаток — SSE-live + A7-smoke + true A5-фикс. См. `логи/gap2-playwright-bootstrap.md`, `логи/gap2-batch2-ui-coverage.md` |
 | L5 Real VM | 0% | Не начат. |
 
 > **\*** `65.6%` — измерено `go test -cover ./...` (package `main`). Раньше в
@@ -47,7 +47,7 @@ Forgejo Actions, контейнер Fedora 44.
 | A2 | CRITICAL | backend aliases.go | Дубликаты DNS-alias можно добавлять (`findAliasesByDomain` исключает self для add-flow) |
 | A3 | HIGH | backend main.go | Zero/broadcast MAC (`00:00:..`, `ff:ff:..`) принимаются |
 | A4 | HIGH | backend main.go | MAC с `-` разделителем сохраняется verbatim, dnsmasq падает |
-| A5 | HIGH | frontend BulkEditModal.vue | Модалка не реагирует / no_hosts при пустом выборе |
+| A5 | HIGH | frontend BulkEditModal.vue | Модалка не рендерится при открытии: `preview` computed звёт `store_hosts.find(...)` вместо `store_hosts.hosts.find(...)` → TypeError. Воспроизведён Playwright (`bulk-ops.spec` → `test.fail`). Фикс = 1 строка. |
 | A6 | MEDIUM | backend handlers_hosts.go | Bulk JSON response не имеет `count` поля |
 | A7 | MEDIUM | frontend TemplatesModal.vue | UI layout не соответствует чек-листу (не баг, cosmetic) |
 | A8 | MEDIUM | backend metrics.go | `/metrics` 401 имеет пустое body |
@@ -57,9 +57,10 @@ Forgejo Actions, контейнер Fedora 44.
 | A13 | HIGH | backend dnsmasq.go | `writeFileRaw` гоняет `dnsmasq --test` без `--conf-file=<path>` |
 
 **A1, A5, A7, A10** — frontend/feature, не представлены в `known-bugs.txt`
-(smoke.sh их в принципе не может поймать). A1 теперь под Playwright
-regression-guard (`hosts-sort.spec`, 1-я итерация Gap 2); A5/A7 ждут 2-й
-батч E2E.
+(smoke.sh их в принципе не может поймать). A1 под Playwright guard
+(`hosts-sort.spec`). **A5 воспроизведён** в `bulk-ops.spec` (`test.fail`,
+root cause pinned — см. баг-таблицу); true-фикс = 1 строка в проде, после
+снять `.fail`. A7 (cosmetic) ждёт 3-й батч E2E.
 **A2, A3, A4, A6, A8, A11, A12, A13** — в `known-bugs.txt`, имеют regression
 test в smoke.sh с тегом `check ... Axx`.
 
@@ -75,25 +76,26 @@ Gap 1 (smoke endpoints), Gap 3 (L2 edge cases), Gap 5 (perf), Gap 6 (plugins),
 Gap 2 (1-я итерация Playwright) — **закрыты** (см. `tests/ROADMAP.md` → «Уже
 закрыто»). Остались задачи, требующие новой инфраструктуры.
 
-### Gap 2 — Playwright (UI тесты) — 1-я итерация ЗАКРЫТА, остаток = 2-й батч
+### Gap 2 — Playwright (UI тесты) — 2 батча ЗАКРЫТЫ, остаток = SSE + A5-фикс
 
-**Закрыто (1-я итерация, 5 specs):** Playwright поднят против `intermasq-ci`
-в CI (Fedora 44, opt-in `run_e2e_tests`), отдельный `tests/e2e/` со своим
+**Закрыто (батч 1+2, 11 specs):** Playwright против `intermasq-ci` в CI
+(Fedora 44, opt-in `run_e2e_tests`), отдельный `tests/e2e/` со своим
 `package.json`/lockfile (продуктовый `frontend/package.json` не тронут).
-Spec'и: `auth`, `theme`, `i18n`, `hosts-sort` (regression-guard для A1),
-`host-crud`. Лог: `логи/gap2-playwright-bootstrap.md`.
+Батч 1: auth/theme/i18n/hosts-sort (A1 guard)/host-crud. Батч 2:
+host-add-ui/host-tags/search-filter/bulk-ops (bulk-move + bulk-edit)/
+config-files + общий seed-хелпер `tests/e2e/lib/api.ts`.
+Логи: `логи/gap2-playwright-bootstrap.md`, `логи/gap2-batch2-ui-coverage.md`.
 
-**Осталось (2-й батч, ~15-25 specs):**
-- A5 regression: открыть bulk-edit модалку, снять чекбоксы, убедиться что
-  модалка закрылась
-- A7 — templates UI
-- SSE updates: подключиться к /api/events, получить ARP update
-- Tags: add host с set:iot,tag:guest → проверить отображение badge
-- Bulk operations: выбрать 3 хоста → bulk-move → bulk-edit
-- Config editor: создать файл → edit directive → raw PUT → delete
-- Search/filter: ввести текст в search box → проверить фильтрацию
+**Бонус батча 2:** A5 пойман точным репродюсером — `bulk-ops.spec` (bulk-edit)
+помечен `test.fail()` (CI зелёный). Root cause: `BulkEditModal.vue:67`
+`store_hosts.find(...)` → `store_hosts.hosts.find(...)`.
 
-**Что закроет 2-й батч:** regression для A5, A7 + остальной browser-side logic.
+**Осталось (3-й батч / мелочь):**
+- SSE-live: либо smoke «EventSource на `/api/events` коннектится», либо
+  тест с мутацией arp-файла (вещатель шлёт только дельты, fixture статичен
+  → нужна правка CI: копировать fixture в writable путь).
+- A7 (TemplatesModal) — UI-smoke (cosmetic, не баг).
+- true A5-фикс (1 строка) → снять `test.fail` с bulk-edit-теста.
 
 ### Gap 4 — Real VM (init-system), +5%
 
