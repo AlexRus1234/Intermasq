@@ -212,7 +212,17 @@ jobs:
         # Separate server instance (own port/conf-dir) so it cannot collide
         # with the smoke (18081) or perf (18082) runs. Own conf-dir also
         # keeps seeded hosts isolated from other suites.
+        #
+        # NOTE on deps: `npx playwright install --with-deps` only knows apt
+        # (Ubuntu/Debian). On this Fedora 44 container it falls back to the
+        # ubuntu dep list and dies on `apt-get: command not found`. So we
+        # install chromium's shared-lib deps ourselves via dnf (gtk3 pulls in
+        # atk/pango/cairo/atspi transitively) and fetch the browser binary
+        # WITHOUT --with-deps.
         run: |
+          dnf install -y nss nspr cups-libs libdrm libxkbcommon libXcomposite \
+            libXdamage libXfixes libXrandr libXScrnSaver mesa-libgbm alsa-lib \
+            gtk3 libxshmfence
           mkdir -p /tmp/e2e-conf /tmp/e2e-history
           ./intermasq-ci \
             -port 18083 \
@@ -232,7 +242,7 @@ jobs:
           done
           cd tests/e2e
           npm ci
-          npx playwright install --with-deps chromium
+          npx playwright install chromium
           set +e
           E2E_BASE_URL=http://localhost:18083 CONF_DIR=/tmp/e2e-conf \
             ADMIN_USER=admin ADMIN_PASS=pass1234 npx playwright test
