@@ -33,7 +33,7 @@ init_state
 
 # --- Soft thresholds (env-overridable) --------------------------------------
 # Defaults are deliberately CI-friendly (Fedora container, modest cores). Bump
-# them via env to match duis.md aspirational targets (SSE_CLIENTS=50,
+# them via env to match aspirational targets (SSE_CLIENTS=50,
 # SSE_SECONDS=60, CRUD_CYCLES=1000) on a dedicated runner.
 SEED_HOSTS="${SEED_HOSTS:-200}"             # hosts written by gen-hosts.sh for read-load
 READ_TOTAL="${READ_TOTAL:-200}"             # total GET /api/hosts requests

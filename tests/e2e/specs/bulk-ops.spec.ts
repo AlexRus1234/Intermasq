@@ -61,7 +61,7 @@ test('bulk-move: selected hosts move to another file', async ({ page }) => {
 })
 
 // bulk-edit: the BulkEditModal preview computed used to crash on open
-// (логи/duis.md, A5) because it called `store_hosts.find(...)` on the
+// (логи/gap2-blockA-a5a13-fixes.md, A5) because it called `store_hosts.find(...)` on the
 // reactive store object (no .find). Fixed to `store_hosts.hosts.find(...)`.
 // This spec now verifies the modal opens and the IP prefix transform works.
 

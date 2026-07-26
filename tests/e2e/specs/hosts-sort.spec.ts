@@ -1,7 +1,7 @@
 // A1 regression: sorting the hosts table must not change the number of
 // rendered rows for our seeded prefix.
 //
-// Root cause of A1 (логи/duis.md): HostTable.vue uses `:key="h.mac"` which
+// Root cause of A1 (tests/bugreport/bugs.md): HostTable.vue uses `:key="h.mac"` which
 // is not guaranteed unique, so on re-sort Vue can reuse DOM and rows appear
 // duplicated. For this guard the mechanism is irrelevant — the invariant
 // is "row count for our prefix is stable across sort clicks".

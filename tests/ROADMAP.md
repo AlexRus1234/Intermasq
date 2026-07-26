@@ -10,7 +10,7 @@
 |---|---|---|
 | L1+L2 Go (unit + httptest) | **65.6%\*** (измерено) | один package `main` → L1/L2 совместно не делятся. Парсеры/handler'ы 80-100%; разрыв сосредоточен в init-system/bootstrap/goroutine-коде (см. сноску) |
 | L3 — smoke.sh | ~75-80% API | ✓ 29 suite-файлов, 136 проверок; плагин-прокси покрыт (`82-plugins.sh`). Иная метрика — доля эндпоинтов, не строки |
-| L4 — Playwright UI | 25 specs | ◐ батч 1+2 + фазы А,Б,В закрыты (auth/theme/i18n/hosts-sort/host-crud/host-add-ui/host-tags/search-filter/bulk-ops/config-files/host-edit-ui/templates-modal/users-tab/dns-aliases-add/bulk-import-text/csv-import/reload-ui/rollback-ui/history-modal/discovery-tab/backup-restore-ui). A5 воспроизведён (`test.fail`). Остаток — батч 4 (6 нишевых + 2 жёстких) + SSE/A5-фикс |
+| L4 — Playwright UI | 25 specs | ◐ батч 1+2 + фазы А,Б,В закрыты (auth/theme/i18n/hosts-sort/host-crud/host-add-ui/host-tags/search-filter/bulk-ops/config-files/host-edit-ui/templates-modal/users-tab/dns-aliases-add/bulk-import-text/csv-import/reload-ui/rollback-ui/history-modal/discovery-tab/backup-restore-ui). **A5 + A13 FIXED** (Блок A); bulk-edit без `test.fail`. Остаток — батч 4 (6 нишевых + 2 жёстких) + mutation-pass |
 | L5 — Real VM (init/dnsmasq) | 0% | ✗ не реализован |
 | Perf/stress (opt-in) | реализовано, informational | ✓ `tests/perf.sh` (read/reload/CRUD+RSS/SSE); не coverage-слой |
 
@@ -42,6 +42,7 @@ L4/L5 — 0%. Метрики разных слоёв не суммируются
 | **Gap 2** (3-й батч, фаза А) — UI coverage | +5 specs (host-edit-ui/bulk-delete/templates-modal[A7 smoke]/users-tab[create+delete, delete-self]). Хелпер разбит: `lib/api.ts` → barrel + `api-auth.ts` + `api-hosts.ts`. | `gap2-batch3-phaseA.md` |
 | **Gap 2** (3-й батч, фаза Б) — UI coverage | +4 specs (dns-aliases-add/bulk-import-text/csv-import/reload-ui). All form-input selectors scoped to the form card so the toolbar search box can't shadow them. | `gap2-batch3-phaseB.md` |
 | **Gap 2** (3-й батч, фаза В) — UI coverage | +5 tests/4 specs (rollback-ui/history-modal/discovery-tab/backup-restore-ui[download+restore]). 2 writes/file для `.bak`+version; restore = merge (безопасно для других спеков). | `gap2-batch3-phaseV.md` |
+| **Gap 2** (финал, Блок A) — продуктовые фиксы A5 + A13 | A5: `BulkEditModal.vue` `store_hosts.find` → `.hosts.find` (1 строка), `test.fail` снят. A13: `writeFileRaw`/`writeConfigWithTest`/`restoreHistoryVersion` → `dnsmasq --test --conf-file=<path>` (3 строки); A13 убран из `known-bugs.txt`; smoke-чек `40-config-files` стал честным 400. A3/A4-хосты изолированы в `19-bugs.conf` (не отравляют `10-static.conf` для restore-валидации). | `gap2-blockA-a5a13-fixes.md` |
 
 ---
 
@@ -60,17 +61,18 @@ discovery-tab/backup-restore-ui. Хелпер разбит на `lib/api-auth.ts
 `gap2-batch2-ui-coverage.md`, `gap2-batch3-phaseA.md`, `gap2-batch3-phaseB.md`,
 `gap2-batch3-phaseV.md`.
 
-**A5 воспроизведён (бонус батча 2):** bulk-edit-спек оказался точным
-репродюсером A5 — `BulkEditModal.vue:67` звёт `store_hosts.find(...)`
-вместо `store_hosts.hosts.find(...)` → TypeError в computed → модалка не
-рендерится. Помечен `test.fail()` (CI зелёный); фикс в проде = одна
-строка, после него снять `.fail`.
+**A5 + A13 FIXED (Блок A, `Gap_2_finish.md` §5):** A5 — `BulkEditModal.vue:67`
+`store_hosts.find(...)` → `store_hosts.hosts.find(...)` (TypeError в `preview`
+computed, модалка не открывалась); `test.fail` снят. A13 —
+`writeFileRaw`/`writeConfigWithTest`/`restoreHistoryVersion` теперь гоняют
+`dnsmasq --test --conf-file=<path>` (валидация записанного файла, а не
+default-конфига); A13 убран из `known-bugs.txt`, smoke-чек стал честным 400.
+См. `логи/gap2-blockA-a5a13-fixes.md`.
 
 **Осталось:**
 - Батч 4 (6 нишевых + 2 жёстких): audit/plugins-iframe/i18n-api-error/
   config-template-fill/setup-screen + sse-live (мутация arp-файла) +
-  config-directive/raw (блок A13).
-- true A5-фикс (1 строка в `BulkEditModal.vue`) → снять `test.fail`.
+  config-directive/raw (**разблокированы фиксом A13**).
 - (опционально) mutation-pass для эмпирической уверенности в качестве
   тестов — см. замечание в `gap2-batch3-phaseB.md`.
 
@@ -136,7 +138,7 @@ fake-бинарники на PATH (+8-12%, но тест против моков
 
 | Приоритет | Задача | Время | Дельта coverage |
 |---|---|---|---|
-| **P0** | Пофиксить баги A1-A4 + A12-A13 | 2-3 часа | (чистит красноту known-bugs) |
+| **P0** | Пофиксить баги A1-A4 + A12 (A5 + A13 — FIXED в Блоке A) | 2-3 часа | (чистит красноту known-bugs) |
 | **P1** | Playwright (Gap 2) — батч 1+2 ✓ (11 specs), остаток SSE+A7+A5-фикс | +0.5 дня | основное UI-покрытие закрыто; SSE/true-A5 — 3-й батч |
 | **P2** | L5 Real VM nightly (Gap 4) | 1-2 дня | +5% |
 | **P2** | Fuzzing для парсеров | 0.5 дня | +2-3% |

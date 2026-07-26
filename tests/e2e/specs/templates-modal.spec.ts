@@ -1,7 +1,7 @@
 // Templates modal (A7 smoke): open via the HostForm ⚙️ button, create a
 // template, confirm it appears in the list, then delete it.
 //
-// A7 is classified cosmetic in duis.md (not a bug), so this is a UI smoke,
+// A7 is classified cosmetic in tests/bugreport/bugs.md (not a bug), so this is a UI smoke,
 // not a regression. Selectors: the ⚙️ entry button lives in the HostForm
 // card; hostname_pattern has a hardcoded placeholder "device-{NNN}" (stable
 // anchor), the rest of the create-form inputs are addressed positionally

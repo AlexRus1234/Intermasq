@@ -20,18 +20,18 @@
 | A2 | CRITICAL | backend (aliases.go) | OPEN | smoke.sh: `A2: duplicate A same file → 409` |
 | A3 | HIGH | backend (main.go macRegex) | OPEN | smoke.sh: `A3: zero MAC rejected` |
 | A4 | HIGH | backend (validation) | OPEN | smoke.sh: `A4: dash-MAC handled` |
-| A5 | HIGH | frontend (BulkEditModal.vue) | OPEN | нужен Playwright (L4) |
+| A5 | HIGH | frontend (BulkEditModal.vue) | FIXED | был Playwright `test.fail` (Блок A), `.fail` снят |
 | A6 | MEDIUM | backend (handlers_hosts.go) | OPEN | smoke.sh: `Bulk JSON response has count field` |
 | A7 | MEDIUM | frontend (TemplatesModal.vue) | OPEN | UI проверен вручную, не баг |
 | A8 | MEDIUM | backend (metrics.go) | OPEN | smoke.sh: `A8: 401 has body` |
 | A10 | LOW | backend (arp_leases.go) | OPEN | feature gap, не regression test |
 | A11 | LOW | security (handlers_*.go) | PARTIAL | smoke.sh: path traversal battery |
 | A12 | HIGH | backend (main.go aliasDomainRegex) | OPEN | smoke.sh: `A12: Add TXT with underscore domain` |
-| A13 | HIGH | backend (dnsmasq.go writeFileRaw) | OPEN | smoke.sh: `A13: PUT with invalid dnsmasq syntax` |
+| A13 | HIGH | backend (dnsmasq.go writeFileRaw) | FIXED | smoke.sh: `PUT with invalid dnsmasq syntax → 400` (стал честным) |
 
-**Итого:** 11 открытых багов (A7 — UI-несоответствие, не баг; A11 —
-частично закрыт фреймворком), 8 покрыты regression-тестами в smoke.sh,
-3 требуют Playwright (A1, A5, A7).
+**Итого:** 9 открытых багов (A7 — UI-несоответствие, не баг; A11 —
+частично закрыт фреймворком; A5 + A13 — FIXED в Блоке A), 7 покрыты
+regression-тестами в smoke.sh, 2 требуют Playwright (A1, A7).
 
 ---
 
@@ -163,6 +163,11 @@ mac = strings.ReplaceAll(mac, "-", ":")
 
 ## A5 — Bulk-edit: модалка либо не реагирует, либо no_hosts
 
+> **Status: FIXED** (Блок A, коммит `7cd0e1d`, 2026-07-26). Фактический root
+> cause оказался **другим** — см. ниже «Фактический фикс». Гипотезы ниже
+> (HostTable watcher / tooltip) НЕ понадобились; они оставлены как исходный
+> контекст симптома. Лог: `логи/gap2-blockA-a5a13-fixes.md`.
+
 **Severity:** HIGH
 **Component:** `frontend/src/components/static/HostTable.vue:4`, `BulkEditModal.vue:1`
 
@@ -189,6 +194,13 @@ mac = strings.ReplaceAll(mac, "-", ":")
 
 **Regression test:** Нужен Playwright — открыть модалку, снять чекбоксы,
 убедиться модалка закрылась.
+
+**Фактический фикс (Блок A, `7cd0e1d`):** L4-репродюсер `bulk-ops.spec`
+показал, что модалка падала раньше, чем доходило до `no_hosts` — TypeError в
+`preview` computed: `BulkEditModal.vue:67` звал `store_hosts.find(...)`, а
+`store_hosts` это reactive-объект `store` (без `.find`). Фикс = 1 строка:
+`store_hosts.hosts.find(...)`. `test.fail` снят, тест зелёный. Гипотезы
+выше (watcher/tooltip) не применялись — корень был проще.
 
 ---
 
@@ -340,6 +352,13 @@ aliasDomainRegex = regexp.MustCompile(`^[a-zA-Z0-9_]([a-zA-Z0-9-._]*[a-zA-Z0-9_]
 ---
 
 ## A13 — writeFileRaw dnsmasq --test не тестит записанный файл
+
+> **Status: FIXED** (Блок A, коммит `7cd0e1d`, 2026-07-26). Применён вариант
+> с `--conf-file=<path>` (канонический паттерн из `dnsmasq_test.go:1882`) в
+> `writeFileRaw`, `writeConfigWithTest`, `restoreHistoryVersion`. A13 убран из
+> `known-bugs.txt`; smoke-чек стал честным 400. Лог: `логи/gap2-blockA-a5a13-fixes.md`.
+> `reloadDnsmasq` (sse.go) и `restoreBackupZip` (backup.go) намеренно оставлены
+> с bare `--test` — отдельная задача (см. `Gap_2_finish.md` §5).
 
 **Severity:** HIGH
 **Component:** `dnsmasq.go:65-80` (`writeFileRaw`, `writeConfigWithTest`)
