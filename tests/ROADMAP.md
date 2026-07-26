@@ -10,7 +10,7 @@
 |---|---|---|
 | L1+L2 Go (unit + httptest) | **65.6%\*** (измерено) | один package `main` → L1/L2 совместно не делятся. Парсеры/handler'ы 80-100%; разрыв сосредоточен в init-system/bootstrap/goroutine-коде (см. сноску) |
 | L3 — smoke.sh | ~75-80% API | ✓ 29 suite-файлов, 136 проверок; плагин-прокси покрыт (`82-plugins.sh`). Иная метрика — доля эндпоинтов, не строки |
-| L4 — Playwright UI | 20 specs | ◐ батч 1+2 + фазы А,Б закрыты (auth/theme/i18n/hosts-sort/host-crud/host-add-ui/host-tags/search-filter/bulk-ops[move+edit+delete]/config-files/host-edit-ui/templates-modal/users-tab/dns-aliases-add/bulk-import-text/csv-import/reload-ui). A5 воспроизведён (`test.fail`). Остаток — фаза В (rollback/history/discovery/backup-restore) + батч 4 + SSE/A5-фикс |
+| L4 — Playwright UI | 25 specs | ◐ батч 1+2 + фазы А,Б,В закрыты (auth/theme/i18n/hosts-sort/host-crud/host-add-ui/host-tags/search-filter/bulk-ops/config-files/host-edit-ui/templates-modal/users-tab/dns-aliases-add/bulk-import-text/csv-import/reload-ui/rollback-ui/history-modal/discovery-tab/backup-restore-ui). A5 воспроизведён (`test.fail`). Остаток — батч 4 (6 нишевых + 2 жёстких) + SSE/A5-фикс |
 | L5 — Real VM (init/dnsmasq) | 0% | ✗ не реализован |
 | Perf/stress (opt-in) | реализовано, informational | ✓ `tests/perf.sh` (read/reload/CRUD+RSS/SSE); не coverage-слой |
 
@@ -41,21 +41,24 @@ L4/L5 — 0%. Метрики разных слоёв не суммируются
 | **Gap 2** (2-й батч) — UI coverage | +5 specs (host-add-ui/host-tags/search-filter/bulk-ops[bulk-move+bulk-edit]/config-files) + общий seed-хелпер `tests/e2e/lib/api.ts`. A5 пойман репродюсером (`test.fail`, root cause pinned). | `gap2-batch2-ui-coverage.md` |
 | **Gap 2** (3-й батч, фаза А) — UI coverage | +5 specs (host-edit-ui/bulk-delete/templates-modal[A7 smoke]/users-tab[create+delete, delete-self]). Хелпер разбит: `lib/api.ts` → barrel + `api-auth.ts` + `api-hosts.ts`. | `gap2-batch3-phaseA.md` |
 | **Gap 2** (3-й батч, фаза Б) — UI coverage | +4 specs (dns-aliases-add/bulk-import-text/csv-import/reload-ui). All form-input selectors scoped to the form card so the toolbar search box can't shadow them. | `gap2-batch3-phaseB.md` |
+| **Gap 2** (3-й батч, фаза В) — UI coverage | +5 tests/4 specs (rollback-ui/history-modal/discovery-tab/backup-restore-ui[download+restore]). 2 writes/file для `.bak`+version; restore = merge (безопасно для других спеков). | `gap2-batch3-phaseV.md` |
 
 ---
 
 ## Что осталось
 
-### Gap 2: UI behavior (~+20%) — 2 батча + фазы А,Б закрыты, остаток = фаза В + батч 4 + SSE/A5
+### Gap 2: UI behavior (~+20%) — 3 батча закрыты (25 specs), остаток = батч 4 + SSE/A5
 
-**Закрыто (батч 1+2 + фазы А,Б, 20 specs):** Playwright против `intermasq-ci`
+**Закрыто (батч 1+2 + фазы А,Б,В, 25 specs):** Playwright против `intermasq-ci`
 в CI (Fedora 44, opt-in `run_e2e_tests`). Батч 1: auth/theme/i18n/hosts-sort
 (A1 guard)/host-crud. Батч 2: host-add-ui/host-tags/search-filter/bulk-ops
 (bulk-move + bulk-edit)/config-files + seed-хелпер. Фаза А: host-edit-ui/
 bulk-delete/templates-modal (A7 smoke)/users-tab. Фаза Б: dns-aliases-add/
-bulk-import-text/csv-import/reload-ui. Хелпер разбит на `lib/api-auth.ts`
+bulk-import-text/csv-import/reload-ui. Фаза В: rollback-ui/history-modal/
+discovery-tab/backup-restore-ui. Хелпер разбит на `lib/api-auth.ts`
 + `lib/api-hosts.ts` + barrel `lib/api.ts`. См. логи `gap2-playwright-bootstrap.md`,
-`gap2-batch2-ui-coverage.md`, `gap2-batch3-phaseA.md`, `gap2-batch3-phaseB.md`.
+`gap2-batch2-ui-coverage.md`, `gap2-batch3-phaseA.md`, `gap2-batch3-phaseB.md`,
+`gap2-batch3-phaseV.md`.
 
 **A5 воспроизведён (бонус батча 2):** bulk-edit-спек оказался точным
 репродюсером A5 — `BulkEditModal.vue:67` звёт `store_hosts.find(...)`
@@ -64,11 +67,12 @@ bulk-import-text/csv-import/reload-ui. Хелпер разбит на `lib/api-a
 строка, после него снять `.fail`.
 
 **Осталось:**
-- Фаза В (4): rollback-ui, history-modal, discovery-tab, backup-restore-ui.
 - Батч 4 (6 нишевых + 2 жёстких): audit/plugins-iframe/i18n-api-error/
   config-template-fill/setup-screen + sse-live (мутация arp-файла) +
   config-directive/raw (блок A13).
 - true A5-фикс (1 строка в `BulkEditModal.vue`) → снять `test.fail`.
+- (опционально) mutation-pass для эмпирической уверенности в качестве
+  тестов — см. замечание в `gap2-batch3-phaseB.md`.
 
 **Решение:** Playwright, расширение `tests/e2e/specs/`. План зафиксирован
 в `C:\Users\alexr\AppData\Local\Temp\opencode\l4-batch3-plan.md`.
