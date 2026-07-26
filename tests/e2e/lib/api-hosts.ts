@@ -43,7 +43,7 @@ export async function deleteHostApi(
   file: string,
 ): Promise<void> {
   const ctx = await request.newContext({ baseURL: BASE_URL })
-  await ctx.delete(`/hosts/${mac}?file=${encodeURIComponent(file)}`, {
+  await ctx.delete(`/api/hosts/${mac}?file=${encodeURIComponent(file)}`, {
     headers: { Authorization: `Bearer ${token}` },
   })
   await ctx.dispose()
