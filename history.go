@@ -242,7 +242,7 @@ func restoreHistoryVersion(filePath, version string) error {
 	if err := os.WriteFile(filePath, content, 0644); err != nil {
 		return err
 	}
-	testCmd := exec.Command(dnsmasqBin(), "--test")
+	testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+filePath)
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
 		counters.TestFailures.Add(1)
 		if prev != nil {

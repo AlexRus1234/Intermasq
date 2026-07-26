@@ -22,4 +22,3 @@ A6    bulk JSON /api/hosts/bulk response missing `count` field (CSV path returns
 A8    /metrics 401 response has empty body — confusing for operators and Prometheus UI
 A11   path traversal battery (mostly caught; one vector blocked by Go HTTP path cleaning, not server logic)
 A12   aliasDomainRegex rejects `_` in domain — breaks _dmarc.local, _sip._tcp, DKIM/ACME challenge names
-A13   writeFileRaw's `dnsmasq --test` runs without --conf-file=<path> — tests default dnsmasq config, not the file being written

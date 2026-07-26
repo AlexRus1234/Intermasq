@@ -74,7 +74,7 @@ func writeFileRaw(path string, content []byte) error {
 	if err := os.WriteFile(path, content, 0644); err != nil {
 		return err
 	}
-	testCmd := exec.Command(dnsmasqBin(), "--test")
+	testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+path)
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
 		counters.TestFailures.Add(1)
 		_ = rollbackFile(path)
@@ -94,7 +94,7 @@ func writeConfigWithTest(path string, content []byte) error {
 	if err := os.WriteFile(path, content, 0644); err != nil {
 		return err
 	}
-	testCmd := exec.Command(dnsmasqBin(), "--test")
+	testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+path)
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
 		counters.TestFailures.Add(1)
 		_ = rollbackFile(path)

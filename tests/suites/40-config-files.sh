@@ -1,4 +1,4 @@
-# tests/suites/40-config-files.sh — config file CRUD + raw PUT + A13 dnsmasq --test.
+# tests/suites/40-config-files.sh — config file CRUD + raw PUT + dnsmasq --test validation.
 
 if require_jwt "config files" 10; then
     S=$(POST "$JWT" "/api/config/file" "{\"name\":\"30-test.conf\",\"template\":\"empty\"}")
@@ -28,12 +28,10 @@ if require_jwt "config files" 10; then
     check "PUT raw file with valid content" 200 "$S" || true
 
     S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -X PUT -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" -d '{"content":"# invalid\nport=abc\n"}' "$BASE/api/files/30-test.conf")
-    # A13: writeFileRaw runs `dnsmasq --test` without --conf-file=<path>, so
-    # dnsmasq tests its default config (not our newly-written file) and the
-    # invalid `port=abc` slips through as 200. Once the call is changed to
-    # `dnsmasq --test --conf-file=<path>` (or --conf-dir=$ConfigDir), this
-    # will return 400 with a dnsmasq error.
-    check "A13: PUT with invalid dnsmasq syntax → 400" 400 "$S" A13 || true
+    # writeFileRaw runs `dnsmasq --test --conf-file=<path>`, so the invalid
+    # `port=abc` is genuinely validated against the file we just wrote and
+    # rejected with 400 + a dnsmasq error (A13 fixed).
+    check "PUT with invalid dnsmasq syntax → 400" 400 "$S" || true
 
     S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -X DELETE -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" -d '{"file":"'"$CONF_DIR"'/30-test.conf"}' "$BASE/api/config/file")
     check "DELETE config file" 200 "$S" || true

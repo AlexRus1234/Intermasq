@@ -64,7 +64,7 @@ const hostForm = ref({ strip_old: '', suffix: '' })
 
 const preview = computed(() => {
   return props.hosts.slice(0, 5).map(h => {
-    const host = store_hosts.find(x => x.mac === h.mac)
+    const host = store_hosts.hosts.find(x => x.mac === h.mac)
     const oldIp = host?.ip || ''
     const oldHost = host?.hostname || ''
     let newIp = oldIp

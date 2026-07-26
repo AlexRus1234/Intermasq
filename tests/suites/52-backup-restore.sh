@@ -8,7 +8,11 @@ if require_jwt "backup restore" 4; then
     cp /tmp/smoke.body /tmp/smoke.backup.zip
 
     # Happy: upload the same ZIP back. All .conf files in the archive are
-    # restored; dnsmasq --test runs against the default config (A13) and passes.
+    # restored. restoreBackupZip still runs bare `dnsmasq --test` (whole-
+    # config, NOT per-file --conf-file) — intentionally left this way, so
+    # the check passes as long as dnsmasq's default config is valid, and
+    # does not itself validate the restored files (separate from the A13
+    # per-file fix).
     S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -H "Authorization: Bearer $JWT" -F "file=@/tmp/smoke.backup.zip" "$BASE/api/backup/restore")
     check "Restore valid ZIP → 200" 200 "$S" || true
 

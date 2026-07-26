@@ -1,6 +1,6 @@
 // Bulk operations via the UI: select rows with checkboxes, then
 //   - bulk-move (📦): move hosts to another .conf file
-//   - bulk-edit (✏️): IP prefix transform (10.99.70 → 10.99.71) [A5, test.fail]
+//   - bulk-edit (✏️): IP prefix transform (10.99.70 → 10.99.71)
 //   - bulk-delete (🗑️): remove all selected hosts
 //
 // The bulk action bar (HostTable) only renders when >=1 row is selected.
@@ -9,9 +9,7 @@
 // own modal. We scope emoji selectors to ".bg-danger .btn-group" so the
 // per-row edit button (also ✏️) can't shadow the bulk button.
 //
-// NOTE: this is a UI-functional spec for the bulk bar + modals, NOT an A5
-// regression — see логи/gap2-playwright-bootstrap.md (A5 needs separate
-// reproduction before it can be honestly regression-tested).
+// NOTE: this is a UI-functional spec for the bulk bar + modals.
 
 import { test, expect } from '@playwright/test'
 import { apiLogin, seedHosts, CONF_DIR } from '../lib/api'
@@ -62,16 +60,12 @@ test('bulk-move: selected hosts move to another file', async ({ page }) => {
   await expect(row.locator('td.small.text-muted')).toHaveText(/e2e-bulk-b\.conf/, { timeout: 10000 })
 })
 
-// NOTE on bulk-edit below: this test reproduces known bug A5
-// (логи/duis.md). Root cause pinned: BulkEditModal.vue's preview computed
-// calls `store_hosts.find(...)` where `store_hosts` is the reactive `store`
-// object (which has no .find) — should be `store_hosts.hosts.find(...)`.
-// The computed throws on render, so opening the modal never produces
-// `.modal-content`. Marked test.fail() so CI stays green; when A5 is
-// fixed, this test will unexpectedly pass and Playwright will flag it —
-// at which point drop the .fail and the comment.
+// bulk-edit: the BulkEditModal preview computed used to crash on open
+// (логи/duis.md, A5) because it called `store_hosts.find(...)` on the
+// reactive store object (no .find). Fixed to `store_hosts.hosts.find(...)`.
+// This spec now verifies the modal opens and the IP prefix transform works.
 
-test.fail('bulk-edit: IP prefix transform changes IPs (A5 — modal crashes on open)', async ({ page }) => {
+test('bulk-edit: IP prefix transform changes IPs', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('.dropdown-toggle')).toBeVisible({ timeout: 15000 })
 

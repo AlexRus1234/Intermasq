@@ -1,9 +1,9 @@
 # tests/suites/41-config-put.sh — PUT /api/config (visual editor).
 # Validates: valid directives, invalid directive key, newline in value,
 # unsafe file path.
-# NOTE: writeConfigWithTest has the A13 bug (dnsmasq --test runs against
-# default config, not the file being written) — so we only test cases whose
-# expected status doesn't depend on dnsmasq actually validating the file.
+# writeConfigWithTest runs `dnsmasq --test --conf-file=<path>` (A13 fixed),
+# so the "valid directives" case is genuinely validated against the written
+# file; the other cases are rejected earlier (regex/escape/isSafePath).
 
 if require_jwt "PUT /api/config (visual editor)" 5; then
     EDIT_FILE="$CONF_DIR/45-visual.conf"

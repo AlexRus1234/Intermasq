@@ -25,9 +25,10 @@ if require_jwt "history diff + restore" 7; then
         DIFF_LEN=$(body | jval '.diff' | wc -c)
         echo "  diff bytes: $DIFF_LEN"
 
-        # Happy: restore that version. dnsmasq --test runs after restore; in
-        # CI mode with -init-system=none the default dnsmasq config is tested
-        # (A13 bug) and passes for any content.
+        # Happy: restore that version. restoreHistoryVersion runs
+        # `dnsmasq --test --conf-file=<path>` after writing (A13 fixed); the
+        # restored version is a previously-saved snapshot of valid dhcp-host
+        # lines, so it validates cleanly and returns 200.
         S=$(POST "$JWT" "/api/history/restore" "{\"file\":\"$FILE\",\"version\":\"$NEWEST_V\"}")
         check "Restore known version → 200" 200 "$S" || true
     else
