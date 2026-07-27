@@ -52,8 +52,12 @@ test('config-directive: save validates via dnsmasq --test (A13); invalid value i
   await expect(page.locator('.nav-link', { hasText: FILE_NAME })).toBeVisible({ timeout: 10000 })
 
   // --- add a custom `port` directive via the dns group's "+ add directive" ---
-  // basic-dhcp yields exactly one group card (dns), so its add button is unique.
-  await page.locator('.card.mb-3.shadow-sm button.btn-outline-primary').click()
+  // basic-dhcp parses into dns + dhcp groups (the commented #dhcp-range /
+  // #dhcp-option lines become inactive dhcp directives, not skipped), so
+  // there are several .btn-outline-primary add buttons across group cards.
+  // Scope to the FIRST group card (GROUP_ORDER = dns, dhcp, …), which is the
+  // dns group and carries exactly one add-directive button.
+  await page.locator('.card.mb-3.shadow-sm').first().locator('button.btn-outline-primary').click()
   const addPanel = page.locator('.card.border-primary')
   await expect(addPanel).toBeVisible({ timeout: 5000 })
   await addPanel.locator('input.form-control-sm').fill('port')
