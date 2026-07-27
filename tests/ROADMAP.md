@@ -10,7 +10,7 @@
 |---|---|---|
 | L1+L2 Go (unit + httptest) | **65.6%\*** (измерено) | один package `main` → L1/L2 совместно не делятся. Парсеры/handler'ы 80-100%; разрыв сосредоточен в init-system/bootstrap/goroutine-коде (см. сноску) |
 | L3 — smoke.sh | ~75-80% API | ✓ 29 suite-файлов, 136 проверок; плагин-прокси покрыт (`82-plugins.sh`). Иная метрика — доля эндпоинтов, не строки |
-| L4 — Playwright UI | 25 specs | ◐ батч 1+2 + фазы А,Б,В закрыты (auth/theme/i18n/hosts-sort/host-crud/host-add-ui/host-tags/search-filter/bulk-ops/config-files/host-edit-ui/templates-modal/users-tab/dns-aliases-add/bulk-import-text/csv-import/reload-ui/rollback-ui/history-modal/discovery-tab/backup-restore-ui). **A5 + A13 FIXED** (Блок A); bulk-edit без `test.fail`. Остаток — батч 4 (6 нишевых + 2 жёстких) + mutation-pass |
+| L4 — Playwright UI | 33 specs (31 pass + 2 skip) | ✓ **финал**: батч 1+2 + фазы А,Б,В + Блок A (A5/A13 FIXED) + батч 4 закрыты. 31 pass (auth/theme/i18n/hosts-sort/host-crud/host-add-ui/host-tags/search-filter/bulk-ops/config-files/host-edit-ui/templates-modal/users-tab/dns-aliases-add/bulk-import-text/csv-import/reload-ui/rollback-ui/history-modal/discovery-tab/backup-restore-ui/audit-tab/plugins-iframe/i18n-api-error/config-template-fill/config-directive/sse-live) + 2 skip (config-raw дублирует smoke, setup-screen нужна 2-я инстанция). Остаток — только mutation-pass (опционально) |
 | L5 — Real VM (init/dnsmasq) | 0% | ✗ не реализован |
 | Perf/stress (opt-in) | реализовано, informational | ✓ `tests/perf.sh` (read/reload/CRUD+RSS/SSE); не coverage-слой |
 
@@ -43,23 +43,27 @@ L4/L5 — 0%. Метрики разных слоёв не суммируются
 | **Gap 2** (3-й батч, фаза Б) — UI coverage | +4 specs (dns-aliases-add/bulk-import-text/csv-import/reload-ui). All form-input selectors scoped to the form card so the toolbar search box can't shadow them. | `gap2-batch3-phaseB.md` |
 | **Gap 2** (3-й батч, фаза В) — UI coverage | +5 tests/4 specs (rollback-ui/history-modal/discovery-tab/backup-restore-ui[download+restore]). 2 writes/file для `.bak`+version; restore = merge (безопасно для других спеков). | `gap2-batch3-phaseV.md` |
 | **Gap 2** (финал, Блок A) — продуктовые фиксы A5 + A13 | A5: `BulkEditModal.vue` `store_hosts.find` → `.hosts.find` (1 строка), `test.fail` снят. A13: `writeFileRaw`/`writeConfigWithTest`/`restoreHistoryVersion` → `dnsmasq --test --conf-file=<path>` (3 строки); A13 убран из `known-bugs.txt`; smoke-чек `40-config-files` стал честным 400. A3/A4-хосты изолированы в `19-bugs.conf` (не отравляют `10-static.conf` для restore-валидации). | `gap2-blockA-a5a13-fixes.md` |
+| **Gap 2** (финал, Блок B) — батч 4 Playwright | +6 реализованных specs (audit-tab/plugins-iframe/i18n-api-error/config-template-fill/config-directive[A13 validation]/sse-live[simplified]) + 2 infra-skip (config-raw дублирует smoke, setup-screen нужна 2-я инстанция :18084). 25→33 теста (31 pass + 2 skip). Селекторы выведены из реальных компонентов. | `gap2-finish.md` |
 
 ---
 
 ## Что осталось
 
-### Gap 2: UI behavior (~+20%) — 3 батча закрыты (25 specs), остаток = батч 4 + SSE/A5
+### Gap 2: UI behavior — ФИНАЛ (33 specs, 31 pass + 2 skip)
 
-**Закрыто (батч 1+2 + фазы А,Б,В, 25 specs):** Playwright против `intermasq-ci`
-в CI (Fedora 44, opt-in `run_e2e_tests`). Батч 1: auth/theme/i18n/hosts-sort
-(A1 guard)/host-crud. Батч 2: host-add-ui/host-tags/search-filter/bulk-ops
-(bulk-move + bulk-edit)/config-files + seed-хелпер. Фаза А: host-edit-ui/
+**Закрыто (батч 1+2 + фазы А,Б,В + Блок A + Блок B, 33 specs):** Playwright против
+`intermasq-ci` в CI (Fedora 44, opt-in `run_e2e_tests`). Батч 1: auth/theme/i18n/
+hosts-sort (A1 guard)/host-crud. Батч 2: host-add-ui/host-tags/search-filter/
+bulk-ops (bulk-move + bulk-edit)/config-files + seed-хелпер. Фаза А: host-edit-ui/
 bulk-delete/templates-modal (A7 smoke)/users-tab. Фаза Б: dns-aliases-add/
 bulk-import-text/csv-import/reload-ui. Фаза В: rollback-ui/history-modal/
-discovery-tab/backup-restore-ui. Хелпер разбит на `lib/api-auth.ts`
-+ `lib/api-hosts.ts` + barrel `lib/api.ts`. См. логи `gap2-playwright-bootstrap.md`,
+discovery-tab/backup-restore-ui. Блок A: продуктовые фиксы A5+A13 (см. ниже).
+Блок B (батч 4): audit-tab/plugins-iframe/i18n-api-error/config-template-fill/
+config-directive (A13 validation)/sse-live (simplified) + 2 infra-skip
+(config-raw, setup-screen). Хелпер разбит на `lib/api-auth.ts` + `lib/api-hosts.ts`
++ barrel `lib/api.ts`. См. логи `gap2-playwright-bootstrap.md`,
 `gap2-batch2-ui-coverage.md`, `gap2-batch3-phaseA.md`, `gap2-batch3-phaseB.md`,
-`gap2-batch3-phaseV.md`.
+`gap2-batch3-phaseV.md`, `gap2-blockA-a5a13-fixes.md`, `gap2-finish.md`.
 
 **A5 + A13 FIXED (Блок A, `Gap_2_finish.md` §5):** A5 — `BulkEditModal.vue:67`
 `store_hosts.find(...)` → `store_hosts.hosts.find(...)` (TypeError в `preview`
@@ -69,12 +73,12 @@ computed, модалка не открывалась); `test.fail` снят. A13
 default-конфига); A13 убран из `known-bugs.txt`, smoke-чек стал честным 400.
 См. `логи/gap2-blockA-a5a13-fixes.md`.
 
-**Осталось:**
-- Батч 4 (6 нишевых + 2 жёстких): audit/plugins-iframe/i18n-api-error/
-  config-template-fill/setup-screen + sse-live (мутация arp-файла) +
-  config-directive/raw (**разблокированы фиксом A13**).
-- (опционально) mutation-pass для эмпирической уверенности в качестве
-  тестов — см. замечание в `gap2-batch3-phaseB.md`.
+**Осталось (опционально):**
+- **mutation-pass** (`Gap_2_finish.md` §7) — throwaway-ветка, 4-5 точечных
+  мутаций, каждая должна ронять ровно ожидаемый spec. Эмпирическая уверенность
+  в качестве тестов; отложено (нужны ~5 раундов «правка → push → CI»).
+- **infra-specs:** полный `setup-screen` (2-я инстанция `:18084`) и полный
+  `sse-live` (writable arp-file) — сейчас `test.skip` с комментами.
 
 **Решение:** Playwright, расширение `tests/e2e/specs/`. План зафиксирован
 в `C:\Users\alexr\AppData\Local\Temp\opencode\l4-batch3-plan.md`.
@@ -139,7 +143,7 @@ fake-бинарники на PATH (+8-12%, но тест против моков
 | Приоритет | Задача | Время | Дельта coverage |
 |---|---|---|---|
 | **P0** | Пофиксить баги A1-A4 + A12 (A5 + A13 — FIXED в Блоке A) | 2-3 часа | (чистит красноту known-bugs) |
-| **P1** | Playwright (Gap 2) — батч 1+2 ✓ (11 specs), остаток SSE+A7+A5-фикс | +0.5 дня | основное UI-покрытие закрыто; SSE/true-A5 — 3-й батч |
+| **P1** | Playwright (Gap 2) — **ФИНАЛ** ✓ (33 specs: 31 pass + 2 infra-skip); A5/A13 FIXED; батч 4 закрыт | готово | основное UI-покрытие закрыто; остаток — mutation-pass (опционально) |
 | **P2** | L5 Real VM nightly (Gap 4) | 1-2 дня | +5% |
 | **P2** | Fuzzing для парсеров | 0.5 дня | +2-3% |
 
