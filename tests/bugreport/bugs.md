@@ -29,9 +29,14 @@
 | A12 | HIGH | backend (main.go aliasDomainRegex) | FIXED | smoke.sh: `A12: Add TXT with underscore domain` |
 | A13 | HIGH | backend (dnsmasq.go writeFileRaw) | FIXED | smoke.sh: `PUT with invalid dnsmasq syntax → 400` (стал честным) |
 
-**Итого:** 9 открытых багов (A7 — UI-несоответствие, не баг; A11 —
-частично закрыт фреймворком; A5 + A13 — FIXED в Блоке A), 7 покрыты
-regression-тестами в smoke.sh, 2 требуют Playwright (A1, A7).
+**Итого:** 7 из 9 багов закрыты в Bugfix sweep (2026-07-28): A1, A2, A3, A4,
+A6, A8, A12 → FIXED. Ранее A5 + A13 уже закрыты (Блок A). Остаются: A7 — не
+баг (UI-layout), A10 — feature gap (отдельный PR), A11 — partial (path
+traversal, defense-in-depth; hardening опционален). Все 7 smoke-tagged
+багов убраны из `tests/known-bugs.txt` → smoke.sh ожидаемо 0 Fail / 0
+Known-fail. Regression-тесты добавлены в `dnsmasq_test.go` и
+`handlers_test.go`; A1 покрыт существующим Playwright guard
+`hosts-sort.spec.ts`. Лог сессии: `логи/bugfix-sweep.md`.
 
 ---
 
@@ -440,6 +445,10 @@ testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+path)
 ---
 
 ## Приоритеты починки
+
+> **Bugfix sweep (2026-07-28):** A1, A2, A3, A4, A6, A8, A12 закрыты за одну
+> сессию с regression-тестами. См. `логи/bugfix-sweep.md`. Оригинальная
+> приоритизация ниже сохранена как историческая справка.
 
 По убыванию ROI (impact × лёгкость фикса):
 
