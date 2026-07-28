@@ -129,28 +129,39 @@ A1 → минимальный `:key`-фикс; A2 → сигнатуру `findAl
 - [x] `tests/known-bugs.txt`: остался только A11 (с комментарием-пометкой).
 - [x] `tests/bugreport/bugs.md`: 7 статусов FIXED + коммиты, сводка и
       «Итого» обновлены.
-- [x] smoke.sh: 7 known-fail сняты → ожидаемо 0 Fail / 0 Known-fail
-      (verify в CI; локально smoke не запускается — нужен dnsmasq + linux).
-- [x] `go vet ./...` чисто; `go test ./... -race -count=1` зелёный (см.
-      финальную верификацию ниже).
+- [x] smoke.sh: **0 Fail / 0 Known-fail** — подтверждено CI (см. ниже).
+- [x] `go vet ./...` чисто; `go test ./... -race -count=1` зелёный.
 - [x] `tests/ROADMAP.md` P0 отмечен закрытым.
 - [x] Этот файл.
 
 ---
 
-## Финальная верификация (Windows, локально)
+## Подтверждение CI
 
+После пуша (`fbe9d4e..13b2b41 main -> main`) CI (Forgejo Actions, Fedora 44
+контейнер) прогнал полный smoke.sh и go test. **Результат: всё зелёное.**
+
+- **smoke.sh:** 0 Fail, 0 Known-fail (раньше было 7 known-fail). 7 багов
+  сняты с known-bugs → соответствующие check'и стали честно зелёными:
+  - A2 → `30-aliases-happy.sh` / `31-aliases-bugs.sh` (409 + count=1) и
+    knock-on `32-aliases-delete.sh` (Delete again → 404).
+  - A3 → `21-hosts-bugs.sh` (zero/broadcast MAC → 400).
+  - A4 → `21-hosts-bugs.sh` (dash-MAC → 200 + colon-form в файле).
+  - A6 → `24-hosts-bulk.sh` (`count` поле = 2).
+  - A8 → `80-metrics.sh` (401 body >2 байт).
+  - A12 → `30-aliases-happy.sh` (TXT `_dmarc.local` → 200).
+- **go test:** зелёный, новые regression-тесты прошли (включая
+  `-race`-прогон с конкурентной записью users.json).
+- **gofmt / go vet:** чисто.
+
+Локальная верификация (Windows) совпала с CI:
 ```
-$env:INTERMASQ_SECRET="ci-test-secret-32-bytes-pad-XXXXXX"
 go vet ./...                    # чисто
-go test ./... -count=1          # ok intermask ~11s
-go test ./... -race -count=1    # (race-detector прогон — см. коммиты; -race медленный из-за bcrypt)
-cd frontend; npm run build      # 121 модуль, built in ~3s
+go test ./... -race -count=1    # ok intermask 80.680s
+cd frontend; npm run build      # 121 модуль, built in 3.06s
 ```
 
-Полный suite остался зелёным после КАЖДОГО бага (промежуточные прогоны
-`go test ./... -count=1` делались после каждого фикса). Smoke локально НЕ
-запускался (нужен dnsmasq + Linux-окружение) — полагаюсь на CI.
+Цель сессии (DoD) достигнута полностью.
 
 ---
 
