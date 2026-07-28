@@ -358,7 +358,7 @@ aliasDomainRegex = regexp.MustCompile(`^[a-zA-Z0-9_]([a-zA-Z0-9-._]*[a-zA-Z0-9_]
 > `writeFileRaw`, `writeConfigWithTest`, `restoreHistoryVersion`. A13 убран из
 > `known-bugs.txt`; smoke-чек стал честным 400. Лог: `логи/gap2-blockA-a5a13-fixes.md`.
 > `reloadDnsmasq` (sse.go) и `restoreBackupZip` (backup.go) намеренно оставлены
-> с bare `--test` — отдельная задача (см. `Gap_2_finish.md` §5).
+> с bare `--test` — отдельная задача (см. `логи/gap2-finish.md`).
 
 **Severity:** HIGH
 **Component:** `dnsmasq.go:65-80` (`writeFileRaw`, `writeConfigWithTest`)

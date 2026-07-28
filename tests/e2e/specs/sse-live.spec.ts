@@ -2,7 +2,7 @@
 // and observe a new 🟢 via the SSE delta — needs the e2e instance started
 // with a WRITABLE -arp-file (tests/fixtures/arp-sample.txt is read-only),
 // which is a CI-infrastructure change inside the opt-in L4 step
-// (Gap_2_finish.md §6.8). Until that's added, this spec covers the
+// (see логи/gap2-finish.md for the full-variant plan). Until that's added, this spec covers the
 // simplified alternative the same section allows: the SSE endpoint itself
 // is live and streams under auth.
 //

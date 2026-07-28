@@ -2,7 +2,7 @@
 // but the e2e instance (:18083) is already provisioned by global-setup, so
 // /api/status reports setup_required=false and AuthScreen lands on "login",
 // never "setup". Exercising setup needs a SECOND intermasq instance on
-// :18084 with its own `-db /tmp/e2e-setup-users.json` (Gap_2_finish.md §6.7)
+// :18084 with its own `-db /tmp/e2e-setup-users.json` (see логи/gap2-finish.md)
 // — a CI-infrastructure change inside the opt-in L4 step that hasn't been
 // added. Until it is, this spec is skipped. The login flow is already
 // covered by auth.spec.

@@ -65,7 +65,7 @@ config-directive (A13 validation)/sse-live (simplified) + 2 infra-skip
 `gap2-batch2-ui-coverage.md`, `gap2-batch3-phaseA.md`, `gap2-batch3-phaseB.md`,
 `gap2-batch3-phaseV.md`, `gap2-blockA-a5a13-fixes.md`, `gap2-finish.md`.
 
-**A5 + A13 FIXED (Блок A, `Gap_2_finish.md` §5):** A5 — `BulkEditModal.vue:67`
+**A5 + A13 FIXED (Блок A, `логи/gap2-finish.md`):** A5 — `BulkEditModal.vue:67`
 `store_hosts.find(...)` → `store_hosts.hosts.find(...)` (TypeError в `preview`
 computed, модалка не открывалась); `test.fail` снят. A13 —
 `writeFileRaw`/`writeConfigWithTest`/`restoreHistoryVersion` теперь гоняют

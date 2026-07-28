@@ -3,8 +3,8 @@
 // behaviour (invalid syntax → 400 + rollback; valid syntax → 200). An E2E
 // twin would duplicate those API checks without adding UI coverage — there
 // is no raw-edit UI, only the visual editor (DnsmasqConfig.vue), which is
-// covered by config-directive.spec.ts. Gap_2_finish.md §6.6 explicitly
-// allows skipping ("по сути дублирует smoke — оцени целесообразность").
+// covered by config-directive.spec.ts. The original plan (see логи/gap2-finish.md)
+// explicitly allows skipping ("по сути дублирует smoke — оцени целесообразность").
 
 import { test } from '@playwright/test'
 
