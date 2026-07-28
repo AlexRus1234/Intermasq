@@ -77,7 +77,7 @@ var (
 var (
 	macRegex         = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
 	hostnameRegex    = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
-	aliasDomainRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-.]*[a-zA-Z0-9])?$`)
+	aliasDomainRegex = regexp.MustCompile(`^[a-zA-Z0-9_]([a-zA-Z0-9-._]*[a-zA-Z0-9_])?$`)
 	// dhcpTagRegex validates a single dhcp-host tag qualifier. dnsmasq
 	// accepts "set:<name>" (assigns a tag to the host) and "tag:<name>"
 	// (host matches only if that tag is already set by dhcp-match).

@@ -26,7 +26,7 @@
 | A8 | MEDIUM | backend (metrics.go) | OPEN | smoke.sh: `A8: 401 has body` |
 | A10 | LOW | backend (arp_leases.go) | OPEN | feature gap, не regression test |
 | A11 | LOW | security (handlers_*.go) | PARTIAL | smoke.sh: path traversal battery |
-| A12 | HIGH | backend (main.go aliasDomainRegex) | OPEN | smoke.sh: `A12: Add TXT with underscore domain` |
+| A12 | HIGH | backend (main.go aliasDomainRegex) | FIXED | smoke.sh: `A12: Add TXT with underscore domain` |
 | A13 | HIGH | backend (dnsmasq.go writeFileRaw) | FIXED | smoke.sh: `PUT with invalid dnsmasq syntax → 400` (стал честным) |
 
 **Итого:** 9 открытых багов (A7 — UI-несоответствие, не баг; A11 —
@@ -324,6 +324,11 @@ OUI-vendor работает только для зарегистрированн
 ---
 
 ## A12 — aliasDomainRegex отвергает подчёркивание
+
+> **Status: FIXED** (Bugfix sweep, 2026-07-28). Регекс ослаблен до
+> `^[a-zA-Z0-9_]([a-zA-Z0-9-._]*[a-zA-Z0-9_])?$` — теперь принимает `_dmarc.local`,
+> `_sip._tcp`, DKIM/ACME challenge names. Regression: `TestAliasDomainRegexUnderscore`
+> в `dnsmasq_test.go`; smoke `A12: Add TXT with underscore domain → 200` зелёный.
 
 **Severity:** HIGH
 **Component:** `main.go:80`

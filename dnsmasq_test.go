@@ -2330,6 +2330,39 @@ func TestValidateAliasEntryPTRAndTXT(t *testing.T) {
 	}
 }
 
+// TestAliasDomainRegexUnderscore (A12 regression) confirms that the domain
+// regex accepts underscore-prefixed/suffixed owner names required for DMARC
+// (_dmarc), DKIM (default._domainkey), SRV (_sip._tcp) and ACME DNS-01
+// (_acme-challenge), while still rejecting malformed domains.
+func TestAliasDomainRegexUnderscore(t *testing.T) {
+	accept := []string{
+		"_dmarc.local",
+		"_sip._tcp.example.com",
+		"default._domainkey.example.com",
+		"_acme-challenge.example.com",
+		"nas.local",
+		"a",
+		"_",
+	}
+	reject := []string{
+		"",
+		"-leading.example.com",
+		".leadingdot.example.com",
+		"with space.example.com",
+		"bad!char.example.com",
+	}
+	for _, d := range accept {
+		if !aliasDomainRegex.MatchString(d) {
+			t.Errorf("aliasDomainRegex should accept %q (A12)", d)
+		}
+	}
+	for _, d := range reject {
+		if aliasDomainRegex.MatchString(d) {
+			t.Errorf("aliasDomainRegex should reject %q", d)
+		}
+	}
+}
+
 func TestRemoveAliasLinePTR(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dns.conf")
