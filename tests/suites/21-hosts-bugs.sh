@@ -18,7 +18,17 @@ if require_jwt "static hosts — bug regressions" 3; then
     S=$(POST "$JWT" "/api/hosts" "{\"mac\":\"ff:ff:ff:ff:ff:ff\",\"ip\":\"10.0.0.98\",\"hostname\":\"bcastmac\",\"file\":\"$BUG_FILE\"}")
     check "A3: broadcast MAC rejected → 400" 400 "$S" A3 || true
 
-    # A4: dash separator should be normalized OR rejected (currently saved verbatim, breaks dnsmasq)
+    # A4: dash separator is normalised to ':' on input (dnsmasq rejects dashes).
+    # POST returns 200 and the file must contain the colon form, not the dash form.
     S=$(POST "$JWT" "/api/hosts" "{\"mac\":\"aa-bb-cc-dd-ee-07\",\"ip\":\"10.0.0.17\",\"hostname\":\"dashmac\",\"file\":\"$BUG_FILE\"}")
-    check "A4: dash-MAC handled (rejected or normalized)" 400 "$S" A4 || true
+    check "A4: dash-MAC normalised → 200" 200 "$S" || true
+    if [ -f "$BUG_FILE" ]; then
+        if grep -q "aa:bb:cc:dd:ee:07" "$BUG_FILE" && ! grep -q "aa-bb-cc-dd-ee-07" "$BUG_FILE"; then
+            check "A4: file stores colon form, not dash" 0 0 || true
+        else
+            check "A4: file stores colon form, not dash" 0 1 || true
+        fi
+    else
+        skip "A4: file stores colon form, not dash (file missing)"
+    fi
 fi

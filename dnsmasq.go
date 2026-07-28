@@ -374,13 +374,29 @@ func hostsToCSV(hosts []HostEntry) []byte {
 	return buf.Bytes()
 }
 
+// normalizeMAC converts the dash-separated MAC form (common when pasting
+// from Windows `getmac` or some network tools) into the colon-separated
+// form that dnsmasq accepts. dnsmasq --test rejects aa-bb-cc-dd-ee-ff, so
+// every user input path normalises through this helper before validation
+// and before writing. Case is preserved.
+func normalizeMAC(mac string) string {
+	return strings.ReplaceAll(mac, "-", ":")
+}
+
 // validateHostFields проверяет поля dhcp-host записи без требования «все
 // три обязательны». Контракт:
 //   - MAC обязателен и валиден по macRegex.
 //   - Если IP указан — должен парситься net.ParseIP.
 //   - Если hostname указан — должен удовлетворять validHostname.
 func validateHostFields(mac, ip, hostname string) bool {
+	mac = normalizeMAC(mac)
 	if !macRegex.MatchString(mac) {
+		return false
+	}
+	// Reject zero and broadcast MACs: dnsmasq either rejects them or, worse,
+	// silently accepts and breaks DHCP for the whole segment.
+	if strings.EqualFold(mac, "00:00:00:00:00:00") ||
+		strings.EqualFold(mac, "ff:ff:ff:ff:ff:ff") {
 		return false
 	}
 	if ip != "" && net.ParseIP(ip) == nil {
@@ -407,7 +423,7 @@ func parseCSVHosts(r io.Reader, targetFile string) ([]HostEntry, error) {
 		if len(row) < 3 {
 			continue
 		}
-		mac := strings.TrimSpace(row[0])
+		mac := normalizeMAC(strings.TrimSpace(row[0]))
 		ip := strings.TrimSpace(row[1])
 		hostname := strings.TrimSpace(row[2])
 		if validateHostFields(mac, ip, hostname) {

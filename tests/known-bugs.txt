@@ -16,6 +16,4 @@
 # check in smoke.sh to expect the fixed behaviour. Pipeline goes green.
 
 A2    DNS alias duplicate allowed — findAliasesByDomain excludes self when called for add flow
-A3    zero/broadcast MAC (00:00:00:00:00:00, ff:ff:ff:ff:ff:ff) accepted by macRegex
-A4    MAC with dash separator (aa-bb-cc-dd-ee-ff) saved verbatim — dnsmasq later rejects
 A11   path traversal battery (mostly caught; one vector blocked by Go HTTP path cleaning, not server logic)

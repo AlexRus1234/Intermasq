@@ -18,8 +18,8 @@
 |---|---|---|---|---|
 | A1 | CRITICAL | frontend (HostTable.vue) | OPEN | нужен Playwright (L4) |
 | A2 | CRITICAL | backend (aliases.go) | OPEN | smoke.sh: `A2: duplicate A same file → 409` |
-| A3 | HIGH | backend (main.go macRegex) | OPEN | smoke.sh: `A3: zero MAC rejected` |
-| A4 | HIGH | backend (validation) | OPEN | smoke.sh: `A4: dash-MAC handled` |
+| A3 | HIGH | backend (main.go macRegex) | FIXED | smoke.sh: `A3: zero MAC rejected` |
+| A4 | HIGH | backend (validation) | FIXED | smoke.sh: `A4: dash-MAC handled` |
 | A5 | HIGH | frontend (BulkEditModal.vue) | FIXED | был Playwright `test.fail` (Блок A), `.fail` снят |
 | A6 | MEDIUM | backend (handlers_hosts.go) | FIXED | smoke.sh: `Bulk JSON response has count field` |
 | A7 | MEDIUM | frontend (TemplatesModal.vue) | OPEN | UI проверен вручную, не баг |
@@ -111,6 +111,12 @@ check и appending строку.
 
 ## A3 — MAC `00:00:00:00:00:00` принимается
 
+> **Status: FIXED** (Bugfix sweep, 2026-07-28). `validateHostFields` теперь
+> отвергает zero/broadcast MAC через `strings.EqualFold` blacklist (после
+> нормализации). Regression: cases в `TestValidateHostFieldsAllCombinations` +
+> e2e `TestAddHostHandlerRejectsZeroBroadcastMAC`; smoke `A3: zero/broadcast MAC
+> rejected → 400` зелёные.
+
 **Severity:** HIGH
 **Component:** `main.go:78`
 
@@ -138,6 +144,14 @@ if strings.EqualFold(mac, "00:00:00:00:00:00") ||
 ---
 
 ## A4 — MAC с `-` сохраняется, dnsmasq потом падает
+
+> **Status: FIXED** (Bugfix sweep, 2026-07-28). Добавлен `normalizeMAC()`
+> (`-`→`:`), вызывается на входе `addHostHandler`, `bulkAddHostsHandler`,
+> `parseCSVHosts` и дефенсивно внутри `validateHostFields`. Записанный файл
+> всегда содержит canonical colon-форму. Regression: `TestNormalizeMAC`,
+> `TestAddHostHandlerDashMACNormalized`, `TestParseCSVHostsNormalizesDashMAC`
+> + table-cases; smoke `A4: dash-MAC normalised → 200` (+ file colon-form
+> check) зелёный.
 
 **Severity:** HIGH
 **Component:** `main.go:78`, `dnsmasq.go:149`

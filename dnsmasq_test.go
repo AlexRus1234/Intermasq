@@ -2050,6 +2050,15 @@ func TestValidateHostFieldsAllCombinations(t *testing.T) {
 		{"bad mac", "not-a-mac", "1.2.3.4", "host", false},
 		{"empty mac", "", "1.2.3.4", "host", false},
 		{"empty all", "", "", "", false},
+		// A3: zero/broadcast MACs must be rejected even though they match macRegex.
+		{"zero mac", "00:00:00:00:00:00", "", "", false},
+		{"broadcast mac", "ff:ff:ff:ff:ff:ff", "", "", false},
+		{"zero mac upper", "FF:FF:FF:FF:FF:FF", "", "", false},
+		// A4: dash-separated MAC is normalised inside validateHostFields, so the
+		// validator accepts it (the entry point then writes the colon form).
+		{"dash mac", "aa-bb-cc-dd-ee-ff", "", "", true},
+		{"dash mac + ip", "aa-bb-cc-dd-ee-ff", "10.0.0.5", "x", true},
+		{"dash zero mac", "00-00-00-00-00-00", "", "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2171,6 +2180,92 @@ func TestAddHostHandlerIPDuplicateStillChecked(t *testing.T) {
 	addHostHandler(c)
 	if w.Code != 409 {
 		t.Fatalf("expected 409 for IP conflict, got %d", w.Code)
+	}
+}
+
+// TestNormalizeMAC (A4) confirms dash-separated MACs become colon-separated.
+func TestNormalizeMAC(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"aa-bb-cc-dd-ee-ff", "aa:bb:cc:dd:ee:ff"},
+		{"aa:bb:cc:dd:ee:ff", "aa:bb:cc:dd:ee:ff"},
+		{"AA-BB-CC-DD-EE-FF", "AA:BB:CC:DD:EE:FF"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := normalizeMAC(tc.in); got != tc.want {
+			t.Errorf("normalizeMAC(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestAddHostHandlerRejectsZeroBroadcastMAC (A3 regression) — zero and
+// broadcast MACs must be rejected at the handler layer even though they
+// match macRegex.
+func TestAddHostHandlerRejectsZeroBroadcastMAC(t *testing.T) {
+	for _, mac := range []string{"00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff"} {
+		dir := t.TempDir()
+		*ConfigDir = dir
+		file := filepath.Join(dir, "hosts.conf")
+		os.WriteFile(file, []byte(""), 0644)
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		body := fmt.Sprintf(`{"mac":%q,"ip":"10.0.0.99","hostname":"x","file":%q}`, mac, file)
+		c.Request = httptest.NewRequest("POST", "/api/hosts", strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Set("user", "admin")
+		addHostHandler(c)
+		if w.Code != 400 {
+			t.Errorf("expected 400 for MAC %q, got %d: %s", mac, w.Code, w.Body.String())
+		}
+		content, _ := os.ReadFile(file)
+		if strings.Contains(string(content), mac) {
+			t.Errorf("MAC %q should not be written to file:\n%s", mac, content)
+		}
+	}
+}
+
+// TestAddHostHandlerDashMACNormalized (A4 regression) — POST /api/hosts with
+// a dash-separated MAC returns 200 and stores the colon form, so dnsmasq
+// --test passes on reload.
+func TestAddHostHandlerDashMACNormalized(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(file, []byte(""), 0644)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := fmt.Sprintf(`{"mac":"aa-bb-cc-dd-ee-07","ip":"10.0.0.17","hostname":"dashmac","file":%q}`, file)
+	c.Request = httptest.NewRequest("POST", "/api/hosts", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	addHostHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for dash-MAC (normalised), got %d: %s", w.Code, w.Body.String())
+	}
+	content, _ := os.ReadFile(file)
+	if !strings.Contains(string(content), "aa:bb:cc:dd:ee:07") {
+		t.Errorf("colon form should be in file:\n%s", content)
+	}
+	if strings.Contains(string(content), "aa-bb-cc-dd-ee-07") {
+		t.Errorf("dash form must NOT be in file:\n%s", content)
+	}
+}
+
+// TestParseCSVHostsNormalizesDashMAC (A4 regression) — CSV import normalises
+// dash-MACs the same way the JSON add path does.
+func TestParseCSVHostsNormalizesDashMAC(t *testing.T) {
+	csv := "mac,ip,hostname\naa-bb-cc-dd-ee-ff,10.0.0.5,x\n"
+	hosts, err := parseCSVHosts(strings.NewReader(csv), "/tmp/x.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	}
+	if hosts[0].Mac != "aa:bb:cc:dd:ee:ff" {
+		t.Errorf("expected normalised MAC aa:bb:cc:dd:ee:ff, got %q", hosts[0].Mac)
 	}
 }
 

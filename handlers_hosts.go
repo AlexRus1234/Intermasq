@@ -62,6 +62,7 @@ func addHostHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
 	}
+	req.Mac = normalizeMAC(req.Mac)
 	if !validateHostFields(req.Mac, req.Ip, req.Hostname) {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
@@ -170,6 +171,12 @@ func bulkAddHostsHandler(c *gin.Context) {
 	if !isSafePath(req.File) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
+	}
+
+	// Normalise MAC separators up-front so the in-batch cross-check and the
+	// eventual write both see the canonical colon form.
+	for i := range req.Hosts {
+		req.Hosts[i].Mac = normalizeMAC(req.Hosts[i].Mac)
 	}
 
 	for i, h1 := range req.Hosts {
