@@ -682,6 +682,14 @@ func TestMetricsHandler_NoAuth_401(t *testing.T) {
 	if w.Code != 401 {
 		t.Fatalf("expected 401 without auth, got %d", w.Code)
 	}
+	// A8 regression: 401 must carry a JSON body so curl/Prometheus show a
+	// meaningful error instead of an empty reply.
+	if w.Body.Len() == 0 {
+		t.Errorf("expected non-empty body on 401, got empty")
+	}
+	if !strings.Contains(w.Body.String(), "auth_required") {
+		t.Errorf("expected body to contain \"auth_required\", got: %s", w.Body.String())
+	}
 }
 
 func TestMetricsHandler_APIKey_200(t *testing.T) {

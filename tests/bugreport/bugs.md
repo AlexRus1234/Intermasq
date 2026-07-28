@@ -23,7 +23,7 @@
 | A5 | HIGH | frontend (BulkEditModal.vue) | FIXED | был Playwright `test.fail` (Блок A), `.fail` снят |
 | A6 | MEDIUM | backend (handlers_hosts.go) | OPEN | smoke.sh: `Bulk JSON response has count field` |
 | A7 | MEDIUM | frontend (TemplatesModal.vue) | OPEN | UI проверен вручную, не баг |
-| A8 | MEDIUM | backend (metrics.go) | OPEN | smoke.sh: `A8: 401 has body` |
+| A8 | MEDIUM | backend (metrics.go) | FIXED | smoke.sh: `A8: 401 has body` |
 | A10 | LOW | backend (arp_leases.go) | OPEN | feature gap, не regression test |
 | A11 | LOW | security (handlers_*.go) | PARTIAL | smoke.sh: path traversal battery |
 | A12 | HIGH | backend (main.go aliasDomainRegex) | FIXED | smoke.sh: `A12: Add TXT with underscore domain` |
@@ -248,6 +248,12 @@ c.JSON(200, gin.H{"status": "ok", "count": len(req.Hosts)})
 ---
 
 ## A8 — /metrics на `curl` без `-i` выглядит "пустым"
+
+> **Status: FIXED** (Bugfix sweep, 2026-07-28). `metricsHandler` теперь
+> вызывает `c.AbortWithStatusJSON(401, gin.H{"error": "auth_required"})` вместо
+> bare `AbortWithStatus(401)`. Regression: augmented `TestMetricsHandler_NoAuth_401`
+> в `handlers_test.go` (assert non-empty body + "auth_required"); smoke `A8: 401
+> has body` зелёный.
 
 **Severity:** MEDIUM (UX)
 **Component:** `metrics.go:60`

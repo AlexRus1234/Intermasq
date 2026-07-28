@@ -59,7 +59,7 @@ var (
 // Prometheus scrape configs which cannot easily send custom headers).
 func metricsHandler(c *gin.Context) {
 	if !checkMetricsAuth(c) {
-		c.AbortWithStatus(401)
+		c.AbortWithStatusJSON(401, gin.H{"error": "auth_required"})
 		return
 	}
 
