@@ -10,7 +10,7 @@
 |---|---|---|
 | L1+L2 Go (unit + httptest) | **65.6%\*** (измерено) | один package `main` → L1/L2 совместно не делятся. Парсеры/handler'ы 80-100%; разрыв сосредоточен в init-system/bootstrap/goroutine-коде (см. сноску) |
 | L3 — smoke.sh | ~75-80% API | ✓ 29 suite-файлов, 136 проверок; плагин-прокси покрыт (`82-plugins.sh`). Иная метрика — доля эндпоинтов, не строки |
-| L4 — Playwright UI | 33 specs (31 pass + 2 skip) | ✓ **финал**: батч 1+2 + фазы А,Б,В + Блок A (A5/A13 FIXED) + батч 4 закрыты. 31 pass (auth/theme/i18n/hosts-sort/host-crud/host-add-ui/host-tags/search-filter/bulk-ops/config-files/host-edit-ui/templates-modal/users-tab/dns-aliases-add/bulk-import-text/csv-import/reload-ui/rollback-ui/history-modal/discovery-tab/backup-restore-ui/audit-tab/plugins-iframe/i18n-api-error/config-template-fill/config-directive/sse-live) + 2 skip (config-raw дублирует smoke, setup-screen нужна 2-я инстанция). Остаток — только mutation-pass (опционально) |
+| L4 — Playwright UI | 33 specs (31 pass + 2 skip) | ✓ **финал**: батч 1+2 + фазы А,Б,В + Блок A (A5/A13 FIXED) + батч 4 закрыты + mutation-pass пройден (4 frontend-мутации роняют ровно ожидаемые spec'и). 31 pass (...) + 2 skip (config-raw дублирует smoke, setup-screen нужна 2-я инстанция). Остаток — опционально: усилить 2 слабых spec'а + infra-specs |
 | L5 — Real VM (init/dnsmasq) | 0% | ✗ не реализован |
 | Perf/stress (opt-in) | реализовано, informational | ✓ `tests/perf.sh` (read/reload/CRUD+RSS/SSE); не coverage-слой |
 
@@ -74,11 +74,16 @@ default-конфига); A13 убран из `known-bugs.txt`, smoke-чек ст
 См. `логи/gap2-blockA-a5a13-fixes.md`.
 
 **Осталось (опционально):**
-- **mutation-pass** (`Gap_2_finish.md` §7) — throwaway-ветка, 4-5 точечных
-  мутаций, каждая должна ронять ровно ожидаемый spec. Эмпирическая уверенность
-  в качестве тестов; отложено (нужны ~5 раундов «правка → push → CI»).
+- **Усилить 2 слабых spec'а** (найдено mutation-pass): `hosts-sort` — assert
+  порядка (сейчас проверяет только кол-во строк, A1-guard); `auth` — assert
+  что после logout следующий API-запрос даёт 401 (сейчас `.btn-primary` visible
+  выполняется и на dashboard).
 - **infra-specs:** полный `setup-screen` (2-я инстанция `:18084`) и полный
   `sse-live` (writable arp-file) — сейчас `test.skip` с комментами.
+- **mutation-pass ВЫПОЛНЕН** (Блок C): 4 frontend-мутации (`applyConfig` /
+  `addAlias` / `deleteHost` / A5-revert) роняют ровно `reload-ui` /
+  `dns-aliases-add` / `host-crud` / `bulk-edit`, без коллатерала. См.
+  `логи/gap2-finish.md`.
 
 **Решение:** Playwright, расширение `tests/e2e/specs/`. План зафиксирован
 в `C:\Users\alexr\AppData\Local\Temp\opencode\l4-batch3-plan.md`.
@@ -143,7 +148,7 @@ fake-бинарники на PATH (+8-12%, но тест против моков
 | Приоритет | Задача | Время | Дельта coverage |
 |---|---|---|---|
 | **P0** | Пофиксить баги A1-A4 + A12 (A5 + A13 — FIXED в Блоке A) | 2-3 часа | (чистит красноту known-bugs) |
-| **P1** | Playwright (Gap 2) — **ФИНАЛ** ✓ (33 specs: 31 pass + 2 infra-skip); A5/A13 FIXED; батч 4 закрыт | готово | основное UI-покрытие закрыто; остаток — mutation-pass (опционально) |
+| **P1** | Playwright (Gap 2) — **ФИНАЛ** ✓ (33 specs: 31 pass + 2 infra-skip); A5/A13 FIXED; батч 4 закрыт; mutation-pass пройден | готово | основное UI-покрытие закрыто; остаток — опционально (усилить 2 слабых spec'а, infra-specs) |
 | **P2** | L5 Real VM nightly (Gap 4) | 1-2 дня | +5% |
 | **P2** | Fuzzing для парсеров | 0.5 дня | +2-3% |
 
