@@ -73,7 +73,7 @@ func addAliasHandler(c *gin.Context) {
 		return
 	}
 
-	conflicts := findAliasesByDomain(req.Domain, req.Type, req.File)
+	conflicts := findAliasesByDomain(req.Domain, "", "")
 	if len(conflicts) > 0 {
 		c.JSON(409, gin.H{"error": "alias_duplicate", "conflicts": conflicts})
 		return

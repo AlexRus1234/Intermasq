@@ -2552,6 +2552,62 @@ func TestAddAliasHandlerTXT(t *testing.T) {
 	}
 }
 
+// TestAddAliasHandlerDuplicateRejected (A2 regression) — adding an A record
+// whose domain+type already exists in the same file must return 409 and must
+// NOT append a second line. Previously findAliasesByDomain excluded the
+// matching type+file combo, so the duplicate check saw zero conflicts.
+func TestAddAliasHandlerDuplicateRejected(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "dns.conf")
+	os.WriteFile(file, []byte("address=/nas.local/10.0.0.5\n"), 0644)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := fmt.Sprintf(`{"type":"A","domain":"nas.local","target":"10.0.0.99","file":%q}`, file)
+	c.Request = httptest.NewRequest("POST", "/api/aliases", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	addAliasHandler(c)
+	if w.Code != 409 {
+		t.Fatalf("expected 409 for duplicate alias, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "alias_duplicate") {
+		t.Errorf("expected alias_duplicate error, got: %s", w.Body.String())
+	}
+	content, _ := os.ReadFile(file)
+	if got := strings.Count(string(content), "address=/nas.local/"); got != 1 {
+		t.Errorf("expected exactly 1 nas.local A record, got %d:\n%s", got, content)
+	}
+}
+
+// TestDeleteAliasHandlerSecondDeleteNotFound (A2 knock-on) — once A2 is fixed
+// there is at most one record per domain+type+file, so a second delete must
+// return 404 (previously it found the duplicate copy and returned 200).
+func TestDeleteAliasHandlerSecondDeleteNotFound(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "dns.conf")
+	os.WriteFile(file, []byte("address=/nas.local/10.0.0.5\n"), 0644)
+
+	doDelete := func() int {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		body := fmt.Sprintf(`{"type":"A","domain":"nas.local","file":%q}`, file)
+		c.Request = httptest.NewRequest("POST", "/api/aliases/delete", strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Set("user", "admin")
+		deleteAliasHandler(c)
+		return w.Code
+	}
+	if code := doDelete(); code != 200 {
+		t.Fatalf("first delete: expected 200, got %d", code)
+	}
+	if code := doDelete(); code != 404 {
+		t.Fatalf("second delete: expected 404 (A2 knock-on), got %d", code)
+	}
+}
+
 func TestParseCSVAliasesIncludesPTRAndTXT(t *testing.T) {
 	csv := "type,domain,target\n" +
 		"A,nas.lan,192.168.1.10\n" +

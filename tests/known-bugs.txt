@@ -15,5 +15,4 @@
 # Removing a fixed bug: delete the ID here. Update the corresponding
 # check in smoke.sh to expect the fixed behaviour. Pipeline goes green.
 
-A2    DNS alias duplicate allowed — findAliasesByDomain excludes self when called for add flow
 A11   path traversal battery (mostly caught; one vector blocked by Go HTTP path cleaning, not server logic)

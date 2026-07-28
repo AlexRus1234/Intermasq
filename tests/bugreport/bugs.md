@@ -17,7 +17,7 @@
 | ID | Severity | Component | Status | Regression test |
 |---|---|---|---|---|
 | A1 | CRITICAL | frontend (HostTable.vue) | OPEN | нужен Playwright (L4) |
-| A2 | CRITICAL | backend (aliases.go) | OPEN | smoke.sh: `A2: duplicate A same file → 409` |
+| A2 | CRITICAL | backend (aliases.go) | FIXED | smoke.sh: `A2: duplicate A same file → 409` |
 | A3 | HIGH | backend (main.go macRegex) | FIXED | smoke.sh: `A3: zero MAC rejected` |
 | A4 | HIGH | backend (validation) | FIXED | smoke.sh: `A4: dash-MAC handled` |
 | A5 | HIGH | frontend (BulkEditModal.vue) | FIXED | был Playwright `test.fail` (Блок A), `.fail` снят |
@@ -73,6 +73,13 @@ reconciliation падает в undefined behavior — дубль DOM при ка
 ---
 
 ## A2 — Дубликаты DNS-alias можно добавлять
+
+> **Status: FIXED** (Bugfix sweep, 2026-07-28). `addAliasHandler` теперь
+> вызывает `findAliasesByDomain(domain, "", "")` без exclude — существующая
+> запись в том же файле корректно считается конфликтом → 409. Knock-on:
+> second-delete в `32-aliases-delete.sh` теперь честно возвращает 404.
+> Regression: `TestAddAliasHandlerDuplicateRejected` +
+> `TestDeleteAliasHandlerSecondDeleteNotFound` в `dnsmasq_test.go`.
 
 **Severity:** CRITICAL
 **Component:** `handlers_aliases.go:76` + `aliases.go:176-189`
