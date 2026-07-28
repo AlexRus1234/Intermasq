@@ -24,7 +24,7 @@
           </tr>
       </thead>
       <tbody>
-          <tr v-for="h in sortedHosts" :key="h.mac" :class="{'table-active': isSelected(h)}">
+          <tr v-for="h in sortedHosts" :key="h.mac + '|' + (h.file||'')" :class="{'table-active': isSelected(h)}">
               <td>
                   <input type="checkbox" class="form-check-input" :checked="isSelected(h)" @change="toggleSelection(h)">
               </td>

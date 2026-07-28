@@ -16,7 +16,7 @@
 
 | ID | Severity | Component | Status | Regression test |
 |---|---|---|---|---|
-| A1 | CRITICAL | frontend (HostTable.vue) | OPEN | нужен Playwright (L4) |
+| A1 | CRITICAL | frontend (HostTable.vue) | FIXED | Playwright `hosts-sort.spec.ts` (guard) |
 | A2 | CRITICAL | backend (aliases.go) | FIXED | smoke.sh: `A2: duplicate A same file → 409` |
 | A3 | HIGH | backend (main.go macRegex) | FIXED | smoke.sh: `A3: zero MAC rejected` |
 | A4 | HIGH | backend (validation) | FIXED | smoke.sh: `A4: dash-MAC handled` |
@@ -36,6 +36,14 @@ regression-тестами в smoke.sh, 2 требуют Playwright (A1, A7).
 ---
 
 ## A1 — Дублирование строк таблицы при сортировке
+
+> **Status: FIXED** (Bugfix sweep, 2026-07-28). Минимальный фикс:
+> `:key="h.mac + '|' + (h.file||'')"` в `HostTable.vue:27`. Ключ теперь
+> уникален: `h.file` различается между `.conf`-файлами, а суффикс `|has_bak`
+> (из `getHostsHandler`) делает уникальными bak/non-bak варианты одного MAC.
+> Опциональный `has_bak`-рефакторинг сознательно не сделан (вне объёма фикса).
+> Regression: существующий Playwright `hosts-sort.spec.ts` (guard — count строк
+> стабилен при сортировке) остаётся зелёным.
 
 **Severity:** CRITICAL
 **Component:** `frontend/src/components/static/HostTable.vue:27`
