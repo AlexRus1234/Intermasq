@@ -266,7 +266,7 @@ func bulkAddHostsHandler(c *gin.Context) {
 		Mac:    fmt.Sprintf("%d hosts", len(req.Hosts)),
 	})
 
-	c.JSON(200, gin.H{"status": "ok"})
+	c.JSON(200, gin.H{"status": "ok", "count": len(req.Hosts)})
 }
 
 func deleteHostHandler(c *gin.Context) {

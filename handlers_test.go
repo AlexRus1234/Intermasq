@@ -27,6 +27,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"net/http/httptest"
@@ -137,6 +138,18 @@ func TestBulkAddHostsHandler_Success(t *testing.T) {
 
 	if w.Code != 200 {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	// A6 regression: JSON bulk response must include a count field, mirroring
+	// the CSV import path.
+	var resp struct {
+		Status string `json:"status"`
+		Count  int    `json:"count"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON response: %v (body: %s)", err, w.Body.String())
+	}
+	if resp.Count != 2 {
+		t.Errorf("expected count=2 in bulk JSON response, got %d (body: %s)", resp.Count, w.Body.String())
 	}
 	content, _ := os.ReadFile(file)
 	if !strings.Contains(string(content), "aa:bb:cc:dd:ee:01") || !strings.Contains(string(content), "aa:bb:cc:dd:ee:02") {

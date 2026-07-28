@@ -21,7 +21,7 @@
 | A3 | HIGH | backend (main.go macRegex) | OPEN | smoke.sh: `A3: zero MAC rejected` |
 | A4 | HIGH | backend (validation) | OPEN | smoke.sh: `A4: dash-MAC handled` |
 | A5 | HIGH | frontend (BulkEditModal.vue) | FIXED | был Playwright `test.fail` (Блок A), `.fail` снят |
-| A6 | MEDIUM | backend (handlers_hosts.go) | OPEN | smoke.sh: `Bulk JSON response has count field` |
+| A6 | MEDIUM | backend (handlers_hosts.go) | FIXED | smoke.sh: `Bulk JSON response has count field` |
 | A7 | MEDIUM | frontend (TemplatesModal.vue) | OPEN | UI проверен вручную, не баг |
 | A8 | MEDIUM | backend (metrics.go) | FIXED | smoke.sh: `A8: 401 has body` |
 | A10 | LOW | backend (arp_leases.go) | OPEN | feature gap, не regression test |
@@ -205,6 +205,10 @@ mac = strings.ReplaceAll(mac, "-", ":")
 ---
 
 ## A6 — Bulk-import показывает "импортировано 0" / JSON без count
+
+> **Status: FIXED** (Bugfix sweep, 2026-07-28). `bulkAddHostsHandler` теперь
+> возвращает `{"status":"ok","count":N}`, инконсистентность с CSV-путём устранена.
+> Regression: augmented `TestBulkAddHostsHandler_Success` (assert `.count == N`).
 
 **Severity:** MEDIUM
 **Component:** `handlers_hosts.go:269` (`bulkAddHostsHandler`)
