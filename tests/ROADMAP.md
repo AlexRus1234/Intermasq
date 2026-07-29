@@ -152,7 +152,7 @@ fake-бинарники на PATH (+8-12%, но тест против моков
 | **P0✓** | **Hardening sweep (2026-07-29) — A11 закрыто:** `getFileHandler`/`putFileHandler` (`handlers_config.go`) получили `isSafePath` после `filepath.Join` (defense-in-depth); regression-тесты `TestGetFileHandlerRejectsUnsafePath` / `TestPutFileHandlerRejectsUnsafePath`. `tests/known-bugs.txt` теперь пуст. См. `логи/hardening-sweep.md`. | готово | known-bugs.txt пуст |
 | **P1** | Playwright (Gap 2) — **ФИНАЛ** ✓ (33 specs: 31 pass + 2 infra-skip); A5/A13 FIXED; батч 4 закрыт; mutation-pass пройден | готово | основное UI-покрытие закрыто; остаток — опционально (усилить 2 слабых spec'а, infra-specs) |
 | **P2** | L5 Real VM nightly (Gap 4) | 1-2 дня | +5% |
-| **P2** | Fuzzing для парсеров | 0.5 дня | +2-3% |
+| **P2✓** | Fuzzing для парсеров (Hardening sweep, 2026-07-29) — закрыто: рефакторинг `parseLeases` → `parseLeasesContent` (`arp_leases.go`) + 4 `FuzzXxx` в `fuzz_test.go` (seed corpus через `f.Add`). Opt-in `-fuzz` CI-шаг отложен. См. `логи/hardening-sweep.md`. | готово | ~+2-3% |
 
 ---
 
