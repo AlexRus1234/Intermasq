@@ -7,7 +7,8 @@ T1 — fuzzing парсеров, T2 — A11 path-traversal hardening, T3 — у�
 2 слабых Playwright spec'а, T4 — разблокировать 2 infra-spec'а.
 
 > **Статус сессии:** выполняется поэтапно. Закрыто: **T2 (A11)**, **T1
-> (fuzzing парсеров)**. T3/T4 — предстоят (см. «Что НЕ сделано»).
+> (fuzzing парсеров)**, **T3 (усиление 2 Playwright spec'ов)**. T4 —
+> предстоит (см. «Что НЕ сделано»).
 
 ## Контекст на старте
 
@@ -107,6 +108,40 @@ round-trip держится).
 
 ---
 
+### T3 — Усилить 2 слабых Playwright spec'а (→ ГОТОВО)
+
+- **Коммит:** `8a80a93` (`T3: strengthen hosts-sort and auth Playwright specs`).
+- **Контекст:** mutation-pass (`логи/gap2-finish.md` Блок C) нашёл, что
+  `hosts-sort` и `auth` проходят даже со сломанным кодом — это guard'ы, а
+  не regression. Цель — сделать их реальными regression-тестами.
+- **T3.1 `tests/e2e/specs/hosts-sort.spec.ts`:** добавлен хелпер
+  `visibleOrder(page)` (MAC-postfix — последние 2 символа — seeded-строк в
+  DOM-порядке). Существующий `toHaveCount(5)` оставлен как pre-condition;
+  сверх него — baseline (ascending-IP на маунте) + 4 order-assert'а после
+  кликов: IP→desc, IP→asc, Hostname→asc, Hostname→desc. Контракт сортировки
+  взят из `HostTable.vue:82-95` (`sortKey='ip'`, `sortAsc=true`; same-key
+  toggles, new-key → `sortAsc=true`). Селекторы `th:has-text('IP'|'Hostname')`
+  и `td.font-monospace` (MAC-ячейка) однозначны.
+- **T3.2 `tests/e2e/specs/auth.spec.ts`:** после logout (поверх
+  существующего `.btn-primary visible`) добавлены 2 сильных assert'а:
+  `localStorage.getItem('token') === null` (`store.js:68` `logout()` делает
+  `removeItem('token')`) и `fetch('/api/hosts')` без токена → `401` (JWT без
+  refresh; raw `fetch` обходит axios-перехватчик).
+- **Верификация:** локальный `tsc` невозможен (нет `node_modules`); TS и
+  поведение подтверждены opt-in CI L4 (см. ниже). Дефолтный CI эти файлы не
+  трогает (Playwright — opt-in).
+
+#### Nuance (DOM-порядок среди чужих хостов)
+
+Таблица рендерит ВСЕ хосты из CONF_DIR (specs шарят conf-dir); `visibleOrder`
+фильтрует только наши 5 строк по уникальному prefix'у `aa:11:11:11:11` и
+читает их в DOM-порядке. Глобальная сортировка сохраняет относительный
+порядок наших 5 строк, так что interleaving с чужими хостами на результат
+не влияет (V8 `Array.sort` стабилен). `seedHosts` идемпотентен
+(`e2e-sort.conf` пересоздаётся) → ровно 5 строк.
+
+---
+
 ## Приёмка (DoD) — по промту
 
 - [x] **T2:** `getFileHandler` и `putFileHandler` вызывают `isSafePath`
@@ -115,8 +150,9 @@ round-trip держится).
 - [x] **T1:** 4 `FuzzXxx` после рефакторинга `parseLeases` →
       `parseLeasesContent`; seed corpus через `f.Add` (обоснование ниже).
       Opt-in `-fuzz` CI-шаг отложен (опционален).
-- [ ] **T3:** `hosts-sort.spec.ts` (assert порядка), `auth.spec.ts`
-      (assert 401 + `token===null`). — *предстоит*
+- [x] **T3:** `hosts-sort.spec.ts` — assert порядка (baseline + 4 клика);
+      `auth.spec.ts` — assert `token===null` + `401` на `/api/hosts`.
+      Оба зелёные в opt-in L4.
 - [ ] **T4:** `setup-screen.spec.ts` / `sse-live.spec.ts` — реальные тесты
       + 2-я инстанция :18084 + writable ARP_FILE в CI yml. — *предстоит*
 - [x] `tests/ROADMAP.md`: A11 отмечен закрытым.
@@ -129,9 +165,13 @@ round-trip держится).
 
 ## Подтверждение CI
 
-После пуша T2 (`8181140..fb1ce14`) и T1 (`1206476..981e88f`) дефолтные
-прогоны CI (Forgejo Actions, Fedora 44) — **зелёные** (подтверждено
-оператором).
+После пуша T2 (`8181140..fb1ce14`), T1 (`1206476..981e88f`) и T3
+(`2ef7dc3..8a80a93`) прогоны CI (Forgejo Actions, Fedora 44) — **зелёные**
+(подтверждено оператором). Финальный прогон: `go test ./... -race` ok
+(71.3s); smoke **139/139 Pass, 0 Fail / 0 Known-fail / 0 Skipped** (CLEAN
+PASS); SSE endurance 20/20 alive; perf — без hard failures; Playwright L4
+opt-in — **31 passed, 2 skipped** (skip'нуты `setup-screen` и `sse-live` —
+это T4).
 
 - **T2 — go vet / go test -race:** чисто/зелёный; regression-тесты
   (`TestGetFileHandlerRejectsUnsafePath`, `TestPutFileHandlerRejectsUnsafePath`)
@@ -141,9 +181,12 @@ round-trip держится).
 - **T1 — go vet / go test -race:** чисто/зелёный; рефакторинг `parseLeases`
   поведение сохранил (`TestGetNewDevices*`, leases-тесты — зелёные); 4
   `FuzzXxx` прогнали seed corpus как unit-subtest'ы без падений инвариантов.
-- **Локально (Windows):** `gofmt -l arp_leases.go fuzz_test.go` — пусто
-  (формат корректен). `go vet`/`go test`/smoke локально не запускались по
-  решению оператора — только CI.
+- **T3 — Playwright L4 (opt-in):** `hosts-sort` (baseline + 4 order-assert'а)
+  и `auth` (`token===null` + `401`) — зелёные; всего 31 passed / 2 skipped.
+  Дефолтный CI эти e2e-файлы не компилирует/не гоняет — только opt-in L4.
+- **Локально (Windows):** `gofmt -l` (T1/T2 Go-файлы) — пусто; локальный
+  `tsc` невозможен (нет `node_modules`). `go vet`/`go test`/smoke/e2e locally
+  не запускались по решению оператора — только CI.
 
 ---
 
@@ -161,9 +204,11 @@ round-trip держится).
 ### Изменённые (tests)
 - `dnsmasq_test.go` — `TestGetFileHandlerRejectsUnsafePath`.
 - `handlers_test.go` — `TestPutFileHandlerRejectsUnsafePath`.
+- `tests/e2e/specs/hosts-sort.spec.ts` — `visibleOrder` + baseline + 4 order-assert'а (T3.1).
+- `tests/e2e/specs/auth.spec.ts` — `token===null` + `401` после logout (T3.2).
 - `tests/known-bugs.txt` — A11 удалён (файл пуст).
-- `tests/bugreport/bugs.md` — A11 FIXED (таблица, «Итого», детальная секция).
-- `tests/ROADMAP.md` — Hardening sweep строка + правка P0✓ + чекмет known-bugs.
+- `tests/bugreport/bugs.md` — A11 FIXED (таблица, «Итого», детальная секция); A1 regression-нота обновлена (hosts-sort — теперь regression, не guard).
+- `tests/ROADMAP.md` — Hardening sweep строки + правка P0✓ + чекмет known-bugs + P1 (2 spec'а усилены).
 
 ---
 
@@ -173,10 +218,10 @@ round-trip держится).
   него реальный fuzz-режим в пайплайне не гоняется (только seed'ы в
   unit-режиме). Добавить можно по образцу `run_e2e_tests` в
   `.forgejo/workflows/build.yml`.
-- **T3 (усиление 2 Playwright spec'ов)** — предстоящая задача сессии;
-  локально на Windows не запускается, только CI L4.
-- **T4 (2 infra-spec'а)** — предстоит; требует правок
-  `.forgejo/workflows/build.yml` (2-я инстанция :18084 + writable ARP_FILE).
+- **T4 (2 infra-spec'а)** — единственная остаточная задача сессии; требует
+  правок `.forgejo/workflows/build.yml` (2-я инстанция :18084 + writable
+  ARP_FILE) + замены `test.skip` на реальные тесты в `setup-screen.spec.ts`
+  и `sse-live.spec.ts`.
 - **Go coverage → 70%/90%** — вне этой сессии: T1 дал ~+2-3% (точная
   дельта — по CI-отчёту coverage); остаток — edge-case тесты на `bins.go`
   (исходник менять не нужно, только `bins_test.go`), `reloadDnsmasq`,
@@ -198,3 +243,5 @@ round-trip держится).
 | Push | **сразу после T2** | по решению оператора: коммит+пуш, ожидание CI. |
 | T1: seed corpus — `testdata/corpus/` vs `f.Add` | **`f.Add`** | Go автозагружает `testdata/fuzz/`, не `corpus/`; `f.Add` compile-checked и работает в дефолтном `go test` — нулевой риск для CI. |
 | T1: opt-in `-fuzz` CI-шаг (T1.4) | **отложить** | опционален по промту; отложен до явного запроса. |
+| T3: hosts-sort — baseline assert | **добавить** | `sortKey='ip',sortAsc=true` на маунте — бесплатный catch регрессий дефолтной сортировки; строгое superset плана. |
+| T3: auth — заменять или дополнять `.btn-primary` | **дополнить** | оставил `.btn-primary visible` (подтверждает возврат на auth-screen) + 2 сильных assert'а сверху. |

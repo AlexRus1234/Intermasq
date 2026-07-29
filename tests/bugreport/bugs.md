@@ -48,8 +48,9 @@ Known-fail. Regression-тесты добавлены в `dnsmasq_test.go` и
 > уникален: `h.file` различается между `.conf`-файлами, а суффикс `|has_bak`
 > (из `getHostsHandler`) делает уникальными bak/non-bak варианты одного MAC.
 > Опциональный `has_bak`-рефакторинг сознательно не сделан (вне объёма фикса).
-> Regression: существующий Playwright `hosts-sort.spec.ts` (guard — count строк
-> стабилен при сортировке) остаётся зелёным.
+> Regression: Playwright `hosts-sort.spec.ts` — изначально guard (только count
+> строк стабилен), в Hardening sweep (2026-07-29) усилен до реальной regression
+> с assert'ом видимого ПОРЯДКА после каждого клика сортировки. Зелёный.
 
 **Severity:** CRITICAL
 **Component:** `frontend/src/components/static/HostTable.vue:27`
