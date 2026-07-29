@@ -53,26 +53,36 @@ func parseArpContent(content string) map[string]bool {
 	return activeMacs
 }
 
-// parseLeases reads dnsmasq.leases (path overridable via -leases). The file
-// format is whitespace-separated: timestamp MAC IP [hostname] [client-id].
-func parseLeases() []LeaseEntry {
+// parseLeasesContent parses the textual content of a dnsmasq.leases file
+// (whitespace-separated: timestamp MAC IP [hostname] [client-id]) and
+// returns one LeaseEntry per line with at least 3 fields. Pure (no I/O) so
+// it can be fuzzed and unit-tested directly. Behaviour is identical to the
+// previous in-place scan of parseLeases.
+func parseLeasesContent(content string) []LeaseEntry {
 	leases := []LeaseEntry{}
-	file, err := os.Open(*LeasesPath)
-	if err == nil {
-		defer file.Close()
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			fields := strings.Fields(scanner.Text())
-			if len(fields) >= 3 {
-				l := LeaseEntry{Ip: fields[2], Mac: fields[1]}
-				if len(fields) > 3 {
-					l.Hostname = fields[3]
-				}
-				leases = append(leases, l)
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) >= 3 {
+			l := LeaseEntry{Ip: fields[2], Mac: fields[1]}
+			if len(fields) > 3 {
+				l.Hostname = fields[3]
 			}
+			leases = append(leases, l)
 		}
 	}
 	return leases
+}
+
+// parseLeases reads dnsmasq.leases (path overridable via -leases) and
+// delegates parsing to parseLeasesContent. Returns an empty list when the
+// file is missing or unreadable.
+func parseLeases() []LeaseEntry {
+	data, err := os.ReadFile(*LeasesPath)
+	if err != nil {
+		return []LeaseEntry{}
+	}
+	return parseLeasesContent(string(data))
 }
 
 // getNewDevices returns MACs that appear in the ARP table (i.e. recently
