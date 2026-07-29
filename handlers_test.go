@@ -501,6 +501,34 @@ func TestPutFileHandler_PathSeparator(t *testing.T) {
 	}
 }
 
+// TestPutFileHandlerRejectsUnsafePath locks the path-traversal defence for
+// PUT /api/files/:name (A11, defense-in-depth). Vectors carry a .conf
+// extension so the extension check does not short-circuit. The substring
+// filter fires first today; isSafePath-after-Join is the redundant layer. No
+// write is attempted because the substring check rejects before writeFileRaw,
+// so this test is safe on Windows (no dnsmasq --test).
+func TestPutFileHandlerRejectsUnsafePath(t *testing.T) {
+	cases := []string{
+		"../etc/evil.conf",
+		"..\\evil.conf",
+		"../../etc/dnsmasq.conf",
+	}
+	for _, name := range cases {
+		t.Run(name, func(t *testing.T) {
+			newTestDir(t)
+			w, c := newJSONContext("PUT", "/api/files/x.conf", `{"content":"x"}`)
+			c.Params = gin.Params{{Key: "name", Value: name}}
+			putFileHandler(c)
+			if w.Code != 403 {
+				t.Fatalf("expected 403 for traversal name %q, got %d: %s", name, w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "access_denied") {
+				t.Errorf("expected access_denied body for %q, got: %s", name, w.Body.String())
+			}
+		})
+	}
+}
+
 // ===== Safety handlers (L2) =====
 
 func TestHistoryDiffHandler_MissingParams(t *testing.T) {

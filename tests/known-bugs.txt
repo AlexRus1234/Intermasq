@@ -15,4 +15,6 @@
 # Removing a fixed bug: delete the ID here. Update the corresponding
 # check in smoke.sh to expect the fixed behaviour. Pipeline goes green.
 
-A11   path traversal battery (mostly caught; one vector blocked by Go HTTP path cleaning, not server logic)
+# (empty) — all known bugs are fixed as of Hardening sweep 2026-07-29
+# (A11 path-traversal was the last entry; removed after defense-in-depth
+# hardening in handlers_config.go).

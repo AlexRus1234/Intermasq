@@ -201,6 +201,15 @@ func getFileHandler(c *gin.Context) {
 		return
 	}
 	path := filepath.Join(*ConfigDir, name)
+	// Defense in depth (A11): the substring filter above already blocks any
+	// separator-bearing name, so filepath.Join cannot escape ConfigDir today.
+	// Re-check via isSafePath so a future weakening of the substring filter
+	// (or a new call site) still cannot read outside ConfigDir. readFileRaw
+	// checks isSafePath again — three layers, by design.
+	if !isSafePath(path) {
+		c.JSON(403, gin.H{"error": "access_denied"})
+		return
+	}
 	content, err := readFileRaw(path)
 	if err != nil {
 		c.JSON(404, gin.H{"error": "file_not_found"})
@@ -216,6 +225,11 @@ func putFileHandler(c *gin.Context) {
 		return
 	}
 	path := filepath.Join(*ConfigDir, name)
+	// Defense in depth (A11): mirror getFileHandler — isSafePath after Join.
+	if !isSafePath(path) {
+		c.JSON(403, gin.H{"error": "access_denied"})
+		return
+	}
 	var req struct {
 		Content string `json:"content"`
 	}

@@ -1637,6 +1637,38 @@ func TestGetFileHandlerMissing(t *testing.T) {
 	}
 }
 
+// TestGetFileHandlerRejectsUnsafePath locks the path-traversal defence for
+// GET /api/files/:name (A11, defense-in-depth). Every vector below carries a
+// .conf extension so the extension check does not short-circuit, exercising
+// the traversal defence specifically. The substring filter on "/" / "\"
+// fires first today; the isSafePath-after-Join layer is kept so a future
+// weakening of that filter (or a new call site) cannot enable reads outside
+// ConfigDir.
+func TestGetFileHandlerRejectsUnsafePath(t *testing.T) {
+	cases := []string{
+		"../etc/evil.conf",
+		"..\\evil.conf",
+		"../../etc/dnsmasq.conf",
+	}
+	for _, name := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			*ConfigDir = dir
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest("GET", "/api/files/x.conf", nil)
+			c.Params = gin.Params{{Key: "name", Value: name}}
+			getFileHandler(c)
+			if w.Code != 403 {
+				t.Fatalf("expected 403 for traversal name %q, got %d: %s", name, w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "access_denied") {
+				t.Errorf("expected access_denied body for %q, got: %s", name, w.Body.String())
+			}
+		})
+	}
+}
+
 // ========== Config file templates (POST /api/config/file?template=…) ==========
 
 // TestCreateConfigFileHandlerEachTemplate проверяет, что каждый зарегистрированный

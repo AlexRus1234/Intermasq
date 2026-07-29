@@ -25,18 +25,19 @@
 | A7 | MEDIUM | frontend (TemplatesModal.vue) | OPEN | UI проверен вручную, не баг |
 | A8 | MEDIUM | backend (metrics.go) | FIXED | smoke.sh: `A8: 401 has body` |
 | A10 | LOW | backend (arp_leases.go) | OPEN | feature gap, не regression test |
-| A11 | LOW | security (handlers_*.go) | PARTIAL | smoke.sh: path traversal battery |
+| A11 | LOW | security (handlers_*.go) | FIXED | smoke.sh: path traversal battery; L2 `TestGetFileHandlerRejectsUnsafePath` / `TestPutFileHandlerRejectsUnsafePath` |
 | A12 | HIGH | backend (main.go aliasDomainRegex) | FIXED | smoke.sh: `A12: Add TXT with underscore domain` |
 | A13 | HIGH | backend (dnsmasq.go writeFileRaw) | FIXED | smoke.sh: `PUT with invalid dnsmasq syntax → 400` (стал честным) |
 
 **Итого:** 7 из 9 багов закрыты в Bugfix sweep (2026-07-28): A1, A2, A3, A4,
-A6, A8, A12 → FIXED. Ранее A5 + A13 уже закрыты (Блок A). Остаются: A7 — не
-баг (UI-layout), A10 — feature gap (отдельный PR), A11 — partial (path
-traversal, defense-in-depth; hardening опционален). Все 7 smoke-tagged
-багов убраны из `tests/known-bugs.txt` → smoke.sh ожидаемо 0 Fail / 0
+A6, A8, A12 → FIXED. Ранее A5 + A13 уже закрыты (Блок A). A11 закрыт в
+Hardening sweep (2026-07-29) как defense-in-depth. Остаются: A7 — не
+баг (UI-layout), A10 — feature gap (отдельный PR). Все smoke-tagged
+баги убраны из `tests/known-bugs.txt` → smoke.sh ожидаемо 0 Fail / 0
 Known-fail. Regression-тесты добавлены в `dnsmasq_test.go` и
 `handlers_test.go`; A1 покрыт существующим Playwright guard
-`hosts-sort.spec.ts`. Лог сессии: `логи/bugfix-sweep.md`.
+`hosts-sort.spec.ts`. Логи сессий: `логи/bugfix-sweep.md`,
+`логи/hardening-sweep.md`.
 
 ---
 
@@ -344,6 +345,20 @@ OUI-vendor работает только для зарегистрированн
 ---
 
 ## A11 — Path-traversal battery
+
+> **Status: FIXED** (Hardening sweep, 2026-07-29). Defense-in-depth: в
+> `getFileHandler` и `putFileHandler` (`handlers_config.go`) добавлен вызов
+> `isSafePath(path)` после `filepath.Join(*ConfigDir, name)` — те же 403 +
+> `access_denied`, что и substring-фильтр. Поведение эндпоинтов не изменилось
+> (все 9 smoke-векторов в `81-path-traversal.sh` остаются с теми же
+> статусами); substring-фильтр на `/`/`\` сегодня срабатывает первым для
+> любого достижимого через URL traversal-входа, а `isSafePath`-после-Join —
+> страховочный слой на случай будущего ослабления фильтра или нового call
+> site'а. Теперь оба хендлера повторяют единый chokepoint-паттерн остальных
+> 22 call site'ов. Regression: `TestGetFileHandlerRejectsUnsafePath`
+> (`dnsmasq_test.go`), `TestPutFileHandlerRejectsUnsafePath`
+> (`handlers_test.go`). A11 удалён из `tests/known-bugs.txt`. Лог:
+> `логи/hardening-sweep.md`.
 
 **Severity:** LOW (большинство векторов закрыто)
 
