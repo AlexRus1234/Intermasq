@@ -150,7 +150,7 @@ fake-бинарники на PATH (+8-12%, но тест против моков
 | **P0** | Пофиксить баги A1-A4 + A12 (A5 + A13 — FIXED в Блоке A) | 2-3 часа | (чистит красноту known-bugs) |
 | **P0✓** | **Bugfix sweep (2026-07-28) — закрыто:** A1, A2, A3, A4, A6, A8, A12 → FIXED с regression-тестами. См. `логи/bugfix-sweep.md`. | готово | smoke 0 Fail / 0 Known-fail |
 | **P0✓** | **Hardening sweep (2026-07-29) — A11 закрыто:** `getFileHandler`/`putFileHandler` (`handlers_config.go`) получили `isSafePath` после `filepath.Join` (defense-in-depth); regression-тесты `TestGetFileHandlerRejectsUnsafePath` / `TestPutFileHandlerRejectsUnsafePath`. `tests/known-bugs.txt` теперь пуст. См. `логи/hardening-sweep.md`. | готово | known-bugs.txt пуст |
-| **P1** | Playwright (Gap 2) — **ФИНАЛ** ✓ (33 specs: 31 pass + 2 infra-skip); A5/A13 FIXED; батч 4 закрыт; mutation-pass пройден; 2 слабых spec'а (`hosts-sort`, `auth`) усилены (Hardening sweep, 2026-07-29) | готово | основное UI-покрытие закрыто; остаток — опционально (infra-specs T4) |
+| **P1** | Playwright (Gap 2) — **ФИНАЛ** ✓ (34 tests: 33 pass + 1 permanent-skip `config-raw`); A5/A13 FIXED; батч 4 закрыт; mutation-pass пройден; 2 слабых spec'а (`hosts-sort`, `auth`) усилены; 2 infra-spec'а (`setup-screen`, `sse-live`) разблокированы (Hardening sweep, 2026-07-29) | готово | UI-покрытие закрыто полностью |
 | **P2** | L5 Real VM nightly (Gap 4) | 1-2 дня | +5% |
 | **P2✓** | Fuzzing для парсеров (Hardening sweep, 2026-07-29) — закрыто: рефакторинг `parseLeases` → `parseLeasesContent` (`arp_leases.go`) + 4 `FuzzXxx` в `fuzz_test.go` (seed corpus через `f.Add`). Opt-in `-fuzz` CI-шаг отложен. См. `логи/hardening-sweep.md`. | готово | ~+2-3% |
 
@@ -161,7 +161,7 @@ fake-бинарники на PATH (+8-12%, но тест против моков
 - [x] `tests/known-bugs.txt` пустой (или содержит только wontfix'ы)
 - [ ] smoke.sh: 0 Fail, 0 Known-fail, 0 Skipped, ~140+ Pass
 - [ ] L1+L2 Go test coverage ≥ 70% (`go test -cover ./...`)
-- [ ] Playwright: 20+ spec'ов, все зелёные
+- [x] Playwright: 20+ spec'ов, все зелёные (33 pass + 1 permanent-skip `config-raw`, покрыт smoke)
 - [ ] L5 nightly: 7 дней без красноты
 - [ ] `tests/perf.sh`: 0 hard failures на дефолтных порогах
 - [ ] Все баги из `tests/bugreport/bugs.md` либо FIXED, либо WONTFIX с rationale
