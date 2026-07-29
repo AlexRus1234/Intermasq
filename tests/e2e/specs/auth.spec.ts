@@ -2,7 +2,8 @@
 //
 // globalSetup already created the admin, so the app lands on the login
 // screen. We exercise the real UI: fill credentials, submit, land in the
-// dashboard, then log out and confirm we're back at the login screen.
+// dashboard, then log out and confirm we're back at the login screen with
+// the token purged and subsequent API calls rejected (401).
 
 import { test, expect } from '@playwright/test'
 
@@ -28,4 +29,14 @@ test('login then logout via UI', async ({ page }) => {
 
   // Back to the auth screen.
   await expect(page.locator('.btn-primary')).toBeVisible({ timeout: 10000 })
+
+  // Strong asserts (mutation-pass Блок C showed the .btn-primary check alone
+  // is weak): the token must be gone from localStorage (store.js logout()
+  // calls localStorage.removeItem('token')), and an unauthenticated API call
+  // must be rejected with 401 (JWT, no refresh token).
+  const token = await page.evaluate(() => localStorage.getItem('token'))
+  expect(token).toBeNull()
+
+  const status = await page.evaluate(() => fetch('/api/hosts').then((r) => r.status))
+  expect(status).toBe(401)
 })
