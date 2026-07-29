@@ -231,6 +231,10 @@ jobs:
             libX11 libXcomposite libXdamage libXext libXfixes libXrandr \
             mesa-libgbm pango alsa-lib libxshmfence
           mkdir -p /tmp/e2e-conf /tmp/e2e-history
+          # Writable copy of the arp fixture: the sse-live.spec full variant
+          # appends an entry mid-test and observes the new 🟢 via the SSE
+          # delta (the fixture itself is read-only in the repo).
+          cp tests/fixtures/arp-sample.txt /tmp/e2e-arp.txt
           ./intermasq-ci \
             -port 18083 \
             -conf-dir /tmp/e2e-conf \
@@ -239,7 +243,7 @@ jobs:
             -history-dir /tmp/e2e-history \
             -templates /tmp/e2e-templates.json \
             -leases /tmp/e2e-leases \
-            -arp-file tests/fixtures/arp-sample.txt \
+            -arp-file /tmp/e2e-arp.txt \
             -init-system=none \
             -ci-mode=true &
           E2E_PID=$!
@@ -247,14 +251,41 @@ jobs:
             if curl -sf http://localhost:18083/api/status >/dev/null 2>&1; then break; fi
             sleep 1
           done
+          # 2nd instance for setup-screen.spec: fresh -db file (rm -f below) →
+          # /api/status returns setup_required:true → AuthScreen renders the
+          # setup form. E2E_SETUP_BASE_URL points the spec at this instance.
+          rm -rf /tmp/e2e-conf-setup
+          mkdir -p /tmp/e2e-conf-setup /tmp/e2e-setup-history
+          rm -f /tmp/e2e-setup-users.json
+          ./intermasq-ci \
+            -port 18084 \
+            -conf-dir /tmp/e2e-conf-setup \
+            -db /tmp/e2e-setup-users.json \
+            -audit-log /tmp/e2e-setup-audit.log \
+            -history-dir /tmp/e2e-setup-history \
+            -templates /tmp/e2e-setup-templates.json \
+            -leases /tmp/e2e-setup-leases \
+            -arp-file tests/fixtures/arp-sample.txt \
+            -init-system=none \
+            -ci-mode=true &
+          E2E_SETUP_PID=$!
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:18084/api/status >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
           cd tests/e2e
           npm ci
           npx playwright install chromium
           set +e
           E2E_BASE_URL=http://localhost:18083 CONF_DIR=/tmp/e2e-conf \
-            ADMIN_USER=admin ADMIN_PASS=pass1234 npx playwright test
+            ADMIN_USER=admin ADMIN_PASS=pass1234 \
+            E2E_SETUP_BASE_URL=http://localhost:18084 \
+            ARP_FILE=/tmp/e2e-arp.txt \
+            npx playwright test
           PW_RC=$?
           set -e
+          kill $E2E_SETUP_PID 2>/dev/null || true
+          wait $E2E_SETUP_PID 2>/dev/null || true
           kill $E2E_PID 2>/dev/null || true
           wait $E2E_PID 2>/dev/null || true
           if [ "$PW_RC" -ne 0 ]; then
