@@ -158,7 +158,7 @@ fake-бинарники на PATH (+8-12%, но тест против моков
 
 ## Метрики "когда готово к v1.0 release"
 
-- [ ] `tests/known-bugs.txt` пустой (или содержит только wontfix'ы)
+- [x] `tests/known-bugs.txt` пустой (или содержит только wontfix'ы)
 - [ ] smoke.sh: 0 Fail, 0 Known-fail, 0 Skipped, ~140+ Pass
 - [ ] L1+L2 Go test coverage ≥ 70% (`go test -cover ./...`)
 - [ ] Playwright: 20+ spec'ов, все зелёные
