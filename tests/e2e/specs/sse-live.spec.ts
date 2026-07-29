@@ -61,13 +61,15 @@ test('sse-live: appended ARP entry surfaces as new online dot', async ({ page })
   await expect(page.locator('.dropdown-toggle')).toBeVisible({ timeout: 15000 })
 
   // Start assert: our row shows 🔴 (offline) — NEW_MAC is not in the arp table.
-  const offlineDot = page.locator('tr', { hasText: NEW_MAC }).locator('span.text-muted')
+  // Scope to td.text-center: the online/offline dot lives there. A bare
+  // span.text-muted would also match the Tags-column "—" placeholder.
+  const offlineDot = page.locator('tr', { hasText: NEW_MAC }).locator('td.text-center span.text-muted')
   await expect(offlineDot).toBeVisible({ timeout: 15000 })
 
   // Mutate the writable arp file: append NEW_MAC flagged 0x2 (reachable).
   appendFileSync(ARP_FILE!, `10.99.99.1     0x1         0x2         ${NEW_MAC}     *        eth0\n`)
 
   // SSE broadcaster polls every 5s (sse.go:78); wait up to 20s for 🟢.
-  const onlineDot = page.locator('tr', { hasText: NEW_MAC }).locator('span.text-success')
+  const onlineDot = page.locator('tr', { hasText: NEW_MAC }).locator('td.text-center span.text-success')
   await expect(onlineDot).toBeVisible({ timeout: 20000 })
 })
