@@ -9,13 +9,15 @@
 | Слой | Coverage | Статус |
 |---|---|---|
 | L1+L2 Go (unit + httptest) | **65.6%\*** (измерено) | один package `main` → L1/L2 совместно не делятся. Парсеры/handler'ы 80-100%; разрыв сосредоточен в init-system/bootstrap/goroutine-коде (см. сноску) |
-| L3 — smoke.sh | ~75-80% API | ✓ 29 suite-файлов, 136 проверок; плагин-прокси покрыт (`82-plugins.sh`). Иная метрика — доля эндпоинтов, не строки |
-| L4 — Playwright UI | 33 specs (31 pass + 2 skip) | ✓ **финал**: батч 1+2 + фазы А,Б,В + Блок A (A5/A13 FIXED) + батч 4 закрыты + mutation-pass пройден (4 frontend-мутации роняют ровно ожидаемые spec'и). 31 pass (...) + 2 skip (config-raw дублирует smoke, setup-screen нужна 2-я инстанция). Остаток — опционально: усилить 2 слабых spec'а + infra-specs |
+| L3 — smoke.sh | ~75-80% API | ✓ 29 suite-файлов, 139 проверок; плагин-прокси покрыт (`82-plugins.sh`). Иная метрика — доля эндпоинтов, не строки |
+| L4 — Playwright UI | 34 теста (33 pass + 1 permanent-skip) | ✓ **финал**: батч 1+2 + фазы А,Б,В + Блок A (A5/A13 FIXED) + батч 4 + mutation-pass пройден. Hardening sweep (2026-07-29) добил: усилены 2 слабых spec'а (`hosts-sort`, `auth`) и разблокированы 2 infra-spec'а (`setup-screen` 2-я инстанция `:18084`, `sse-live` writable ARP). Единственный skip — `config-raw` (дублирует smoke, постоянный) |
 | L5 — Real VM (init/dnsmasq) | 0% | ✗ не реализован |
 | Perf/stress (opt-in) | реализовано, informational | ✓ `tests/perf.sh` (read/reload/CRUD+RSS/SSE); не coverage-слой |
 
-> **\*** `65.6%` — измерено `go test -cover ./...` (241 тест, package `main`).
-> Раньше в доках фигурировали оценки «~85-90%», но то был подсчёт «handler'ов с
+> **\*** `65.6%` — измерено `go test -cover ./...` (241+ тестов, package `main`)
+> ДО Hardening sweep. T1 (4 `FuzzXxx` + `parseLeasesContent`) добавляет ~+2-3%,
+> точную цифру нужно перемерить `go test -cover ./...`. Раньше в доках фигурировали
+> оценки «~85-90%», но то был подсчёт «handler'ов с
 > хотя бы одним тестом», а не statement-coverage. ~34% непокрытых строк
 > сосредоточены в: `system.go` (init-system exec — это и есть **Gap 4**),
 > `bins.go` (резолв linux-бинарных `sudo`/`systemctl`/`service`/`rc-service`/`sv`),
@@ -44,12 +46,13 @@ L4/L5 — 0%. Метрики разных слоёв не суммируются
 | **Gap 2** (3-й батч, фаза В) — UI coverage | +5 tests/4 specs (rollback-ui/history-modal/discovery-tab/backup-restore-ui[download+restore]). 2 writes/file для `.bak`+version; restore = merge (безопасно для других спеков). | `gap2-batch3-phaseV.md` |
 | **Gap 2** (финал, Блок A) — продуктовые фиксы A5 + A13 | A5: `BulkEditModal.vue` `store_hosts.find` → `.hosts.find` (1 строка), `test.fail` снят. A13: `writeFileRaw`/`writeConfigWithTest`/`restoreHistoryVersion` → `dnsmasq --test --conf-file=<path>` (3 строки); A13 убран из `known-bugs.txt`; smoke-чек `40-config-files` стал честным 400. A3/A4-хосты изолированы в `19-bugs.conf` (не отравляют `10-static.conf` для restore-валидации). | `gap2-blockA-a5a13-fixes.md` |
 | **Gap 2** (финал, Блок B) — батч 4 Playwright | +6 реализованных specs (audit-tab/plugins-iframe/i18n-api-error/config-template-fill/config-directive[A13 validation]/sse-live[simplified]) + 2 infra-skip (config-raw дублирует smoke, setup-screen нужна 2-я инстанция :18084). 25→33 теста (31 pass + 2 skip). Селекторы выведены из реальных компонентов. | `gap2-finish.md` |
+| **Hardening sweep** (2026-07-29) — T1+T2+T3+T4 | T1: fuzzing 4 парсеров (`fuzz_test.go`, рефакторинг `parseLeases`→`parseLeasesContent`). T2: A11 path-traversal defense-in-depth (`isSafePath` после `filepath.Join`). T3: усилены `hosts-sort` (assert порядка) + `auth` (`token===null`+401). T4: разблокированы `setup-screen` (2-я инстанция `:18084`) + `sse-live` (writable ARP). known-bugs.txt пуст. | `hardening-sweep.md` |
 
 ---
 
 ## Что осталось
 
-### Gap 2: UI behavior — ФИНАЛ (33 specs, 31 pass + 2 skip)
+### Gap 2: UI behavior — ЗАКРЫТО (34 теста, 33 pass + 1 permanent-skip)
 
 **Закрыто (батч 1+2 + фазы А,Б,В + Блок A + Блок B, 33 specs):** Playwright против
 `intermasq-ci` в CI (Fedora 44, opt-in `run_e2e_tests`). Батч 1: auth/theme/i18n/
@@ -73,20 +76,21 @@ computed, модалка не открывалась); `test.fail` снят. A13
 default-конфига); A13 убран из `known-bugs.txt`, smoke-чек стал честным 400.
 См. `логи/gap2-blockA-a5a13-fixes.md`.
 
-**Осталось (опционально):**
-- **Усилить 2 слабых spec'а** (найдено mutation-pass): `hosts-sort` — assert
-  порядка (сейчас проверяет только кол-во строк, A1-guard); `auth` — assert
-  что после logout следующий API-запрос даёт 401 (сейчас `.btn-primary` visible
-  выполняется и на dashboard).
-- **infra-specs:** полный `setup-screen` (2-я инстанция `:18084`) и полный
-  `sse-live` (writable arp-file) — сейчас `test.skip` с комментами.
-- **mutation-pass ВЫПОЛНЕН** (Блок C): 4 frontend-мутации (`applyConfig` /
-  `addAlias` / `deleteHost` / A5-revert) роняют ровно `reload-ui` /
-  `dns-aliases-add` / `host-crud` / `bulk-edit`, без коллатерала. См.
-  `логи/gap2-finish.md`.
+**Добито в Hardening sweep (2026-07-29, `логи/hardening-sweep.md`):**
+- **T3 — 2 слабых spec'а усилены** (найдено mutation-pass Блок C): `hosts-sort` —
+  assert видимого ПОРЯДКА после кликов сортировки (был только count-guard);
+  `auth` — assert `localStorage.token===null` + `fetch('/api/hosts')→401` после
+  logout (был слабый `.btn-primary visible`).
+- **T4 — 2 infra-spec'а разблокированы:** `setup-screen` (2-я инстанция `:18084`
+  со свежим `-db` → `setup_required:true`) и `sse-live` full-вариант (writable
+  `/tmp/e2e-arp.txt`, append ARP → 🟢 через SSE delta). Правки в
+  `.forgejo/workflows/build.yml` (L4 шаг).
+- **mutation-pass ВЫПОЛНЕН** (Блок C, `логи/gap2-mutation-pass.md`): 4 frontend-
+  мутации (`applyConfig` / `addAlias` / `deleteHost` / A5-revert) роняют ровно
+  `reload-ui` / `dns-aliases-add` / `host-crud` / `bulk-edit`, без коллатерала.
 
-**Решение:** Playwright, расширение `tests/e2e/specs/`. План зафиксирован
-в `C:\Users\alexr\AppData\Local\Temp\opencode\l4-batch3-plan.md`.
+**Решение:** Playwright, расширение `tests/e2e/specs/`. Единственный остаточный
+skip — `config-raw` (постоянный, дублирует smoke `40-config-files.sh`).
 
 ### Gap 4: Real init-system integration (~+5%)
 
@@ -107,10 +111,14 @@ default-конфига); A13 убран из `known-bugs.txt`, smoke-чек ст
 
 Время: 1-2 дня на bootstrap, дальше работает само.
 
-### Fuzzing (~+2-3%)
+### Fuzzing (~+2-3%) — ЗАКРЫТО (Hardening sweep, T1)
 
-**Где:** Go built-in fuzzing (`go test -fuzz`).
-**Цели:** `FuzzParseDhcpHostLine`, `FuzzParseArpContent`, `FuzzParseLeases`, `FuzzParseAliasLine`.
+**Реализовано:** `fuzz_test.go` — 4 native `FuzzXxx` (`FuzzParseDhcpHostLine`,
+`FuzzParseArpContent`, `FuzzParseAliasLine`, `FuzzParseLeasesContent`) после
+рефакторинга `parseLeases` → чистая `parseLeasesContent`. Seed corpus через
+`f.Add` (compile-checked, работает как subtest'ы в дефолтном `go test`).
+**Отложено:** opt-in CI-шаг `run_fuzz_tests` (опционален по промту) — без него
+real `-fuzz` не гоняется, только seed'ы. См. `логи/hardening-sweep.md`.
 
 ---
 
@@ -159,11 +167,11 @@ fake-бинарники на PATH (+8-12%, но тест против моков
 ## Метрики "когда готово к v1.0 release"
 
 - [x] `tests/known-bugs.txt` пустой (или содержит только wontfix'ы)
-- [ ] smoke.sh: 0 Fail, 0 Known-fail, 0 Skipped, ~140+ Pass
-- [ ] L1+L2 Go test coverage ≥ 70% (`go test -cover ./...`)
+- [x] smoke.sh: 0 Fail, 0 Known-fail, 0 Skipped, ~140+ Pass (139/139 CLEAN PASS)
+- [ ] L1+L2 Go test coverage ≥ 70% (`go test -cover ./...`) — сейчас 65.6% (до T1; ~68% после, перемерить)
 - [x] Playwright: 20+ spec'ов, все зелёные (33 pass + 1 permanent-skip `config-raw`, покрыт smoke)
-- [ ] L5 nightly: 7 дней без красноты
-- [ ] `tests/perf.sh`: 0 hard failures на дефолтных порогах
-- [ ] Все баги из `tests/bugreport/bugs.md` либо FIXED, либо WONTFIX с rationale
+- [ ] L5 nightly: 7 дней без красноты — Gap 4 открыт
+- [x] `tests/perf.sh`: 0 hard failures на дефолтных порогах
+- [x] Все баги из `tests/bugreport/bugs.md` либо FIXED, либо WONTFIX с rationale
 - [ ] CHANGELOG.md обновлён
 - [ ] README обновлён (installation, configuration, troubleshooting)

@@ -9,13 +9,16 @@
 
 | Слой | Где | Что ловит | Время | Текущий coverage |
 |---|---|---|---|---|
-| **L1** Go unit | `go test` в Go-процессе | Pure-функции: парсеры, IP-math, validation, OUI | ~18 сек | ~85% pure logic |
-| **L2** Go integration | `go test -race` с httptest | Handlers целиком с mock SystemCaller и dnsmasq | +5 сек | ~30% handlers |
-| **L3** Smoke e2e | `tests/smoke.sh` (bash + curl) против запущенного binary | Все API endpoints + path traversal + auth | ~30 сек | ~60% API |
-| **L4** UI (Playwright) | `tests/e2e/specs/*.spec.js` против binary + chromium | Vue reactivity, modals, i18n | ~3-5 мин | **0% (не реализован)** |
-| **L5** Real VM | Nightly cron на persistent test server | Init-system, real dnsmasq leases, real /proc/net/arp | ~10 мин | **0% (не реализован)** |
+| **L1** Go unit | `go test` в Go-процессе | Pure-функции: парсеры, IP-math, validation, OUI, fuzz-invariants | ~70 сек | pure logic 80-100% |
+| **L2** Go integration | `go test -race` с httptest | Handlers целиком с mock SystemCaller и dnsmasq | (+race) | ~50/52 handlers (~85-90%) |
+| **L3** Smoke e2e | `tests/smoke.sh` (orchestrator + `lib/` + `suites/`, bash+curl) против запущенного binary | Все API endpoints + path traversal + auth | ~30 сек | ~75-80% API (139 проверок, 29 suite-файлов) |
+| **L4** UI (Playwright) | `tests/e2e/specs/*.spec.ts` против binary + chromium | Vue reactivity, modals, i18n, SSE delta | ~20 сек | **34 теста (33 pass + 1 permanent-skip)** |
+| **L5** Real VM | Nightly cron на persistent test server (Gap 4 — не реализован) | Init-system, real dnsmasq leases, real /proc/net/arp | ~10 мин | **0% (не реализован)** |
 
-**Текущая суммарная coverage:** ~60-65%.
+**Текущий coverage:** L1+L2 Go statement = **65.6%** (`go test -cover ./...`, один
+package `main` — L1/L2 делят одну цифру; fuzz-тесты добавляют ~+2-3%,
+требует перемеривания). Метрики слоёв разные по природе и **не суммируются**
+в одно число (statement-% vs доля endpoints vs число specs).
 
 ---
 
@@ -28,8 +31,9 @@ export INTERMASQ_SECRET="test-secret-32-bytes-pad-XXXXXXXXXX"
 go test ./... -count=1
 ```
 
-Все тесты должны быть зелёными (~18 секунд, ~2700 строк тестов в
-`dnsmasq_test.go` + `new_features_test.go`).
+Все тесты должны быть зелёными (~70 секунд, `dnsmasq_test.go` +
+`handlers_test.go` + `new_features_test.go` + `fuzz_test.go`; 240+ тестов
+вкл. 4 native `FuzzXxx` target'а).
 
 ### L1 + L2 с race detector
 
@@ -85,16 +89,24 @@ BASE=http://localhost:18081 CONF_DIR=/tmp/conf ./tests/smoke.sh
 
 ```
 tests/
-├── smoke.sh                  # L3 bash+curl (~80 проверок)
-├── known-bugs.txt            # source-of-truth списка известных багов
+├── smoke.sh                  # L3 orchestrator (~64 строки) — вызывает lib/ + suites/
+├── lib/                      # shared bash-хелперы smoke (check/require_jwt/...)
+├── suites/                   # L3 test-suites (29 файлов, 139 проверок): NN-name.sh
+├── known-bugs.txt            # source-of-truth списка известных багов (сейчас пуст)
+├── perf.sh                   # Gap 5 perf/stress (opt-in CI)
 ├── fixtures/
-│   └── arp-sample.txt        # пример /proc/net/arp для CI
+│   ├── arp-sample.txt        # пример /proc/net/arp для CI
+│   ├── gen-hosts.sh          # генератор большого host-набора для perf
+│   └── plugins/hello/        # mock-плагин для Gap 6 (ставится в CI до smoke)
+├── e2e/                      # L4 Playwright: specs/*.spec.ts + lib/ + global-setup.ts + playwright.config.ts
 ├── bugreport/
 │   └── bugs.md               # полный баг-репорт (A1-A13)
 └── ROADMAP.md                # что нужно для 95-100% coverage
 
-dnsmasq_test.go               # L1 unit (2247 строк)
-new_features_test.go          # L1 unit для новых фич (430 строк)
+dnsmasq_test.go               # L1/L2 unit+integration (parsers, handlers, fuzz invariants)
+handlers_test.go              # L2 handler httptest-тесты (~50/52 handlers)
+new_features_test.go          # L1 unit для новых фич
+fuzz_test.go                  # 4 native FuzzXxx (parseDhcpHostLine/Arp/Alias/Leases)
 ```
 
 ---
@@ -116,10 +128,10 @@ new_features_test.go          # L1 unit для новых фич (430 строк
 
 ```
 === SUMMARY ===
-  Pass:        76 / 84
-  Fail:        0 / 84
-  Known-fail:  8 / 84  (bugs: A11 A12 A13 A2 A3 A4 A6 A8)
-  Skipped:     0 / 84  (pre-condition failed)
+  Pass:        139 / 139
+  Fail:        0 / 139
+  Known-fail:  0 / 139  (bugs: (none))
+  Skipped:     0 / 139  (pre-condition failed)
 ```
 
 **Pipeline зелёный** если `Fail=0` и `FATALS=[]`. Любой unexpected
@@ -176,6 +188,8 @@ or add A2 to tests/known-bugs.txt (new bug found).
 | `push_to_registry` | `false` | Опубликовать binary в Forgejo Packages после зелёного прогона |
 | `version_tag` | `""` (→ `sha-<short>`) | Версия в registry |
 | `run_race_tests` | `true` | Включить `-race` для Go test (медленнее, но ловит data races) |
+| `run_perf_tests` | `false` | Gap 5: perf/stress (`tests/perf.sh`, отдельная инстанция `:18082`) |
+| `run_e2e_tests` | `false` | Gap 2: Playwright L4 (ставит chromium, отдельная инстанция `:18083` + `:18084`) |
 
 ### Шаги
 
@@ -191,10 +205,13 @@ or add A2 to tests/known-bugs.txt (new bug found).
 10. `go vet`
 11. `gofmt check` — fail если любой файл не отформатирован
 12. `L1 + L2 Go tests` (CGO_ENABLED=1 для race)
-13. `L3 smoke` — запускает binary + tests/smoke.sh
-14. `Show binary info`
-15. `Publish to Forgejo Packages` (опционально)
-16. `Cleanup` (always)
+13. `Build & install mock plugin` (Gap 6) — собирает `tests/fixtures/plugins/hello/` в `/etc/intermasq/plugins/`
+14. `L3 smoke` — запускает binary + tests/smoke.sh
+15. `Perf/stress scenarios` (opt-in `run_perf_tests`) — отдельная инстанция `:18082`
+16. `L4 — Playwright E2E` (opt-in `run_e2e_tests`) — chromium + инстанции `:18083` (основная, writable ARP) и `:18084` (fresh `-db` → setup-screen)
+17. `Show binary info`
+18. `Publish to Forgejo Packages` (опционально)
+19. `Cleanup` (always)
 
 ### Известные особенности
 
@@ -214,9 +231,9 @@ or add A2 to tests/known-bugs.txt (new bug found).
 | Парсер (dnsmasq.go, aliases.go) | L1 (go test) — обязательно |
 | Handler (handlers_*.go) | L1 + L3 (smoke.sh соответствующей секции) |
 | Auth/JWT/rate-limit (auth.go) | L1 + L3 auth секция + race |
-| UI компонент (frontend/) | L4 (Playwright) — не реализован пока, ручной smoke |
+| UI компонент (frontend/) | L4 (Playwright, opt-in `run_e2e_tests`) — реализован; локально нужен chromium+dnsmasq |
 | Path safety (isSafePath) | L3 path-traversal секция — обязательно |
-| Системный caller (system.go) | L5 (real VM) — не автоматизировано пока, ручной тест |
+| Системный caller (system.go) | L5 (real VM) — не автоматизировано (Gap 4), ручной тест |
 | CI/pipeline (build.yml) | workflow_dispatch в Forgejo UI |
 
 ---

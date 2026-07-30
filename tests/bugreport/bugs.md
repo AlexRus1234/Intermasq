@@ -16,28 +16,29 @@
 
 | ID | Severity | Component | Status | Regression test |
 |---|---|---|---|---|
-| A1 | CRITICAL | frontend (HostTable.vue) | FIXED | Playwright `hosts-sort.spec.ts` (guard) |
+| A1 | CRITICAL | frontend (HostTable.vue) | FIXED | Playwright `hosts-sort.spec.ts` (regression: order asserts) |
 | A2 | CRITICAL | backend (aliases.go) | FIXED | smoke.sh: `A2: duplicate A same file → 409` |
 | A3 | HIGH | backend (main.go macRegex) | FIXED | smoke.sh: `A3: zero MAC rejected` |
 | A4 | HIGH | backend (validation) | FIXED | smoke.sh: `A4: dash-MAC handled` |
 | A5 | HIGH | frontend (BulkEditModal.vue) | FIXED | был Playwright `test.fail` (Блок A), `.fail` снят |
 | A6 | MEDIUM | backend (handlers_hosts.go) | FIXED | smoke.sh: `Bulk JSON response has count field` |
-| A7 | MEDIUM | frontend (TemplatesModal.vue) | OPEN | UI проверен вручную, не баг |
+| A7 | MEDIUM | frontend (TemplatesModal.vue) | WONTFIX | не баг (UI-layout), проверен вручную |
 | A8 | MEDIUM | backend (metrics.go) | FIXED | smoke.sh: `A8: 401 has body` |
-| A10 | LOW | backend (arp_leases.go) | OPEN | feature gap, не regression test |
+| A10 | LOW | backend (arp_leases.go) | WONTFIX | feature gap → отдельный PR |
 | A11 | LOW | security (handlers_*.go) | FIXED | smoke.sh: path traversal battery; L2 `TestGetFileHandlerRejectsUnsafePath` / `TestPutFileHandlerRejectsUnsafePath` |
 | A12 | HIGH | backend (main.go aliasDomainRegex) | FIXED | smoke.sh: `A12: Add TXT with underscore domain` |
 | A13 | HIGH | backend (dnsmasq.go writeFileRaw) | FIXED | smoke.sh: `PUT with invalid dnsmasq syntax → 400` (стал честным) |
 
 **Итого:** 7 из 9 багов закрыты в Bugfix sweep (2026-07-28): A1, A2, A3, A4,
 A6, A8, A12 → FIXED. Ранее A5 + A13 уже закрыты (Блок A). A11 закрыт в
-Hardening sweep (2026-07-29) как defense-in-depth. Остаются: A7 — не
-баг (UI-layout), A10 — feature gap (отдельный PR). Все smoke-tagged
-баги убраны из `tests/known-bugs.txt` → smoke.sh ожидаемо 0 Fail / 0
-Known-fail. Regression-тесты добавлены в `dnsmasq_test.go` и
-`handlers_test.go`; A1 покрыт существующим Playwright guard
-`hosts-sort.spec.ts`. Логи сессий: `логи/bugfix-sweep.md`,
-`логи/hardening-sweep.md`.
+Hardening sweep (2026-07-29) как defense-in-depth. A7 и A10 → WONTFIX
+(не баги: A7 — UI-layout, A10 — feature gap отдельным PR). **Все записи
+(A1–A8, A10–A13) теперь FIXED или WONTFIX.** Все smoke-tagged баги убраны из
+`tests/known-bugs.txt` → smoke.sh ожидаемо 0 Fail / 0 Known-fail.
+Regression-тесты добавлены в `dnsmasq_test.go`, `handlers_test.go`,
+`fuzz_test.go`; A1 покрыт Playwright-regression `hosts-sort.spec.ts`
+(усилен в Hardening sweep: assert порядка). Логи сессий:
+`логи/bugfix-sweep.md`, `логи/hardening-sweep.md`.
 
 ---
 
@@ -267,6 +268,10 @@ c.JSON(200, gin.H{"status": "ok", "count": len(req.Hosts)})
 
 ## A7 — Templates UI не соответствует чек-листу
 
+> **Status: WONTFIX** (не баг — UI-layout). Ручной smoke `templates-modal.spec.ts`
+> (A7-smoke) зелёный; переработка UI в 2 колонки — опциональный polish, отдельная
+> задача.
+
 **Severity:** MEDIUM (не баг, UI-layout)
 **Component:** `frontend/src/components/static/TemplatesModal.vue:27-39`
 
@@ -320,6 +325,9 @@ c.AbortWithStatusJSON(401, gin.H{"error": "auth_required"})
 ---
 
 ## A10 — Discovered-devices не показывает IP
+
+> **Status: WONTFIX** (feature gap → отдельный PR). Расширение `parseArpContent`
+> до `map[mac]struct{IP,Mask}` + UI-колонка IP — новая фича, не regression-фикс.
 
 **Severity:** LOW (feature gap)
 **Component:** `arp_leases.go:43` (`parseArpContent`)
