@@ -51,14 +51,22 @@ func init() {
 func cleanBlacklistLoop() {
 	for {
 		time.Sleep(10 * time.Minute)
-		blacklistMu.Lock()
-		now := time.Now()
-		for id, exp := range blacklist {
-			if exp.Before(now) {
-				delete(blacklist, id)
-			}
+		cleanupBlacklistOnce(time.Now())
+	}
+}
+
+// cleanupBlacklistOnce performs a single sweep of the revocation blacklist:
+// removes any entry whose expiry is in the past. Extracted from
+// cleanBlacklistLoop so the per-iteration logic is unit-testable without
+// sleeping or spawning the background goroutine. The caller is responsible
+// for any locking around the blacklist.
+func cleanupBlacklistOnce(now time.Time) {
+	blacklistMu.Lock()
+	defer blacklistMu.Unlock()
+	for id, exp := range blacklist {
+		if exp.Before(now) {
+			delete(blacklist, id)
 		}
-		blacklistMu.Unlock()
 	}
 }
 

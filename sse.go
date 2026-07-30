@@ -76,9 +76,7 @@ func startSSEBroadcaster() {
 		lastStatus := false
 		for {
 			time.Sleep(5 * time.Second)
-			arp := getArpTable()
-			arpJSON := arpToJSON(arp)
-			status := checkDnsmasqStatus()
+			arpJSON, status := ssePollOnce()
 			if arpJSON != lastArp {
 				sseBroadcast("arp", arpJSON)
 				lastArp = arpJSON
@@ -89,6 +87,17 @@ func startSSEBroadcaster() {
 			}
 		}
 	}()
+}
+
+// ssePollOnce performs a single polling iteration: reads the current ARP
+// table and dnsmasq status. Extracted from startSSEBroadcaster so the
+// per-iteration logic is unit-testable without sleeping or spawning a
+// goroutine. Returns the JSON-marshalled ARP map and the dnsmasq-active flag.
+func ssePollOnce() (arpJSON string, status bool) {
+	arp := getArpTable()
+	arpJSON = arpToJSON(arp)
+	status = checkDnsmasqStatus()
+	return arpJSON, status
 }
 
 func arpToJSON(arp map[string]bool) string {

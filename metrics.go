@@ -153,12 +153,19 @@ func startDNSHealthChecker() {
 	}()
 }
 
+// dnsResolver is the lookup function used by runDNSHealthPass. Default is
+// net.Resolver{PreferGo: true}.LookupHost; tests can swap this for a stub
+// to avoid real network I/O and to drive the up/down/error branches.
+var dnsResolver = func(ctx context.Context, domain string) ([]string, error) {
+	resolver := net.Resolver{PreferGo: true}
+	return resolver.LookupHost(ctx, domain)
+}
+
 func runDNSHealthPass() {
 	aliases := readAllAliases()
 	if len(aliases) == 0 {
 		return
 	}
-	resolver := net.Resolver{PreferGo: true}
 	for _, a := range aliases {
 		if a.Type != "A" && a.Type != "CNAME" {
 			continue
@@ -169,7 +176,7 @@ func runDNSHealthPass() {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		start := time.Now()
-		_, err := resolver.LookupHost(ctx, domain)
+		_, err := dnsResolver(ctx, domain)
 		cancel()
 		latency := time.Since(start)
 
