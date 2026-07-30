@@ -241,8 +241,13 @@ func (s *NoneCaller) String() string {
 	return "none"
 }
 
+// procOneCommPath is the path read by detectInitSystem to identify the
+// init process. It is a package var (not a hard-coded literal) so tests
+// can point it at a temp file on any platform without touching /proc.
+var procOneCommPath = "/proc/1/comm"
+
 func detectInitSystem() string {
-	comm, err := os.ReadFile("/proc/1/comm")
+	comm, err := os.ReadFile(procOneCommPath)
 	if err == nil {
 		name := strings.TrimSpace(string(comm))
 		switch name {
