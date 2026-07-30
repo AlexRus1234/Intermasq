@@ -352,20 +352,22 @@ shell-скрипты по seam `*BinPath` vars (§2.D + §3.T-D). **VANITY-по�
   первым (например, из C-блока), и `binsOnce` уже «прогрет», fakes
   всё равно перезаписывают var; cleanup восстанавливает orig (real path
   или ""), не "".
-- **`sudoDispatch`** — `shift` дропает только первый арг (`-n`); для
-  команд вида `sudo systemctl restart svc` (без `-n`) дропает `systemctl`,
-  что сломало бы. Ho все наши caller'ы с `UseSudo=true` добавляют `-n`
-  только в `IsActive`; `Restart`/`RestartSelf` вызывают `sudo systemctl
-  restart ...` БЕЗ `-n`. Это означает, что `shift` в `Restart` дропает
-  `systemctl` → exec("restart","svc"), что НЕ запускает fake systemctl.
-  **Анализ**: для `Restart` (`exec.Command(sudoBin(), systemctlBin(),
-  "restart", service)`) argv = (sudo, systemctl, "restart", service).
-  `shift` → (systemctl, "restart", service), `exec "$@"` → запускает
-  fake systemctl `restart service` — корректно (`exec "$@"`
-  интерпретирует первый оставшийся аргумент как команду). Для `IsActive`
-  (`sudo -n systemctl is-active svc`) argv = (sudo, "-n", systemctl,
-  "is-active", svc). `shift` → (systemctl, "is-active", svc), exec
-  fake systemctl — корректно. `sudoDispatch` работает в обоих случаях.
+- **`sudoDispatch`** — fake `sudo` стрипит leading dash-флаги (прежде
+  всего `-n` из `IsActive`) и затем exec'ит остаток argv as-is, эмулируя
+  реальный `sudo`. Первая итерация блока D использовала наивный
+  `shift\nexec "$@"`, что ломало `Restart`/`RestartSelf` без `-n`:
+  `sudo systemctl restart svc` → shift дропал `systemctl` →
+  `exec restart svc` → exit 127. CI пробег `d58b67e` поймал это
+  (5 `sudo_ok`/`sudo_fail` subtest'ов FAIL: exit 127/1). Фикс —
+  POSIX `while/case` loop, дропающий только `-*)` арги:
+  ```
+  while [ $# -gt 0 ]; do case "$1" in -*) shift ;; *) break ;; esac; done
+  exec "$@"
+  ```
+  Корректно для обоих вызовов:
+  - `IsActive`: `sudo -n systemctl is-active svc` → strip `-n` → exec fake systemctl ✓
+  - `Restart`: `sudo systemctl restart svc` → no flags → exec fake systemctl ✓
+  - `RestartSelf`: `sudo systemctl restart intermasq` → exec fake systemctl ✓
 - **Файлы `system_callers_test.go` против `system_test.go`**: блок C
   использовал `system_test.go` (portable detect* + String()); блок D
   вынес в отдельный файл из-за разных инвариантов (Linux-gated, fake

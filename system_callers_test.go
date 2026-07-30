@@ -33,12 +33,20 @@ import (
 	"testing"
 )
 
-// sudoDispatch is the body of a fake `sudo` that drops the first argument
-// (the `-n` flag passed by SystemdSystemCaller.IsActive) and dispatches the
-// remaining argv to the wrapped binary's fake. This is the cleanest way to
-// let both the `UseSudo=true` and `UseSudo=false` branches reach the same
-// fake binary under test.
-const sudoDispatch = `shift
+// sudoDispatch is the body of a fake `sudo`: it strips any leading
+// dash-flags (notably `-n` from SystemdSystemCaller.IsActive) and then
+// execs the rest of argv verbatim. This mirrors real sudo's argv handling
+// closely enough for the UseSudo=true branches to reach the same fake
+// wrapped binary (systemctl/rc-service/sv/service) as the UseSudo=false
+// branches. Without the flag-strip (a naive `shift`) `Restart`/`RestartSelf`
+// — which call `sudo <bin> restart <svc>` with no `-n` — would drop the
+// wrapped binary path itself and exec `restart <svc>` (exit 127).
+const sudoDispatch = `while [ $# -gt 0 ]; do
+	case "$1" in
+		-*) shift ;;
+		*) break ;;
+	esac
+done
 exec "$@"`
 
 type binScript struct {
