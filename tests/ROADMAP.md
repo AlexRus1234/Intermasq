@@ -168,7 +168,7 @@ fake-бинарники на PATH (+8-12%, но тест против моков
 
 - [x] `tests/known-bugs.txt` пустой (или содержит только wontfix'ы)
 - [x] smoke.sh: 0 Fail, 0 Known-fail, 0 Skipped, ~140+ Pass (139/139 CLEAN PASS)
-- [ ] L1+L2 Go test coverage ≥ 70% (`go test -cover ./...`) — сейчас 65.6% (до T1; ~68% после, перемерить)
+- [x] L1+L2 Go test coverage ≥ 70% (`go test -cover ./...`) — 72.2% на CI Linux после coverage sweep A+B (логи/coverage-sweep.md)
 - [x] Playwright: 20+ spec'ов, все зелёные (33 pass + 1 permanent-skip `config-raw`, покрыт smoke)
 - [ ] L5 nightly: 7 дней без красноты — Gap 4 открыт
 - [x] `tests/perf.sh`: 0 hard failures на дефолтных порогах
