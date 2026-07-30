@@ -182,6 +182,29 @@ func loadPlugins(r *gin.Engine) {
 
 func main() {
 	flag.Parse()
+	r, err := setupServer()
+	if err != nil {
+		fmt.Printf("[FATAL] setup: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Intermasq v3.0 Started on :%s\n", *Port)
+	if err := r.Run(":" + *Port); err != nil {
+		fmt.Printf("[FATAL] Server failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// setupServer performs all one-time bootstrap between flag.Parse() and
+// r.Run(): resolves external binaries, loads users/templates, picks the
+// init-system caller, builds the gin engine, registers every route and
+// starts the SSE / DNS-health background goroutines. It returns the
+// configured engine ready to be served by main()'s blocking r.Run().
+//
+// Extracted from main() so the bootstrap logic is unit-testable in
+// isolation (TestSetupServer) without invoking the blocking server. main()
+// keeps only the Run() + os.Exit plumbing, which is intentionally left
+// uncovered (see логи/Coverage_sweep.md §6).
+func setupServer() (*gin.Engine, error) {
 	resolveBins()
 	loadUsers()
 	loadTemplates()
@@ -286,9 +309,5 @@ func main() {
 	staticFS, _ := fs.Sub(staticFiles, "frontend/dist")
 	r.NoRoute(gin.WrapH(http.FileServer(http.FS(staticFS))))
 
-	fmt.Printf("Intermasq v3.0 Started on :%s\n", *Port)
-	if err := r.Run(":" + *Port); err != nil {
-		fmt.Printf("[FATAL] Server failed: %v\n", err)
-		os.Exit(1)
-	}
+	return r, nil
 }
