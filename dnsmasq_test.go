@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -2657,5 +2658,238 @@ func TestParseCSVAliasesIncludesPTRAndTXT(t *testing.T) {
 	}
 	if aliases[2].Type != "TXT" {
 		t.Errorf("third row should be TXT, got %s", aliases[2].Type)
+	}
+}
+
+// ===== Coverage sweep T-A: pure unit functions =====
+
+// TestParseIPTransform covers every error branch and the two success modes
+// (octet-prefix / CIDR / none) of parseIPTransform.
+func TestParseIPTransform(t *testing.T) {
+	cases := []struct {
+		name    string
+		old, nw string
+		wantErr string // empty => no error expected
+	}{
+		{"none", "", "", ""},
+		{"only_old_set", "10.0.0", "", "both_prefixes_required"},
+		{"only_new_set", "", "10.0.0", "both_prefixes_required"},
+		{"cidr_mismatch_only_old", "10.0.0.0/24", "10.0.0", "prefix_format_mismatch"},
+		{"cidr_mismatch_only_new", "10.0.0", "10.0.0.0/24", "prefix_format_mismatch"},
+		{"cidr_invalid_old", "nope/x", "10.0.0.0/24", "invalid_cidr"},
+		{"cidr_invalid_new", "10.0.0.0/24", "nope/x", "invalid_cidr"},
+		{"cidr_mask_mismatch", "10.0.0.0/24", "10.0.0.0/16", "prefix_mismatch"},
+		{"cidr_ipv6_old", "::1/24", "10.0.0.0/24", "ipv6_not_supported"},
+		{"cidr_ipv6_new", "10.0.0.0/24", "::1/24", "ipv6_not_supported"},
+		{"cidr_ok", "10.0.0.0/24", "10.0.1.0/24", ""},
+		{"octet_mismatched_dots", "10.0.0", "10.0", "prefix_format_mismatch"},
+		{"octet_invalid_old", "9999.0.0", "10.0.0", "invalid_prefix_format"},
+		{"octet_invalid_new", "10.0.0", "9999.0.0", "invalid_prefix_format"},
+		{"octet_ok_3octets", "10.0.0", "192.168.1", ""},
+		{"octet_ok_2octets", "10.0", "192.168", ""},
+		{"octet_ok_1octet", "10", "192", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseIPTransform(tc.old, tc.nw)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("parseIPTransform(%q,%q) unexpected err: %v", tc.old, tc.nw, err)
+				}
+				if got == nil {
+					t.Fatal("expected non-nil transform")
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error %q, got nil", tc.wantErr)
+			}
+			if err.Error() != tc.wantErr {
+				t.Fatalf("expected err %q, got %q", tc.wantErr, err.Error())
+			}
+		})
+	}
+}
+
+// TestIPTransform_Apply_None checks that the zero transform returns the IP
+// untouched.
+func TestIPTransform_Apply_None(t *testing.T) {
+	tr := &ipTransform{mode: ipTransformNone}
+	got, err := tr.apply("10.0.0.55")
+	if err != nil || got != "10.0.0.55" {
+		t.Fatalf("apply(none) = %q, %v; want 10.0.0.55, nil", got, err)
+	}
+}
+
+// TestIPTransform_Apply_InvalidIP covers net.ParseIP returning nil.
+func TestIPTransform_Apply_InvalidIP(t *testing.T) {
+	tr := &ipTransform{mode: ipTransformOctets, oldPref: "10.0.0", newPref: "10.0.1"}
+	if _, err := tr.apply("not-an-ip"); err == nil {
+		t.Fatal("expected invalid_ip error")
+	}
+}
+
+// TestIPTransform_Apply_Octets exercises octet-prefix substitution incl. the
+// prefix_not_matched boundary checks.
+func TestIPTransform_Apply_Octets(t *testing.T) {
+	tr := &ipTransform{mode: ipTransformOctets, oldPref: "10.0.0", newPref: "10.0.1"}
+	cases := []struct {
+		name string
+		ip   string
+		want string // "" => expect prefix_not_matched error
+	}{
+		{"basic", "10.0.0.55", "10.0.1.55"},
+		{"prefix_no_dot", "10.0.0255", ""}, // boundary char is not '.', should fail
+		{"wrong_prefix", "10.0.1.55", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tr.apply(tc.ip)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatalf("apply(%q) expected error, got %q", tc.ip, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("apply(%q) unexpected err: %v", tc.ip, err)
+			}
+			if got != tc.want {
+				t.Errorf("apply(%q) = %q, want %q", tc.ip, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIPTransform_Apply_CIDR exercises the CIDR substitution path.
+func TestIPTransform_Apply_CIDR(t *testing.T) {
+	_, oldNet, _ := net.ParseCIDR("10.0.0.0/24")
+	_, newNet, _ := net.ParseCIDR("10.0.1.0/24")
+	tr := &ipTransform{mode: ipTransformCIDR, oldNet: oldNet, newNet: newNet}
+
+	got, err := tr.apply("10.0.0.55")
+	if err != nil {
+		t.Fatalf("apply CIDR err: %v", err)
+	}
+	if got != "10.0.1.55" {
+		t.Errorf("apply CIDR = %q, want 10.0.1.55", got)
+	}
+
+	// prefix_not_matched
+	if _, err := tr.apply("192.168.0.55"); err == nil {
+		t.Error("expected prefix_not_matched error for non-matching IP")
+	}
+	// ipv6_to4 returns nil
+	if _, err := tr.apply("::1"); err == nil {
+		t.Error("expected invalid_ipv4 error for IPv6 under CIDR transform")
+	}
+}
+
+// TestIPTransform_Apply_CIDRRoundTrip confirms a parse→apply happy path on a
+// 16-bit prefix swap.
+func TestIPTransform_Apply_CIDRRoundTrip(t *testing.T) {
+	tr, err := parseIPTransform("10.0.0.0/16", "172.16.0.0/16")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := tr.apply("10.0.20.50")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "172.16.20.50" {
+		t.Errorf("got %q, want 172.16.20.50", got)
+	}
+}
+
+// TestEnsureAliasesFile covers all three branches.
+func TestEnsureAliasesFile(t *testing.T) {
+	dir := newTestDir(t)
+
+	// 1. Path traversal attempt → ErrPermission.
+	unsafe := filepath.Join(dir, "..", "escape.conf")
+	if err := ensureAliasesFile(unsafe); err != os.ErrPermission {
+		t.Fatalf("expected os.ErrPermission for unsafe path, got %v", err)
+	}
+
+	// 2. New file inside ConfigDir → created with header.
+	good := filepath.Join(dir, "aliases.conf")
+	if err := ensureAliasesFile(good); err != nil {
+		t.Fatalf("ensureAliasesFile err: %v", err)
+	}
+	data, err := os.ReadFile(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(data), "# DNS aliases") {
+		t.Errorf("expected header comment, got: %q", string(data))
+	}
+
+	// 3. Already exists → no-op (preserve prior content).
+	stamped := []byte("address=/existing/x\n")
+	if err := os.WriteFile(good, stamped, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureAliasesFile(good); err != nil {
+		t.Fatalf("ensureAliasesFile on existing err: %v", err)
+	}
+	after, _ := os.ReadFile(good)
+	if string(after) != string(stamped) {
+		t.Errorf("existing file modified: before %q, after %q", stamped, after)
+	}
+}
+
+// TestIsLeaseTime covers the dnsmasq lease-time acceptor.
+func TestIsLeaseTime(t *testing.T) {
+	cases := []struct {
+		s    string
+		want bool
+	}{
+		{"infinite", true},
+		{"12", true},
+		{"12s", true},
+		{"12m", true},
+		{"12h", true},
+		{"12d", true},
+		{"12w", true},
+		{"1s", true},   // single digit + unit
+		{"x", false},   // non-digit
+		{"", false},    // too short
+		{"a", false},   // too short + non-digit
+		{"1", false},   // too short (len<2)
+		{"12y", false}, // wrong unit
+		{"12x", false}, // wrong unit
+	}
+	for _, tc := range cases {
+		if got := isLeaseTime(tc.s); got != tc.want {
+			t.Errorf("isLeaseTime(%q) = %v, want %v", tc.s, got, tc.want)
+		}
+	}
+}
+
+// TestDirectiveGroup covers every group id returned by directiveGroup.
+func TestDirectiveGroup(t *testing.T) {
+	cases := []struct {
+		key  string
+		want int
+	}{
+		// Group 0 — dns.
+		{"domain", 0}, {"domain-needed", 0}, {"bogus-priv", 0}, {"no-resolv", 0},
+		{"no-hosts", 0}, {"listen-address", 0}, {"bind-interfaces", 0},
+		{"except-interface", 0}, {"interface", 0}, {"server", 0}, {"address", 0},
+		{"local", 0}, {"expand-hosts", 0}, {"no-poll", 0}, {"resolv-file", 0},
+		{"strict-order", 0}, {"all-servers", 0}, {"clear-on-reload", 0},
+		// Group 1 — dhcp.
+		{"dhcp-range", 1}, {"dhcp-option", 1}, {"dhcp-lease-max", 1},
+		{"dhcp-authoritative", 1}, {"dhcp-no-override", 1}, {"dhcp-hostsfile", 1},
+		{"dhcp-leasefile", 1}, {"no-dhcp-interface", 1},
+		// Group 2 — log.
+		{"log-queries", 2}, {"log-dhcp", 2}, {"log-facility", 2}, {"log-async", 2},
+		// Group 3 — unknown.
+		{"something-else", 3}, {"", 3}, {"conf-file", 3},
+	}
+	for _, tc := range cases {
+		if got := directiveGroup(tc.key); got != tc.want {
+			t.Errorf("directiveGroup(%q) = %d, want %d", tc.key, got, tc.want)
+		}
 	}
 }

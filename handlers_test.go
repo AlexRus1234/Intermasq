@@ -1504,3 +1504,80 @@ func TestApplyTemplateHandler_BadMAC(t *testing.T) {
 		t.Fatalf("expected 400 for bad MAC, got %d", w.Code)
 	}
 }
+
+// ===== Coverage sweep T-A: pure helpers =====
+
+// TestCoalesce verifies the trivial fallback helper.
+func TestCoalesce(t *testing.T) {
+	if got := coalesce("a", "b"); got != "a" {
+		t.Errorf("coalesce(a,b) = %q, want a", got)
+	}
+	if got := coalesce("", "b"); got != "b" {
+		t.Errorf("coalesce(\"\",b) = %q, want b", got)
+	}
+	if got := coalesce("", ""); got != "" {
+		t.Errorf("coalesce(\"\",\"\") = %q, want empty", got)
+	}
+	if got := coalesce("a", ""); got != "a" {
+		t.Errorf("coalesce(a,\"\") = %q, want a", got)
+	}
+}
+
+// TestValidateHostTags covers every branch: empty (skip), set:/tag: ok,
+// id:-prefixed accepted for round-trip, garbage rejected.
+func TestValidateHostTags(t *testing.T) {
+	cases := []struct {
+		name string
+		tags []string
+		want bool
+	}{
+		{"empty slice", []string{}, true},
+		{"only empties", []string{"", "  ", ""}, true},
+		{"set tag", []string{"set:foo"}, true},
+		{"tag tag", []string{"tag:bar"}, true},
+		{"id accepted for round-trip", []string{"id:abc"}, true},
+		{"mixed valid", []string{"set:foo", "tag:bar", "id:xyz"}, true},
+		{"whitespace trimmed valid", []string{"  set:foo  "}, true},
+		{"invalid bareword", []string{"foo"}, false},
+		{"invalid prefix unknown", []string{"foo:bar"}, false},
+		{"one invalid in mix", []string{"set:foo", "BAD"}, false},
+		{"empty inside still ok", []string{"set:foo", "", "tag:bar"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := validateHostTags(tc.tags); got != tc.want {
+				t.Errorf("validateHostTags(%v) = %v, want %v", tc.tags, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeHostTags covers trim, lowercased dedup and first-seen order.
+func TestNormalizeHostTags(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"empty", []string{}, []string{}},
+		{"all-empty dropped", []string{"", "  ", ""}, []string{}},
+		{"simple", []string{"set:foo"}, []string{"set:foo"}},
+		{"preserves order", []string{"tag:z", "set:a", "tag:b"}, []string{"tag:z", "set:a", "tag:b"}},
+		{"dedup case-insensitive", []string{"set:FOO", "set:foo", "SET:Foo"}, []string{"set:FOO"}},
+		{"trim whitespace", []string{"  set:foo  ", "tag:bar"}, []string{"set:foo", "tag:bar"}},
+		{"dedup after trim", []string{"  set:foo", "set:foo"}, []string{"set:foo"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeHostTags(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("normalizeHostTags(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("idx %d: got %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}

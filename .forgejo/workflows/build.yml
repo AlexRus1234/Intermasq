@@ -125,6 +125,19 @@ jobs:
           echo "Running: go test ./... $RACE_FLAG -count=1"
           go test ./... $RACE_FLAG -count=1
 
+      - name: Coverage report
+        # Separate step (no -race) so instrumentation overhead & race detector
+        # don't skew numbers. Prints per-function coverage and the summary
+        # percentage to the CI log, and uploads coverage.out as an artifact.
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          go test ./... -count=1 -coverprofile coverage.out
+          echo "===== Coverage summary ====="
+          go tool cover -func coverage.out | tail -n 1
+          echo "===== Per-package ====="
+          go tool cover -func coverage.out | grep -E '^intermask/' | sort
+
       - name: Build & install mock plugin (Gap 6)
         # The plugin dir is hardcoded to /etc/intermasq/plugins in main.go
         # (loadPlugins reads it on startup). CI runs as root in the ephemeral
