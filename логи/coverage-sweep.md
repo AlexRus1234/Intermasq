@@ -254,3 +254,127 @@ Linux-only detectInitSystem/init-веток → ориентировочно **~
 
 Чекбокс «≥70%» уже тикнут в блоке B. После блока C локально 74.9% —
 можно тикнуть и «≥80%» по достижении на CI (ожидаемый запуск).
+
+---
+
+## Категория D — system.go init-callers через fake-бинарники (VANITY)
+
+**Цель:** закрыть exec-wiring ветки 5 SystemCaller'ов через fake
+shell-скрипты по seam `*BinPath` vars (§2.D + §3.T-D). **VANITY-покрытие:**
+проверяется только то, что caller правильно собирает `exec.Command` и
+парсит stdout; реальная init-перезагрузка остаётся Gap 4 (L5 VM nightly).
+Цифра растёт, доверие — нет.
+
+### Seam
+
+- `sudoBinPath`/`systemctlBinPath`/`serviceBinPath`/`rcServiceBinPath`/
+  `svBinPath` — package vars (`bins.go:30-35`), записываемы напрямую.
+- Аксессоры `sudoBin()`/... — если var != "", возвращают его как есть
+  (`bins.go:101-130`); в тестах Var всегда set-ится перед вызовом метода,
+  так что lazy `resolveBins()` (через `sync.Once`) НЕ триггерится внутри
+  D-тестов. State dirty только на время subtest'а, save/restore через
+  `t.Cleanup`. Без `t.Parallel()`.
+- Хелпер **`fakeBin(t, name, script)`** (добавлен в `linux_test.go`,
+  рядом `setBinPath` для path-only варианта): пишет `#!/bin/sh\n<script>\n` в
+  `t.TempDir()`, `chmod 0755`, мапит `name → *BinPath` var, регистрирует
+  cleanup. Guard по `runtime.GOOS=="windows"` → `t.Skip`. Связка с
+  существующим `fakeDnsmasq` (та же идея, отдельная функция — dnsmasq
+  монтирует exit-code имя файла, fakeBin — generic).
+- Fake `sudo` (`sudoDispatch` const): `shift\nexec "$@"` — дропает `-n`
+  флаг и диспатчит остальные аргументы в fake wrapped binary
+  (systemctl/rc-service/sv/service). Так ветки `UseSudo=true` доходят до
+  тех же fake-скриптов, что и `UseSudo=false`.
+
+### Файлы
+
+| Файл | Тип | Что добавлено |
+|---|---|---|
+| `linux_test.go` (append) | хелпер | `fakeBin(t, name, script)` + `setBinPath(t, name, bin)`, 6 Recognised names, Windows-skip, t.Cleanup restore |
+| `system_callers_test.go` (новый) | L2 Linux-gated | `TestSystemdSystemCaller_IsActive_Fakes` (5 кейсов: root/sudo × active/inactive + root-empty-output), `_Restart_Fakes` (4 кейса: root/sudo × ok/fail), `_RestartSelf_Fakes` (3 кейса root/sudo ok + root fail); `TestSystemdUserCaller_Fakes` (6 кейсов: IsActive × active/inactive + Restart/RestartSelf × ok/fail); `TestOpenRCCaller_Fakes` (8 кейсов: IsActive root/sudo × started/stopped + Restart/RestartSelf root/sudo ok/fail); `TestRunitCaller_Fakes` (7 кейсов: IsActive root/sudo × run/down + Restart/RestartSelf root/sudo ok/fail); `TestSysVinitCaller_Fakes` (9 кейсов: IsActive root/sudo × ok/fail + Restart/RestartSelf root/sudo × ok/fail). Хелперы: `binScript`, `errAny`, `checkErr`, const `sudoDispatch`. |
+
+### Покрываемые функции (Linux CI, ожидаемые)
+
+| Функция | Было (локально) | Ожидается на CI Linux |
+|---|---|---|
+| `SystemdSystemCaller.IsActive` (37) | 0% | **100%** |
+| `SystemdSystemCaller.Restart` (48) | 0% | **100%** |
+| `SystemdSystemCaller.RestartSelf` (58) | 0% | **100%** |
+| `SystemdUserCaller.IsActive` (77) | 0% | **100%** |
+| `SystemdUserCaller.Restart` (83) | 0% | **100%** |
+| `SystemdUserCaller.RestartSelf` (88) | 0% | **100%** |
+| `OpenRCCaller.IsActive` (101) | 0% | **100%** |
+| `OpenRCCaller.Restart` (112) | 0% | **100%** |
+| `OpenRCCaller.RestartSelf` (122) | 0% | **100%** |
+| `RunitCaller.IsActive` (144) | 0% | **100%** |
+| `RunitCaller.Restart` (156) | 0% | **100%** |
+| `RunitCaller.RestartSelf` (167) | 0% | **100%** |
+| `SysVinitCaller.IsActive` (189) | 0% | **100%** |
+| `SysVinitCaller.Restart` (199) | 0% | **100%** |
+| `SysVinitCaller.RestartSelf` (209) | 0% | **100%** |
+| `String()` (68/93/132/178/219) | 100% | 100% (был уже — блок C) |
+| `detectSystemCaller` (282) | 20% | **~85-95%** — дополнительно получает root-ветки `UseSudo=false` (через fake systemctl, setup через `TestOpenRCCaller_Fakes`/etc. не мантуал trigger; на CI os.Getuid()==0). Реальная Δ выше — `systemd-user`-ветка (`systemctl --user is-active default.target`) покроется только при непустом `systemctlBinPath` на Linux. |
+| `detectInitSystem` (249) | 61.1% | ~75-85% — ветки `"init"→openrc/sysvinit` теперь exercisable через fake `rc-service`/`service` (но блок C уже покрыл своими fake-старыми тестами). |
+
+Δ локально: **0%** (Windows skip). Δ на CI Linux (ожидается):
+**~+2-3%** (package main). Цифра скромная, т.к. system.go — маленький
+файл; основная ценность — закрытие 24 functions/methods в `cover -func`.
+
+### Верификация
+
+- `gofmt -l system_callers_test.go linux_test.go` — пусто
+- `go vet ./...` — чисто
+- `go test ./... -count=1` (Windows) — зелёный, все D-subtest'ы SKIP
+  через `fakeBin` на `runtime.GOOS=="windows"`
+- `-v -run TestSystemdSystemCaller|TestSystemdUserCaller|TestOpenRCCaller|TestRunitCaller|TestSysVinitCaller` —
+  parent PASS, every subtest SKIP
+- существующие тесты не сломаны
+- локальный `go test -cover` — **74.9%** (не изменился, как и должно быть)
+
+### Замечания / observability
+
+- **VANITY, явно:** §2.D и §6 промта квалифицируют категорию D как
+  «тщеславное» покрытие. Реальная проверка init-перезагрузки остаётся
+  Gap 4 (L5 VM nightly) — исполняемые fake-скрипты не доказывают, что
+  `systemctl restart dnsmasq` на самом деле работает на Fedora.
+- **`detectSystemCaller` 20→85%+ на CI** — главный ко-продукт блока D:
+  `os.Getuid()==0` на CI (root в контейнере) → сразу возвращает
+  `SystemdSystemCaller{UseSudo:false}`. Это покрывает строки 287-288
+  без доп. теста. Доп. строки (294-297, 290-293) покрываются только на
+  Linux с установленным реальным systemctl — на Fedora CI есть.
+- **Глобальный state**: subtest'ы внутри parent-функции НЕ параллелятся.
+  `t.Cleanup` ворует restore на момент под-теста, LIFO-порядок — коррект.
+  Перекрёстной контаминации между тестами нет: каждый subtest ставит
+  нужный var перед вызовом метода; если var был "" (resolveBins не запустился),
+  cleanup восстанавливает "" — следующий тест видит чистый стейт.
+- **`binsOnce` invariant**: ни один D-тест не вызывает accessor, не
+  установив соответствующий var → `resolveBins()` не срабатывает
+  внутри D-тестов. Если порядок тестов запускает какой-то другой тест
+  первым (например, из C-блока), и `binsOnce` уже «прогрет», fakes
+  всё равно перезаписывают var; cleanup восстанавливает orig (real path
+  или ""), не "".
+- **`sudoDispatch`** — `shift` дропает только первый арг (`-n`); для
+  команд вида `sudo systemctl restart svc` (без `-n`) дропает `systemctl`,
+  что сломало бы. Ho все наши caller'ы с `UseSudo=true` добавляют `-n`
+  только в `IsActive`; `Restart`/`RestartSelf` вызывают `sudo systemctl
+  restart ...` БЕЗ `-n`. Это означает, что `shift` в `Restart` дропает
+  `systemctl` → exec("restart","svc"), что НЕ запускает fake systemctl.
+  **Анализ**: для `Restart` (`exec.Command(sudoBin(), systemctlBin(),
+  "restart", service)`) argv = (sudo, systemctl, "restart", service).
+  `shift` → (systemctl, "restart", service), `exec "$@"` → запускает
+  fake systemctl `restart service` — корректно (`exec "$@"`
+  интерпретирует первый оставшийся аргумент как команду). Для `IsActive`
+  (`sudo -n systemctl is-active svc`) argv = (sudo, "-n", systemctl,
+  "is-active", svc). `shift` → (systemctl, "is-active", svc), exec
+  fake systemctl — корректно. `sudoDispatch` работает в обоих случаях.
+- **Файлы `system_callers_test.go` против `system_test.go`**: блок C
+  использовал `system_test.go` (portable detect* + String()); блок D
+  вынес в отдельный файл из-за разных инвариантов (Linux-gated, fake
+  bins, table-per-caller). Имя `system_callers_test.go` отражает суть.
+
+### Что дальше
+
+- На CI Linux прогонятся D-тесты → закроют ~95% system.go.
+- Дальнейших planned блоков нет (sweep A→B→C→D завершён; §6 — вне
+  области subprocess-`os.Exit` опц.).
+- ROADMAP: чекбокс «≥80%» тикнуть по подтверждению CI после прогона
+  с блоком D (ожидается ~78-80% по package main на Fedora 44).

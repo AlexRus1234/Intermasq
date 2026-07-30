@@ -69,6 +69,67 @@ func fakeDnsmasq(t *testing.T, exitCode int) {
 	t.Cleanup(func() { dnsmasqBinPath = orig })
 }
 
+// fakeBin writes a shell-script binary `name` (with `script` body, no
+// shebang) into a temp dir, installs it under the matching *BinPath package
+// var (bins.go:30-35) for the duration of the test, and registers cleanup to
+// restore the previous value. Recognised names: "dnsmasq", "sudo",
+// "systemctl", "service", "rc-service", "sv". Windows is skipped because the
+// shebang trick is not honoured by os/exec there.
+//
+// This is the seam used by coverage sweep block D (§3.T-D): all SystemCaller
+// methods call sudoBin()/systemctlBin()/... which read these package vars —
+// so pointing them at fake scripts exercises the exec-wiring without a real
+// init system. See логи/Coverage_sweep.md §2.D ("vanity-покрытие").
+func fakeBin(t *testing.T, name, script string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake shell-script binary unsupported on Windows")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, name)
+	full := "#!/bin/sh\n" + script + "\n"
+	if err := os.WriteFile(bin, []byte(full), 0o755); err != nil {
+		t.Fatalf("write fake %s: %v", name, err)
+	}
+	setBinPath(t, name, bin)
+}
+
+// setBinPath assigns `bin` to the *BinPath var matching `name` and registers
+// cleanup to restore the previous value. Unlike fakeBin, it does not write
+// any file — useful when a test wants to point a var at an existing path.
+func setBinPath(t *testing.T, name, bin string) {
+	t.Helper()
+	var orig string
+	switch name {
+	case "dnsmasq":
+		orig = dnsmasqBinPath
+		dnsmasqBinPath = bin
+		t.Cleanup(func() { dnsmasqBinPath = orig })
+	case "sudo":
+		orig = sudoBinPath
+		sudoBinPath = bin
+		t.Cleanup(func() { sudoBinPath = orig })
+	case "systemctl":
+		orig = systemctlBinPath
+		systemctlBinPath = bin
+		t.Cleanup(func() { systemctlBinPath = orig })
+	case "service":
+		orig = serviceBinPath
+		serviceBinPath = bin
+		t.Cleanup(func() { serviceBinPath = orig })
+	case "rc-service":
+		orig = rcServiceBinPath
+		rcServiceBinPath = bin
+		t.Cleanup(func() { rcServiceBinPath = orig })
+	case "sv":
+		orig = svBinPath
+		svBinPath = bin
+		t.Cleanup(func() { svBinPath = orig })
+	default:
+		t.Fatalf("setBinPath: unknown binary name %q", name)
+	}
+}
+
 // itoa is a tiny stdlib-free itoa so we avoid importing strconv just for the
 // script-assembly line above. Supports non-negative ints only.
 func itoa(n int) string {
