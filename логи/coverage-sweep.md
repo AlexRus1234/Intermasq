@@ -160,6 +160,97 @@ Linux-gated (`runtime.GOOS=="windows"` → `t.Skip`), на CI Linux они бе�
 
 ### Что дальше
 
-- Блок C (рефакторинг bootstrap/горутin: `setupServer()`, `procOneCommPath`,
-  `ssePollOnce`, `runDNSHealthPass` inject, `loadPlugins` fake dir)
 - Блок D (vanity — опционально)
+
+---
+
+## Категория C — рефакторинг bootstrap/горутин
+
+**Цель:** покрыть bootstrap/горутины через extract + injection seams
+(§2.C). 6 рефакторингов, каждый — отдельный коммит. Существующие
+сигнатуры хендлеров и маршрутов сохранены.
+
+### Рефакторинги
+
+| Task | Файл | Что | Коммит |
+|---|---|---|---|
+| T-C.1 | `system.go` | inject `var procOneCommPath = "/proc/1/comm"` | `5e69eaa` |
+| T-C.2 | `sse.go` | extract `ssePollOnce()` из `startSSEBroadcaster` | `526adc5` |
+| T-C.3 | `metrics.go` | inject `var dnsResolver` (по умолчанию `net.Resolver{PreferGo:true}.LookupHost`) | `526adc5` |
+| T-C.4 | `auth.go` | extract `cleanupBlacklistOnce(now time.Time)` из `cleanBlacklistLoop` | `526adc5` |
+| T-C.5 | (нет правок) | `PluginsDir`/`SocketsDir` уже package vars | `125a808` |
+| T-C.6 | `main.go` | extract `setupServer() (*gin.Engine, error)` из `main()` | `6c54bcf` |
+
+### Тесты
+
+| Файл | Тип | Что |
+|---|---|---|
+| `system_test.go` (новый) | L1 | `TestDetectInitSystem_Systemd/Runit` (portable), `_InitOpenRC/_InitSysVinit` (Linux-gated), `_UnreadableComm_Fallback`, `_UnknownComm_Fallback`, `TestCallerStrings` (10 caller String()), `TestResolveSystemCaller_Systemd/OpenRC/Runit/SysVinit/Unknown` |
+| `goroutines_test.go` (новый) | L1 | `TestSsePollOnce`, `_BroadcastsOnDelta`, `TestRunDNSHealthPass_NoAliases`, `_HappyAndSadPaths` (stub resolver), `TestCleanupBlacklistOnce_RemovesExpired`, `_EmptyMap` |
+| `linux_test.go` (append) | L2 Linux-gated | `TestLoadPlugins_FakeDir` (shell-script stub sleep 60 + manifest → регистрируется /plugins/demo/*any), `_NoDir` (portable), `_BrokenManifest` (skip malformed manifest) |
+| `setup_test.go` (новый) | L1 | `TestSetupServer_RegistersRoutes` (~40 маршрутов), `_InitSystemNone` (NoneCaller), `_LegacySystemdScopeWarning`, `_HistoryDirFail` (non-fatal) |
+
+### Результаты (локально Windows)
+
+| Функция | Было | Стало |
+|---|---|---|
+| `cleanBlacklistLoop` | 62% | **100%** (init() запускает горутину, очистка через `cleanupBlacklistOnce`) |
+| `cleanupBlacklistOnce` | — | **100%** |
+| `ssePollOnce` | — | **100%** |
+| `runDNSHealthPass` | 0% | **94.1%** |
+| `startDNSHealthChecker` | 0% | **83.3%** (residual = ticker-loop) |
+| `startSSEBroadcaster` | 0% | **58.3%** (residual = sleep-tight ticker-loop; 5s интервал не бежит за время теста) |
+| `detectInitSystem` | 0% | **61.1%** (residual = Linux-only ветви Init/OpenRC) |
+| `resolveSystemCaller` | 0% | **100%** |
+| `mapLegacyScope` | 100% | 100% (был уже) |
+| `initSystemCaller` | 0% | **100%** |
+| `setupServer` | — | **92.9%** (residual = `restart-self` goroutine ветка, CiMode=true в тестах) |
+| `main()` | 0% | **0%** (см. §6 — вне области, blocking `r.Run`/`os.Exit`) |
+| `loadPlugins` | 0% | **12.1%** локально ( FakeDir/BrokenManifest Linux-gated → SKIP, на CI ~90%) |
+
+### Δ coverage (локально Windows)
+
+```
+После A+B локально:  69.5%
+После C локально:    74.9%    (+5.4%)
+```
+
+На CI Linux ожидается дополнительно **~+3-4%** от loadPlugins и от
+Linux-only detectInitSystem/init-веток → ориентировочно **~78-80%**.
+
+### Верификация
+
+- `gofmt -l` — пусто
+- `go vet ./...` — чисто
+- `go test ./... -count=1` — зелёный
+- существующие тесты не сломаны
+
+### Замечания / observability
+
+- **`detectInitSystem` 61%**: ветви `"init"→openrc/sysvinit` требуют
+  `rcServiceBin()` / `serviceBin()` на $PATH — на CI Fedora их нет
+  (есть `systemctl`), поэтому даже на Linux эти skip'аются. Базовая
+  `systemd`/`runit`-ветви покрыты portable-тестами (file write + assert).
+  Остаточный residual уходит только на Alpine/Gentoo CI матрицах (за
+  пределами sweep).
+- **`startSSEBroadcaster` 58% / `startDNSHealthChecker` 83%**: residual —
+  ticker-loop итерации, которые крутятся вечно (5s / 60s) и не выполняются
+  за короткий lifetime теста. По §6 они лишь частично покрываемые; 100%
+  требует подачи фейкового ticker'а — слишком дорогой рефакторинг для 2-3%.
+- **`setupServer` 93%**: единственная непокрытая ветка — `restart-self`
+  handler goroutine (только при `CiMode=false`); в тестах `CiMode` по
+  умолчанию false, но мы не дёргаем endpoint — это L3 smoke-задача.
+- **`loadPlugins` 12% локально**: два из трёх тестов Linux-gated (shell-
+  script plugin),_SKIP на Windows. На CI они пробегут → ожидаем ~90%.
+- **`main()` 0%**: по §6 вне области (`r.Run` blocking + `os.Exit`).
+
+### Что дальше
+
+- Блок D (vanity — fake-init бинарники, **только если оператор хочет
+  цифру >90%**: system.go callers через fake `*BinPath` vars; помечается
+  как vanity в §6 — реальная проверка остаётся Gap 4 L5 VM)
+
+### Покрытие ROADMAP
+
+Чекбокс «≥70%» уже тикнут в блоке B. После блока C локально 74.9% —
+можно тикнуть и «≥80%» по достижении на CI (ожидаемый запуск).
