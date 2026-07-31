@@ -275,6 +275,15 @@ jobs:
           make --version | head -n 1
           echo "::endgroup::"
 
+          # dnsmasq ≤2.90 declares iface_enumerate's callback as `int ()`
+          # (K&R, untyped) and passes typed function pointers. gcc 13- warned,
+          # gcc 14+ (Fedora 44 ships gcc 15) makes -Wincompatible-pointer-types
+          # an error by default → every src-build of <2.91 dies in network.c.
+          # dnsmasq's Makefile appends COPTS to CFLAGS, so we downgrade that
+          # one diagnostic back to a warning. Vanilla behaviour is preserved;
+          # only the gcc-14 strictness policy is relaxed for the old sources.
+          export COPTS="-Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration"
+
           COMPAT_TOTAL_RC=0
           for DNSMASQ_VERSION in 2.80 2.86 2.90; do
             echo "::group::dnsmasq ${DNSMASQ_VERSION}"
@@ -295,10 +304,13 @@ jobs:
             # Top-level Makefile delegates to src/; default target builds
             # src/dnsmasq. COPTS empty — vanilla build. Output inlined (not
             # redirected to a file) so version-specific build errors show up
-            # directly in the group, no separate tail step needed.
-            echo "-> make -C $SRC_DIR -j2"
-            if ! make -C "$SRC_DIR" -j2; then
-              echo "::error::dnsmasq ${DNSMASQ_VERSION} build failed (make rc=$?)"
+            # directly in the group, no separate tail step needed. Capture
+            # make's exit code explicitly (NOT via `! cmd` which masks $?).
+            echo "-> make -C $SRC_DIR -j2 COPTS=\"$COPTS\""
+            make -C "$SRC_DIR" -j2
+            MAKE_RC=$?
+            if [ "$MAKE_RC" -ne 0 ]; then
+              echo "::error::dnsmasq ${DNSMASQ_VERSION} build failed (make rc=$MAKE_RC)"
               COMPAT_TOTAL_RC=1
               echo "::endgroup::"
               continue
