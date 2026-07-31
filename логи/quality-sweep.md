@@ -88,3 +88,57 @@ PASS, при повторном применении целевой мутаци
   ручной подход позволил классифицировать его корректно.
 
 ---
+
+## Этап 1 — Fuzz opt-in CI + реальный прогон ✅ ВЫПОЛНЕН (2026-07-31)
+
+**Цель:** добавить opt-in CI-шаг `run_fuzz_tests` (по образцу `run_e2e_tests`),
+запустить реальный `-fuzz` (не только seed'ы из `f.Add`) и разобрать crash'и,
+которые statement-coverage не видит.
+
+### Что сделано
+
+1. **`workflow_dispatch.inputs.run_fuzz_tests`** (build.yml:31-35) — boolean,
+   default `false`, opt-in по образцу `run_e2e_tests`. Дефолтный пайплайн
+   не затронут.
+2. **Шаг «Fuzz parsers (opt-in, time-bounded)»** (build.yml:133-159) — после
+   L1+L2 Go-тестов, до Coverage report. Цикл по 4 target'ам:
+   `FuzzParseDhcpHostLine`, `FuzzParseArpContent`, `FuzzParseAliasLine`,
+   `FuzzParseLeasesContent`. Каждый: `go test -run='^$' -fuzz="^${target}$"
+   -fuzztime=30s .` (одиночный пакет `.` — важно: `./...` роняет go с "fuzz
+   testing requires a single package" потому что раскрывается в 2 пакета
+   `intermask` + `intermask/docs`; первый коммит это упустил, 0s-провал).
+   CGO_ENABLED=1.
+3. **Verbose-вывод для триажа:** команда echo'ится перед запуском; per-target
+   rc ловится; на crash шлёт `::warning::` с путём `testdata/fuzz/<Name>/` и
+   фейлит шаг в конце (все 4 успевают отработать).
+
+### Коммиты
+
+- `a2b0edc` — первичный input + step (с багом `./...`).
+- `6a5fdad` — fix: `./...` → `.` + verbose triage output.
+
+### Реальный прогон (CI, `run_fuzz_tests=true`)
+
+- **Время:** ~2m54s на 4 target'а × 30s fuzztime (overhead = compile + corpus
+  init per target).
+- **Результат:** PASS — нет `::warning::`/`::error::`, шаг зелёный.
+- **Crash'и:** **нет** (no crash found in 4×30s). Артефактов в
+  `testdata/fuzz/` не появилось → regression-корпус не пополнился.
+- Покрытые парсеры: `parseDhcpHostLine`, `parseArpContent`, `parseAliasLine`,
+  `parseLeasesContent`. Oracle (panic-free + структурные инварианты на
+  success) устоял во всех 4 случаях за 30s случайного инпута каждый.
+
+### Замечания / knock-on
+
+- **Продуктовый код не тронут** — правки только в YAML (build.yml +21/+17).
+- `-fuzz` гоняется опционально по запросу; дефолтный CI не удлиняется.
+- ROI для дальнейшего `-fuzztime`: на 30s × 4 target'а crash'ей не найдено;
+  продление до минутного бюджета — на усмотрение (можно сделать input-параметр
+  `fuzztime`, но сейчас востребованности нет).
+- Crash-корпус `testdata/fuzz/` остаётся пустым — это норма (парсеры
+  намеренно толерантны к мусору, oracle = "не паникует"). Если позже
+  появится crash, Go автоматически запишет корпус — его коммитить.
+- Снимает пункт "real `-fuzz` НЕ гоняется — opt-in CI-шаг отложен" из
+  `Quality_sweep.md` §0 (состояние на 2026-07-29).
+
+---
