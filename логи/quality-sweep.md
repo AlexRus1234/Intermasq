@@ -252,7 +252,28 @@ Workflow dispatch с `run_compat_matrix=true`. Compile-флаги для мат�
 - `f75511b` — pass COPTS on make cmdline (env didn't override Makefile COPTS=).
 - `42d5a4f` — add `-std=gnu17` — revert C23 `()`=(void) hard error on K&R callbacks.
 - `39f8c20` — drop `::group::` (collapsed UI hides per-version failures).
-- `<этот коммит>` — register A14 + A15 in `tests/known-bugs.txt`, tag smoke checks, верификация green.
+- `7ad7d39` — register A14 + A15 in `tests/known-bugs.txt`, tag smoke checks, results matrix + version map.
+- `b27ecfb` — fix `init_state` to parse last known-bugs line even without trailing newline.
+
+### Боковая находка: bash `read` без trailing newline (commit `b27ecfb`)
+
+После `7ad7d39` dispatch всё равно fail'ил на A15 (`Bug A15 not in
+known-bugs.txt`), хотя A14 распознавался как KNOWN. Root cause: файл
+`tests/known-bugs.txt` оканчивался строкой `A15 ... TBD)` **без** финального
+`\n` (git маркер `\ No newline at end of file`). bash's `while IFS= read -r
+_line; do ... done < file` молча пропускает последнюю unterminated-строку —
+`read` возвращает failure на EOF без `\n`, даже если `_line` заполнен.
+
+Поэтому A14 (строка 25, с `\n` после) парсился, а A15 (строка 35, без `\n`)
+drop'алась из `KNOWN_BUGS` map — и чек становился loud FAIL вместо KNOWN.
+
+Фикс двойной (defense in depth):
+1. Appended `\n` к `known-bugs.txt` (1976 → 1977 bytes).
+2. Hardened `tests/lib/state.sh:init_state` — заменил `while IFS= read -r
+   _line; do` на `while IFS= read -r _line || [ -n "$_line" ]; do`. Это
+   стандартный bash-идиом для обработки финальной строки без trailing
+   newline. Защищает от будущих рецидивов, когда редактор или ручная правка
+   оставит файл без финального `\n`.
 
 ### Замечания / knock-on
 
