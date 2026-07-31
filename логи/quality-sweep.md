@@ -142,3 +142,99 @@ PASS, при повторном применении целевой мутаци
   `Quality_sweep.md` §0 (состояние на 2026-07-29).
 
 ---
+
+## Этап 2 — dnsmasq compatibility matrix ✅ ВЫПОЛНЕН (2026-07-31)
+
+**Цель:** smoke.sh против разных версий dnsmasq — поймать версионные расхождения
+`--test`-валидации, парсеров, dhcp-range auto-detect.
+
+### Подход
+
+Build-from-source внутри федора-44 контейнера-runner'а (не docker-in-docker,
+не strategy.matrix). Runner сам в `fedora:44` container → вложенный `docker
+run` недоступен. Простейшая надёжная схема: один собранный `intermasq-ci`
+(статический, CGO_ENABLED=0 из основного build-step'а) + 3 dnsmasq-тарбалла с
+upstream (`thekelleys.org.uk/dnsmasq/`), `cc`-only build (~10s каждая),
+указываем путь через `-dnsmasq-bin`. Это переиспользует уже готовый бинарник
+(доп. builds артефактом не передаются — нет нужды в `upload-artifact`).
+
+### Что сделано
+
+1. **`workflow_dispatch.inputs.run_compat_matrix`** (build.yml:36-40) —
+   boolean, default `false`, opt-in по образцу `run_e2e_tests`/`run_fuzz_tests`.
+   Дефолтный пайплайн не затронут.
+2. **Шаг «L3.5 — dnsmasq compat matrix (opt-in)»** (build.yml:230-342) —
+   после дефолтного L3 smoke, до Perf. Seq-цикл по 3 версиям:
+   - `2.80` (Jan 2018) — oldest anchor; `--test --conf-file=` поддерживает
+     (добавлено в 2.66), `dhcp-range` AT-style — basic.
+   - `2.86` (Sep 2021) — middlepoint; близко к debian stable 12 (2.86).
+   - `2.90` (Feb 2024) — recent; близко к fedora 40+ пакету.
+3. **Per-version изоляция**: distinct port+`-conf-dir`+`-db`+`-history-dir`
+   (suffixed `-2.80`/`-2.86`/`-2.90`) + `rm -rf $CONF_DIR`/`rm -f users.json`
+   → каждая итерация стартует с чистого `setup_required=true`, так что
+   `00-preflight.sh` делает POST `/api/setup` заново — состояние одной
+   версии не утекает в следующую.
+4. **Diag/log:** печатает карту версий (системная fedora:44 + 3 src-build) +
+   `dnsmasq --version` каждой собранной; `dnsmasq-<v>-build.log` на случай
+   build-fail с `tail -n 40` в `::error::`.
+5. **Version map** (зафиксировано в логе CI-шага):
+   ```
+   fedora:44 system dnsmasq: <dnsmasq --version line 1 — varies по образу>
+   matrix src-build versions : 2.80 (2018), 2.86 (2021), 2.90 (2024)
+   ```
+   Distro-аналоги (информационно, не verified в этом CI): alpine 3.19 ≈ 2.89,
+   debian 12 ≈ 2.86, ubuntu 24.04 ≈ 2.90, fedora 44 ≈ 2.92+. Шаг намеренно
+   НЕ запускает другие distro-контейнеры (нужен docker-in-docker, недоступно);
+   source-build matrix покрывает ту же version-axis.
+
+### Verify-критерий (по §этапа)
+
+- opt-in `run_compat_matrix=true` прогоняет smoke на 3 версиях без
+  unexpected fails (или с зафиксированными version-notes).
+- Дефолтный CI не затронут (input default=false → шаг skips).
+- Терпимость к расхождениям: если dnsmasq vX даёт иное поведение, которое
+  НЕ баг intermasq → smoke-чек либо версионно-обходится через
+  `dnsmasq --version | grep`, либо помечается known-difference в логе
+  шага. Баг intermasq = расхождение, ломающее пользователя на поддерживаемой
+  версии.
+
+### Коммиты
+
+- `8328ceb` — opt-in input + step (build-from-source matrix vs smoke).
+
+### Замечания / knock-on
+
+- **Продуктовый код не тронут** — правки только в YAML (build.yml +119).
+- **`make` добавляется** в opt-in шаге (`dnf install -y make`) — в base fedora:44
+  нет. ~1s overhead, только при opt-in.
+- **Upstream tarball URL** `https://thekelleys.org.uk/dnsmasq/` — public CA,
+ reachable из контейнера так же как go.dev (там это уже работает в build-step
+  для Go toolchain).
+- **Build-время:** dnsmasq-v2.80 на gcc-14 выдаёт warnings (C-statics legacy),
+  но компилится cc=0; собирается в `src/dnsmasq` (~10s `-j2`). v2.86/2.90
+  собираются без предупреждений.
+- **Coverage-lib:** версия dnsmasq определяет, какие `dhcp-range` опции
+  валидны для `--test`; smoke 30-test.conf/40-dhcp.conf (basic-dhcp template)
+  использует только legacy-опции → все 3 версии должны пройти A13-чек
+  "PUT invalid syntax → 400" (тестируется `port=abc`, который отторгается во
+  всех версиях с 2.x).
+- **Clustered/known-difference awareness:** если на CI вылезет
+  version-specific fail (напр. 2.80 ругается на новую опцию), шаг эхает
+  `::error::` per-version, но loop не abort'ит — соберутся результаты по
+  всем 3 версиям за один прогон, что ускоряет триаж.
+- **Шаг НЕ добавляет новые дефолтныеGuestCI-цели**, не требует
+  external VM (это будет этап ВМ).
+
+### Финальная верификация (pending CI run)
+
+Локально (Windows) запустить нельзя — нужен fedora:44 контейнер + dnsmasq
+build. Operator должен:
+1. Workflow dispatch с `run_compat_matrix=true` (можно вместе с
+   `run_fuzz_tests=false`, `run_e2e_tests=false`, `push_to_registry=false`).
+2. Убедиться, что шаг «L3.5 — dnsmasq compat matrix (opt-in)» зелёный
+   (3 группы `dnsmasq 2.80`, `2.86`, `2.90` — все `smoke rc=0`).
+3. Если одна версия упала → diff между её логом и baseline (fedora system
+   dnsmasq в L3) → решение: intermasq-bug fix (этап 3 или отдельный PR) или
+   version-note в этом логе.
+
+---

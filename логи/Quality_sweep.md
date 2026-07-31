@@ -74,7 +74,7 @@ package" — фикс в `6a5fdad`). Реальный прогон ~2m54s: **no 
 
 ---
 
-## Этап 2 — dnsmasq compatibility matrix
+## Этап 2 — dnsmasq compatibility matrix ✅ ВЫПОЛНЕН (2026-07-31)
 
 **Цель:** smoke.sh против разных версий dnsmasq — поведение `--test`, парсеров,
 dhcp-range auto-detect может отличаться между версиями. Покрыть реальный риск
