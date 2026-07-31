@@ -52,91 +52,25 @@ npm/go/rpm через прокси Nora. Один package `main`.
 
 ---
 
-## Этап 4 — Go mutation-testing (СДЕЛАТЬ ПЕРВЫМ)
+## Этап 4 — Go mutation-testing ✅ ВЫПОЛНЕН (2026-07-31)
 
-**Цель:** эмпирически доказать, что Go-тесты **ловят** мутации, а не просто
-пробегают строки (statement-coverage ≠ quality). Аналог frontend mutation-pass
-из `логи/gap2-mutation-pass.md`, но для backend.
-
-**Подход — РУЧНЫЕ point-мутации (без внешнего инструмента):** на throwaway-ветке
-`mutation-go` (НЕ в main, удалить после), для каждой мутации: измени 1 строку в
-продуктовом `.go`, запусти `go test ./...`, запиши какой тест упал (killed) или
-не упал (survived = слабый тест → добавить regression-тест). `go-mutesting`
-ОПЦИОНАЛЕН если доступен; ручной подход детерминирован и не требует dep'ов.
-
-**Что мутировать (представительный набор, по доменам):**
-- `dnsmasq.go:116 parseDhcpHostLine` — напр. `macRegex.MatchString(p)` → `!...`,
-  или убрать `if entry.Mac=="" {return false}`.
-- `dnsmasq.go:391 validateHostFields` — zero/broadcast blacklist `EqualFold` →
-  убрать одну пару; off-by-one в лимите.
-- `dnsmasq.go:382 normalizeMAC` — `-`→`:` замену сделать no-op.
-- `aliases.go:57 parseAliasLine` — `entry.Domain==""` → `!=`; `slash<0` → `<=0`.
-- `handlers_hosts.go:56 addHostHandler` — убрать `isSafePath`/duplicate-чек.
-- `handlers_aliases.go:60 addAliasHandler` — `findAliasesByDomain(...)` вернуть
-  self-exclude (A2-регрессия).
-- `auth.go:92 rateLimitMiddleware` — лимит `10` → `1000` (должен упасть rate-тест).
-
-**Правила:** 1 мутируемая строка за раз; `go vet`+`go test` после каждой;
-предсказывай failure-режим ДО запуска; каждая мутация должна ронять РОВНО
-ожидаемые тесты (без повсеместного падения = коллатерал = либо мутация слишком
-крупная, либо тесты хрупкие). Survived-мутации → **добавить regression-тест** в
-`_test.go` (это полезный артефакт; коммитить ТОЛЬКО regression-тесты, не сами
-мутации). Мутации в main НЕ мержатся.
-
-**Верификация:** ветка `mutation-go`: `go test ./...` зелёный на base, красный
-ровно на ожидаемых тестах при каждой мутации. Regression-тести (из survived)
-закоммить в main отдельно + `go test` зелёный.
-**Knock-on:** не трогай продуктовый код — только временные мутации на ветке +
-новые `_test.go` кейсы в main. Запиши таблицу «мутация | expected spec |
-killed/survived» в session-лог `логи/quality-sweep.md` (этап 4).
-**Artefact в конец лога:** список survived-мутаций + каких regression-тестов
-добавлено.
+12 мутаций: **9 killed, 2 survived→regressed** (R2/R3 в `dnsmasq_test.go`,
+коммит `f8fd404`), 1 equivalent. Полную матрицу и артефакты см. в
+`логи/quality-sweep.md` (раздел «Этап 4»).
 
 ---
 
-## Этап 1 — Fuzz opt-in CI + реальный прогон
+## Этап 1 — Fuzz opt-in CI + реальный прогон ✅ ВЫПОЛНЕН (2026-07-31)
 
-**Цель:** добавить opt-in CI-шаг `run_fuzz_tests` (по образцу `run_e2e_tests`),
-запустить реальный `-fuzz` (не только seed'ы из `f.Add`) и разобрать crash'и,
-которые statement-coverage **не видит**.
-
-**Файлы:** `.forgejo/workflows/build.yml` (+input +step); `fuzz_test.go` (4
-target'а уже есть: `FuzzParseDhcpHostLine`, `FuzzParseArpContent`,
-`FuzzParseAliasLine`, `FuzzParseLeasesContent`).
-
-**Шаг 1 — CI input.** В `workflow_dispatch.inputs` (~строки 26-30) добавить:
-```yaml
-      run_fuzz_tests:
-        description: "Run Go fuzz targets (each 30s, opt-in)?"
-        required: true
-        default: false
-        type: boolean
-```
-**Шаг 2 — opt-in step** (после L1+L2 Go tests, ~после строки 126), по образцу
-`run_e2e_tests` (`if: success() && github.event.inputs.run_fuzz_tests == 'true'`):
-```yaml
-      - name: Fuzz parsers (opt-in, time-bounded)
-        if: success() && github.event.inputs.run_fuzz_tests == 'true'
-        run: |
-          for target in FuzzParseDhcpHostLine FuzzParseArpContent FuzzParseAliasLine FuzzParseLeasesContent; do
-            echo "::group::fuzz $target (30s)"
-            go test -run='^$' -fuzz="^${target}$" -fuzztime=30s ./...
-            echo "::endgroup::"
-          done
-```
-`-run='^$'` отключает обычные тесты; `-fuzztime=30s` — бюджет на target. Crash'и
-Go сам сохраняет в `testdata/fuzz/<FuzzName>/` — ЗАКОМММИТЬ их (это regression-корпус).
-**Шаг 3 — триаж.** Запусти opt-in (`run_fuzz_tests=true`). Если crash:
-1. воспроизвести локально/в логе, понять root (panic/бесконечный цикл/nil-deref).
-2. фикс парсера (минимальный) + кейс уже в `testdata/fuzz/`.
-3. `go test ./...` зелёный (seed-режим прогонит новый кейс как unit).
-Если crash'ей нет — зафиксируй «no crash found in 4×30s» в логе.
-
-**Верификация:** дефолтный CI не меняется (opt-in). Opt-in прогон: 4 target'а ×
-30s, без crash ИЛИ crash → фикс+корпус. `go vet`/`go test` зелёный.
-**Knock-on:** fixation парсера = продуктовая правка — `go vet` обязателен;
-поведение парсеров «принимают мусор как ok=false» НЕ должно сломаться (см.
-`fuzz_test.go` oracle: «не паникует + инварианты на успех»).
+Добавлен opt-in CI-шаг `run_fuzz_tests` (build.yml:31-35, 133-159) по образцу
+`run_e2e_tests`: 4 target'а (`FuzzParseDhcpHostLine`, `FuzzParseArpContent`,
+`FuzzParseAliasLine`, `FuzzParseLeasesContent`) × 30s в реальном `-fuzz` режиме
+на одиночном пакете `.` (`./...` роняет go с "fuzz testing requires a single
+package" — фикс в `6a5fdad`). Реальный прогон ~2m54s: **no crash found in
+4×30s**, regression-корпус `testdata/fuzz/` пуст (норма — парсеры толерантны к
+мусору). Коммиты: `a2b0edc` (input+step), `6a5fdad` (fix `.` + verbose triage),
+`bc7ab0c` (лог). Полную сводку см. в `логи/quality-sweep.md` (раздел «Этап 1»).
+Дефолтный CI не затронут (opt-in); продуктовый код не тронут.
 
 ---
 
