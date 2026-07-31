@@ -36,7 +36,14 @@ KNOWN_BUGS_LIST=""
 
 init_state() {
     if [ -f "$KNOWN_BUGS_FILE" ]; then
-        while IFS= read -r _line; do
+        # `read` returns failure on a final line lacking a trailing newline
+        # (a common Windows-editor artifact); the `|| [ -n "$_line" ]`
+        # guard processes that last line anyway. Without it, the trailing
+        # entry is silently dropped from KNOWN_BUGS and the corresponding
+        # smoke check becomes a loud FAIL instead of KNOWN — observed in
+        # the dnsmasq compat-matrix (этап 2) where known-bugs.txt ended
+        # on the A15 line with no newline.
+        while IFS= read -r _line || [ -n "$_line" ]; do
             _line="${_line%%#*}"                # strip comments
             _line="$(echo "$_line" | xargs)"    # trim whitespace
             [ -z "$_line" ] && continue
