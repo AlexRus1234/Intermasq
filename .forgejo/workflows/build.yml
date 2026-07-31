@@ -260,20 +260,18 @@ jobs:
           # NOT suppressed: if this fails we want the reason in the log, not
           # a silent fast-fail of every `make -C` below (Nora repo has
           # priority=1 and can shadow the fedora repo for overlapping pkgs).
-          echo "::group::Install dnsmasq build dep (make)"
+          echo "===== Install dnsmasq build dep (make) ====="
           if ! command -v make >/dev/null 2>&1; then
             dnf install -y --setopt=install_weak_deps=False make
             MAKE_INSTALL_RC=$?
             if [ "$MAKE_INSTALL_RC" -ne 0 ]; then
               echo "::error::dnf install make failed (rc=$MAKE_INSTALL_RC) — compat-matrix cannot build dnsmasq"
-              echo "::endgroup::"
               exit 1
             fi
           else
             echo "make already present: $(command -v make)"
           fi
           make --version | head -n 1
-          echo "::endgroup::"
 
           # dnsmasq ≤2.90 declares iface_enumerate's callback as `int ()`
           # (K&R, untyped) and calls it with typed args. Two gcc-14+ strictness
@@ -297,7 +295,12 @@ jobs:
 
           COMPAT_TOTAL_RC=0
           for DNSMASQ_VERSION in 2.80 2.86 2.90; do
-            echo "::group::dnsmasq ${DNSMASQ_VERSION}"
+            # NOTE: deliberately NOT using ::group:: here — when a version
+            # fails the Forgejo UI collapses the group by default and the
+            # actual build/smoke error is hidden, forcing a retry just to
+            # see the message. Top-level `===== banner =====` lines keep
+            # everything visible in the flat log without collapsing.
+            echo "===== dnsmasq ${DNSMASQ_VERSION} ====="
             TBALL="/tmp/dnsmasq-${DNSMASQ_VERSION}.tar.gz"
             SRC_DIR="/tmp/dnsmasq-${DNSMASQ_VERSION}"
             # Upstream mirror: http://thekelleys.org.uk/dnsmasq/. Public CA,
@@ -306,7 +309,6 @@ jobs:
             if ! curl -fsSL "https://thekelleys.org.uk/dnsmasq/dnsmasq-${DNSMASQ_VERSION}.tar.gz" -o "$TBALL"; then
               echo "::error::dnsmasq ${DNSMASQ_VERSION}: download failed (curl rc=$?)"
               COMPAT_TOTAL_RC=1
-              echo "::endgroup::"
               continue
             fi
             ls -lh "$TBALL"
@@ -314,9 +316,9 @@ jobs:
             tar -C /tmp -xzf "$TBALL"
             # Top-level Makefile delegates to src/; default target builds
             # src/dnsmasq. Output inlined (not redirected) so build errors
-            # appear directly in the group. COPTS on the make command line is
-            # propagated to the sub-make via MAKEFLAGS so src/Makefile sees it
-            # too. Capture make's exit code explicitly (NOT via `! cmd`
+            # appear directly in the log. COPTS on the make command line is
+            # propagated to the sub-make via MAKEFLAGS so src/Makefile sees
+            # it too. Capture make's exit code explicitly (NOT via `! cmd`
             # which masks $?).
             echo "-> make -C $SRC_DIR -j2 COPTS=\"$DNSMASQ_COPTS\""
             make -C "$SRC_DIR" -j2 COPTS="$DNSMASQ_COPTS"
@@ -324,7 +326,6 @@ jobs:
             if [ "$MAKE_RC" -ne 0 ]; then
               echo "::error::dnsmasq ${DNSMASQ_VERSION} build failed (make rc=$MAKE_RC)"
               COMPAT_TOTAL_RC=1
-              echo "::endgroup::"
               continue
             fi
             DNSMASQ_BIN_PATH="$SRC_DIR/src/dnsmasq"
@@ -332,7 +333,6 @@ jobs:
               echo "::error::dnsmasq ${DNSMASQ_VERSION}: build produced no executable at $DNSMASQ_BIN_PATH"
               ls -la "$SRC_DIR/src/" || true
               COMPAT_TOTAL_RC=1
-              echo "::endgroup::"
               continue
             fi
             chmod 0755 "$DNSMASQ_BIN_PATH"
@@ -378,7 +378,7 @@ jobs:
               echo "::error::smoke vs dnsmasq ${DNSMASQ_VERSION}: rc=$SMOKE_RC (unexpected failures — see suite output above)"
               COMPAT_TOTAL_RC=1
             fi
-            echo "::endgroup::"
+            echo "===== dnsmasq ${DNSMASQ_VERSION} done ====="
           done
 
           if [ "$COMPAT_TOTAL_RC" -ne 0 ]; then
