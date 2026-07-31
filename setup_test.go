@@ -23,9 +23,10 @@ package main
 // left uncovered (§6).
 //
 // Caveat: setupServer spawns the SSE and DNS-health goroutines as a side
-// effect. They sleep on multi-second/minute tickers and never block the
-// test process from exiting, so this is acceptable for a single
-// short-lived test.
+// effect. They are neutralized here via the startSSEBroadcasterFn /
+// startDNSHealthCheckerFn indirection seams (main.go) because the real
+// goroutines read the same flag-owned paths the test cleanup restores
+// concurrently — a data race under `-race`.
 
 import (
 	"os"
@@ -38,10 +39,17 @@ import (
 
 // withSandboxFlags reroutes every package-level path flag / dir that
 // setupServer touches at temp locations and restores the originals on
-// cleanup. Returns the sandbox root.
+// cleanup. It also neutralizes the long-lived background goroutines
+// (SSE broadcaster + DNS-health checker) that setupServer would otherwise
+// spawn: those read the same flag-owned paths the cleanup restores, which
+// is a data race under `-race`. Returns the sandbox root.
 func withSandboxFlags(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
+	origSSE := startSSEBroadcasterFn
+	origDNS := startDNSHealthCheckerFn
+	startSSEBroadcasterFn = func() {}
+	startDNSHealthCheckerFn = func() {}
 	orig := struct {
 		DBPath, TemplatesPath, HistoryDir, ConfigDir, ArpPath, LeasesPath *string
 		InitSystem, SystemdScope                                          *string
@@ -72,6 +80,8 @@ func withSandboxFlags(t *testing.T) string {
 	*SystemdScope = ""
 	loadedPlugins = nil
 	t.Cleanup(func() {
+		startSSEBroadcasterFn = origSSE
+		startDNSHealthCheckerFn = origDNS
 		*DBPath = *orig.DBPath
 		*TemplatesPath = *orig.TemplatesPath
 		*HistoryDir = *orig.HistoryDir
@@ -203,6 +213,16 @@ func TestSetupServer_LegacySystemdScopeWarning(t *testing.T) {
 }
 
 func TestSetupServer_HistoryDirFail(t *testing.T) {
+	// Neutralize the long-lived background goroutines for the same reason
+	// as withSandboxFlags (see its comment).
+	origSSE := startSSEBroadcasterFn
+	origDNS := startDNSHealthCheckerFn
+	startSSEBroadcasterFn = func() {}
+	startDNSHealthCheckerFn = func() {}
+	t.Cleanup(func() {
+		startSSEBroadcasterFn = origSSE
+		startDNSHealthCheckerFn = origDNS
+	})
 	// Make ensureHistoryDir fail by pointing *HistoryDir at a path whose
 	// parent is a regular file.
 	tmp := t.TempDir()

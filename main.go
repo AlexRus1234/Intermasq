@@ -116,6 +116,18 @@ func init() {
 	}
 }
 
+// startSSEBroadcasterFn / startDNSHealthCheckerFn are the launch points for
+// the long-lived background goroutines started by setupServer. They are
+// package vars (indirection seams) so tests can swap them to no-ops while
+// exercising the bootstrap (TestSetupServer_*): the real goroutines read
+// flag-owned paths (*ConfigDir / *ArpPath / ...) that test cleanup restores
+// concurrently, which is a data race under `-race`. Production bootstrap
+// keeps using the real starters.
+var (
+	startSSEBroadcasterFn   = startSSEBroadcaster
+	startDNSHealthCheckerFn = startDNSHealthChecker
+)
+
 func loadPlugins(r *gin.Engine) {
 	os.MkdirAll(SocketsDir, 0770)
 
@@ -229,8 +241,8 @@ func setupServer() (*gin.Engine, error) {
 	r := gin.Default()
 
 	loadPlugins(r)
-	startSSEBroadcaster()
-	startDNSHealthChecker()
+	startSSEBroadcasterFn()
+	startDNSHealthCheckerFn()
 
 	// /metrics is exposed outside the /api group so Prometheus can scrape it
 	// at the conventional URL. Authentication is handled inside the handler
