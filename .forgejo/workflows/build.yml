@@ -276,18 +276,24 @@ jobs:
           echo "::endgroup::"
 
           # dnsmasq ≤2.90 declares iface_enumerate's callback as `int ()`
-          # (K&R, untyped) and passes typed function pointers. gcc 13- warned,
-          # gcc 14+ (Fedora 44 ships gcc 15) makes -Wincompatible-pointer-types
-          # an error by default → every src-build of <2.91 dies in network.c.
-          # dnsmasq's Makefile uses `COPTS =` (plain assignment, overrides env
-          # vars), so exporting COPTS has no effect: verified in the first run
-          # where the cc command line showed only `-Wall -W -O2 -DVERSION`
-          # with the `-Wno-error=*` flags missing. Passing COPTS on the make
-          # command line DOES override Makefile assignments (gnu make
-          # precedence: cmdline > makefile > env). Vanilla behaviour
-          # preserved; only the gcc-14 strictness policy is relaxed for the
-          # old sources.
-          DNSMASQ_COPTS="-Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration"
+          # (K&R, untyped) and calls it with typed args. Two gcc-14+ strictness
+          # changes bite on Fedora 44 (gcc 15):
+          #   1. -Wincompatible-pointer-types / -Wint-conversion /
+          #      -Wimplicit-function-declaration became ERRORS by default
+          #      (gcc 14 escalation, not via -Werror).
+          #   2. gcc 15 default std is gnu23, where `int ()` == `int (void)`
+          #      (C23 change). Calling through `int (*)()` with args is a
+          #      HARD constraint violation — no -W flag controls it; the
+          #      only fix is reverting the C standard. Hence `-std=gnu17`
+          #      makes `()` mean "no info about params" again and the call
+          #      is legal C.
+          # dnsmasq's Makefile uses `COPTS =` (plain assignment, env doesn't
+          # override — verified in the first run where the cc command line
+          # showed only `-Wall -W -O2 -DVERSION` with the `-Wno-error=*`
+          # flags missing). Passing COPTS on the make command line DOES
+          # override Makefile assignments (gnu make precedence:
+          # cmdline > makefile > env).
+          DNSMASQ_COPTS="-std=gnu17 -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration"
 
           COMPAT_TOTAL_RC=0
           for DNSMASQ_VERSION in 2.80 2.86 2.90; do
