@@ -2216,6 +2216,63 @@ func TestAddHostHandlerIPDuplicateStillChecked(t *testing.T) {
 	}
 }
 
+// TestAddHostHandlerRejectsUnsafeFile (mutation-go M8 regression) — the
+// isSafePath guard at the top of addHostHandler must reject a file outside
+// ConfigDir with 400 invalid_data, before any field validation runs.
+func TestAddHostHandlerRejectsUnsafeFile(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+
+	cases := []struct{ name, file string }{
+		{"absolute_outside", "/etc/passwd"},
+		{"traversal", filepath.Join(dir, "..", "evil.conf")},
+	}
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		body := fmt.Sprintf(`{"mac":"aa:bb:cc:dd:ee:ff","file":%q}`, tc.file)
+		c.Request = httptest.NewRequest("POST", "/api/hosts", strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Set("user", "admin")
+		addHostHandler(c)
+		if w.Code != 400 {
+			t.Errorf("%s: expected 400 for unsafe file %q, got %d: %s", tc.name, tc.file, w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "invalid_data") {
+			t.Errorf("%s: expected invalid_data body, got: %s", tc.name, w.Body.String())
+		}
+	}
+}
+
+// TestAddHostHandlerMACDuplicateRejected (mutation-go M9 regression) —
+// adding a host whose MAC already exists in the target file must return
+// 409 mac_duplicate and must not overwrite the existing entry. IP is
+// omitted so the IP-duplicate branch cannot mask the MAC check.
+func TestAddHostHandlerMACDuplicateRejected(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	file := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(file, []byte("dhcp-host=aa:bb:cc:dd:ee:ff,existing\n"), 0644)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := fmt.Sprintf(`{"mac":"aa:bb:cc:dd:ee:ff","hostname":"new","file":%q}`, file)
+	c.Request = httptest.NewRequest("POST", "/api/hosts", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	addHostHandler(c)
+	if w.Code != 409 {
+		t.Fatalf("expected 409 for MAC conflict, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "mac_duplicate") {
+		t.Errorf("expected mac_duplicate body, got: %s", w.Body.String())
+	}
+	content, _ := os.ReadFile(file)
+	if !strings.Contains(string(content), "dhcp-host=aa:bb:cc:dd:ee:ff,existing\n") {
+		t.Errorf("existing entry should be preserved on MAC conflict:\n%s", content)
+	}
+}
+
 // TestNormalizeMAC (A4) confirms dash-separated MACs become colon-separated.
 func TestNormalizeMAC(t *testing.T) {
 	cases := []struct{ in, want string }{
