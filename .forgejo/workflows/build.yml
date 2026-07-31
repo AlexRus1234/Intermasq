@@ -257,8 +257,22 @@ jobs:
           echo
 
           # dnsmasq's Makefile needs `make`; the base image only pulls in gcc.
+          # NOT suppressed: if this fails we want the reason in the log, not
+          # a silent fast-fail of every `make -C` below (Nora repo has
+          # priority=1 and can shadow the fedora repo for overlapping pkgs).
           echo "::group::Install dnsmasq build dep (make)"
-          dnf install -y --setopt=install_weak_deps=False make >/dev/null 2>&1
+          if ! command -v make >/dev/null 2>&1; then
+            dnf install -y --setopt=install_weak_deps=False make
+            MAKE_INSTALL_RC=$?
+            if [ "$MAKE_INSTALL_RC" -ne 0 ]; then
+              echo "::error::dnf install make failed (rc=$MAKE_INSTALL_RC) — compat-matrix cannot build dnsmasq"
+              echo "::endgroup::"
+              exit 1
+            fi
+          else
+            echo "make already present: $(command -v make)"
+          fi
+          make --version | head -n 1
           echo "::endgroup::"
 
           COMPAT_TOTAL_RC=0
@@ -268,27 +282,35 @@ jobs:
             SRC_DIR="/tmp/dnsmasq-${DNSMASQ_VERSION}"
             # Upstream mirror: http://thekelleys.org.uk/dnsmasq/. Public CA,
             # reachable from the container the same way go.dev is.
-            curl -fsSL "https://thekelleys.org.uk/dnsmasq/dnsmasq-${DNSMASQ_VERSION}.tar.gz" -o "$TBALL"
-            if [ "$?" -ne 0 ]; then
-              echo "::error::dnsmasq ${DNSMASQ_VERSION}: download failed"
+            echo "-> curl https://thekelleys.org.uk/dnsmasq/dnsmasq-${DNSMASQ_VERSION}.tar.gz"
+            if ! curl -fsSL "https://thekelleys.org.uk/dnsmasq/dnsmasq-${DNSMASQ_VERSION}.tar.gz" -o "$TBALL"; then
+              echo "::error::dnsmasq ${DNSMASQ_VERSION}: download failed (curl rc=$?)"
               COMPAT_TOTAL_RC=1
               echo "::endgroup::"
               continue
             fi
+            ls -lh "$TBALL"
             rm -rf "$SRC_DIR"
             tar -C /tmp -xzf "$TBALL"
             # Top-level Makefile delegates to src/; default target builds
-            # src/dnsmasq. COPTS empty — vanilla build.
-            make -C "$SRC_DIR" -j2 >/tmp/dnsmasq-${DNSMASQ_VERSION}-build.log 2>&1
-            MAKE_RC=$?
-            if [ "$MAKE_RC" -ne 0 ]; then
-              echo "::error::dnsmasq ${DNSMASQ_VERSION} build failed (rc=$MAKE_RC):"
-              tail -n 40 /tmp/dnsmasq-${DNSMASQ_VERSION}-build.log
+            # src/dnsmasq. COPTS empty — vanilla build. Output inlined (not
+            # redirected to a file) so version-specific build errors show up
+            # directly in the group, no separate tail step needed.
+            echo "-> make -C $SRC_DIR -j2"
+            if ! make -C "$SRC_DIR" -j2; then
+              echo "::error::dnsmasq ${DNSMASQ_VERSION} build failed (make rc=$?)"
               COMPAT_TOTAL_RC=1
               echo "::endgroup::"
               continue
             fi
             DNSMASQ_BIN_PATH="$SRC_DIR/src/dnsmasq"
+            if [ ! -x "$DNSMASQ_BIN_PATH" ]; then
+              echo "::error::dnsmasq ${DNSMASQ_VERSION}: build produced no executable at $DNSMASQ_BIN_PATH"
+              ls -la "$SRC_DIR/src/" || true
+              COMPAT_TOTAL_RC=1
+              echo "::endgroup::"
+              continue
+            fi
             chmod 0755 "$DNSMASQ_BIN_PATH"
             echo "Built: $DNSMASQ_BIN_PATH"
             "$DNSMASQ_BIN_PATH" --version | head -n 2
