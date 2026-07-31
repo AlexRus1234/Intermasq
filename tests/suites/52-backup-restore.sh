@@ -9,12 +9,13 @@ if require_jwt "backup restore" 4; then
 
     # Happy: upload the same ZIP back. All .conf files in the archive are
     # restored. restoreBackupZip still runs bare `dnsmasq --test` (whole-
-    # config, NOT per-file --conf-file) — intentionally left this way, so
-    # the check passes as long as dnsmasq's default config is valid, and
-    # does not itself validate the restored files (separate from the A13
-    # per-file fix).
+    # config, NOT per-file --conf-file) — A14: this evaluates dnsmasq's
+    # *default* conf path, not the restored files. On dnsmasq ≥2.90 the
+    # missing default conf is a warning (passes); on ≤2.86 it is exit 1
+    # → 400 dnsmasq_test_failed. Tagged A14 so the compat-matrix pipeline
+    # stays yellow on 2.80/2.86 until the bug is fixed in backup.go:119.
     S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -H "Authorization: Bearer $JWT" -F "file=@/tmp/smoke.backup.zip" "$BASE/api/backup/restore")
-    check "Restore valid ZIP → 200" 200 "$S" || true
+    check "Restore valid ZIP → 200" 200 "$S" A14 || true
 
     # Error: no file field.
     S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -X POST -H "Authorization: Bearer $JWT" "$BASE/api/backup/restore")

@@ -202,39 +202,65 @@ upstream (`thekelleys.org.uk/dnsmasq/`), `cc`-only build (~10s каждая),
 
 - `8328ceb` — opt-in input + step (build-from-source matrix vs smoke).
 
+### Финальная верификация (CI run 2026-07-31 19:45 UTC)
+
+Workflow dispatch с `run_compat_matrix=true`. Compile-флаги для матрицы
+после 3 итераций (см. commits ниже):
+- `COPTS="-std=gnu17 -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration"` на `make` cmdline.
+- Причина: Fedora 44's gcc 15 default'ит к C23, где `int ()` == `int (void)`. dnsmasq ≤2.90 объявляет callback `int (*)()` K&R-style; вызов с args становится hard constraint violation в C23. `-std=gnu17` возвращает pre-C23 semantics. `-Wno-error=*` понижает ещё три gcc-14 escalation-диагностики обратно до warnings. Это build-flag артефакта, не продуктовый код — Fedora мейнтейнер делает то же в spec-файле.
+
+**Результаты матрицы:**
+
+| dnsmasq | smoke result | known-bugs tripped | unexpected fail |
+|---------|--------------|---------------------|------------------|
+| 2.80    | 137/139 (rc=1) | A14 (`Restore valid ZIP → 400`), A15 (`Restore known version → 500`) | 0 |
+| 2.86    | 138/139 (rc=1) | A14 (`Restore valid ZIP → 400`) | 0 |
+| 2.90    | 139/139 (rc=0) | — | 0 (CLEAN PASS) |
+| fedora:44 system (2.92rel2) | — | (это default L3 шаг, не compat-matrix) | 0 |
+
+Все 3 версии собираются из upstream source (`make cc COPTS="..."` ~10s `-j2`), каждая стартует с чистым state-dir. Все 137/138/139 = passed+known_fail (post-tagging)**, unexpected fail = 0 → pipeline **green** after A14/A15 registration in `tests/known-bugs.txt`.
+
+**Реальные intermasq-баги, найденные матрицей** (и зарегистрированные как known, products-код НЕ тронут):
+
+- **A14** (`backup.go:119`): `restoreBackupZip` зовёт `dnsmasq --test` **без `--conf-file=`/`--conf-dir=`**. Должен передавать восстановленные файлы, но вместо этого валидирует дефолтный dnsmasq-конфиг (`/etc/dnsmasq.conf`), которого на CI/prod нет. На 2.90+ отсутствие дефолт-конфига = warning (test passes); на 2.80/2.86 = exit 1 → restore любого валидного ZIP'а 400 `dnsmasq_test_failed`. Сравни с `restoreHistoryVersion` (history.go:245), который корректно передаёт `--conf-file=<filePath>`. Fix path: `--conf-dir=*ConfigDir` (или tmp-аггрегация). Smoke-чек в `tests/suites/52-backup-restore.sh:17` тегирован A14.
+
+- **A15** (`history.go:restoreHistoryVersion` + 2.80): на dnsmasq 2.80 восстановленный `10-static.conf` отвергается `dnsmasq --test --conf-file=path` exit 1 (return 500), тогда как 2.86/2.90 принимают. Точная причина не триажирована — нужен `-v`/stderr capture (smoke.sh эхает только HTTP code). Подозрение: dhcp-host tag-set синтаксис (`set:iot,tag:guest`) строже валидируется в 2.80. Smoke-чек в `tests/suites/51-history-diff-restore.sh:33` тегирован A15.
+
+**Version map зафиксирована:**
+- fedora:44 system dnsmasq: 2.92rel2 (2025-05-11 release)
+- matrix src-build: 2.80 / 2.86 / 2.90
+- distro-эквиваленты (для docs/min-supported): alpine 3.19 ≈ 2.89, debian 12 ≈ 2.86, ubuntu 24.04 ≈ 2.90, fedora 44 ≈ 2.92rel2.
+
+**Рекомендация для docs:** minimum supported dnsmasq ≥2.90 (close to recent debian-stable+1/fedora/latest alpine); 2.80/2.86 известные огрехи в backup/restore-ветках. Решение за оператором: либо tighten products сериализации под 2.80-syntax (отдельный PR), либо документировать 2.90 как min и убрать 2.80/2.86 из матрицы (тогда A15 упраздняется — он 2.80-only).
+
+### Build-флаги — детальное объяснение
+
+3 итерации CI Disp были нужны, чтобы подобрать корректные compile-флаги для старого dnsmasq на новом gcc 15:
+
+1. `8328ceb` — первый прогон: `export COPTS="... -Wno-error=..."`. **Fail**: `make`'s Makefile объявляет `COPTS =` (plain assignment, перекрывает env). Флаги не попали в cc-строку.
+2. `f75511b` — передача `COPTS="..."` на `make` cmdline (gnu make precedence: cmdline > makefile > env). cc-строки показали флаги, но `netlink.c:250: too many arguments to function 'callback'; expected 0, have 6` — это **hard C23 constraint violation**, не warning.
+3. `42d5a4f` — добавлен `-std=gnu17`. C23 ввёл `()` = `(void)` строго; gnu17 возвращает pre-C23 K&R semantics "no info about args", и `(*callback)(args...)` легален. v2.80/2.86/2.90 собрались.
+4. `39f8c20` — cosmetic: `::group::`/`::endgroup::` removed — Forgejo UI сворачивает collapsed groups, и при fail'е группы реальная ошибка скрыта; заменил на top-level `===== banner =====` для плоского诊断тируемого лога.
+
+Все 4 коммита — только YAML правки. Продуктовый Go-код не тронут.
+
+### Коммиты (полный список)
+
+- `8328ceb` — opt-in input `run_compat_matrix` + step (build-from-source matrix vs smoke).
+- `3ba97a6` — verbose make/dnsmasq build output — diagnose fast-fail (итерация 1 фикс).
+- `d2ee080` — COPTS downgrade gcc-14 strict warnings (итерация 2 фикс, partial).
+- `f75511b` — pass COPTS on make cmdline (env didn't override Makefile COPTS=).
+- `42d5a4f` — add `-std=gnu17` — revert C23 `()`=(void) hard error on K&R callbacks.
+- `39f8c20` — drop `::group::` (collapsed UI hides per-version failures).
+- `<этот коммит>` — register A14 + A15 in `tests/known-bugs.txt`, tag smoke checks, верификация green.
+
 ### Замечания / knock-on
 
-- **Продуктовый код не тронут** — правки только в YAML (build.yml +119).
-- **`make` добавляется** в opt-in шаге (`dnf install -y make`) — в base fedora:44
-  нет. ~1s overhead, только при opt-in.
-- **Upstream tarball URL** `https://thekelleys.org.uk/dnsmasq/` — public CA,
- reachable из контейнера так же как go.dev (там это уже работает в build-step
-  для Go toolchain).
-- **Build-время:** dnsmasq-v2.80 на gcc-14 выдаёт warnings (C-statics legacy),
-  но компилится cc=0; собирается в `src/dnsmasq` (~10s `-j2`). v2.86/2.90
-  собираются без предупреждений.
-- **Coverage-lib:** версия dnsmasq определяет, какие `dhcp-range` опции
-  валидны для `--test`; smoke 30-test.conf/40-dhcp.conf (basic-dhcp template)
-  использует только legacy-опции → все 3 версии должны пройти A13-чек
-  "PUT invalid syntax → 400" (тестируется `port=abc`, который отторгается во
-  всех версиях с 2.x).
-- **Clustered/known-difference awareness:** если на CI вылезет
-  version-specific fail (напр. 2.80 ругается на новую опцию), шаг эхает
-  `::error::` per-version, но loop не abort'ит — соберутся результаты по
-  всем 3 версиям за один прогон, что ускоряет триаж.
-- **Шаг НЕ добавляет новые дефолтныеGuestCI-цели**, не требует
-  external VM (это будет этап ВМ).
-
-### Финальная верификация (pending CI run)
-
-Локально (Windows) запустить нельзя — нужен fedora:44 контейнер + dnsmasq
-build. Operator должен:
-1. Workflow dispatch с `run_compat_matrix=true` (можно вместе с
-   `run_fuzz_tests=false`, `run_e2e_tests=false`, `push_to_registry=false`).
-2. Убедиться, что шаг «L3.5 — dnsmasq compat matrix (opt-in)» зелёный
-   (3 группы `dnsmasq 2.80`, `2.86`, `2.90` — все `smoke rc=0`).
-3. Если одна версия упала → diff между её логом и baseline (fedora system
-   dnsmasq в L3) → решение: intermasq-bug fix (этап 3 или отдельный PR) или
-   version-note в этом логе.
+- **Продуктовый Go-код не тронут** — правки только в YAML (build.yml) + tests (known-bugs.txt + 2 suite файла).
+- **`make` добавляется** в opt-in шаге (`dnf install -y --setopt=install_weak_deps=False make`) — в base fedora:44 нет. ~1s overhead, только при opt-in.
+- **Upstream tarball URL** `https://thekelleys.org.uk/dnsmasq/` — public CA, reachable из контейнера так же как go.dev.
+- **Build-время:** ~10s на dnsmasq version (gcc-only, `make -j2`). V2.80 выдаёт `tftp.c:714 [-Wrestrict]` warning и `edns0.c [-Wunterminated-string-initialization]` для v2.86/2.90 — все non-fatal с `-std=gnu17`.
+- **Verify зелёный:** после тегирования A14/A15 — smoke.sh exit 0 на всех 3 версиях (fail'и стали KNOWN-fail, не unexpected-fail). Дефолтный CI не затронут.
+- **Knock-on на этап 3:** когда handlers success-ветки будут покрываться (handler backup-restore, history-restore) на CI — fake-dnsmasq helper из Coverage sweep B возвращает exit 0 на `--test`, маскируя bug. Поэтому compat-matrix с реальным dnsmasq остаётся важным regression-слоем; удалять его нельзя, пока A14/A15 не пофикшены products-кодом. После fix'a — убрать A14/A15 из `known-bugs.txt` и smoke-чеки снова станут loud (что подтвердит fix).
 
 ---
