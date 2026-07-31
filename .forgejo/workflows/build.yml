@@ -33,6 +33,11 @@ on:
         required: true
         default: false
         type: boolean
+      run_compat_matrix:
+        description: "Run smoke.sh vs 3 dnsmasq versions built from upstream source (opt-in)?"
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   build-test:
@@ -221,6 +226,120 @@ jobs:
             echo "::error::smoke.sh returned $SMOKE_RC (unexpected failures present)"
             exit 1
           fi
+
+      - name: L3.5 — dnsmasq compat matrix (opt-in)
+        # Builds 3 dnsmasq versions (2.80 / 2.86 / 2.90) from upstream source
+        # tarballs and runs the full smoke.sh suite against each, pointing
+        # intermasq-ci at the freshly-built binary via -dnsmasq-bin. This
+        # exercises the version-sensitive paths (writeConfigWithTest →
+        # `dnsmasq --test --conf-file=`, parseDhcpRange auto-detect, the
+        # 40-config-files.sh "invalid syntax → 400" check = A13 territory)
+        # against real dnsmasq binaries spanning 2018→2024.
+        #
+        # Why build-from-source (not docker-in-docker): the runner itself
+        # lives in a fedora:44 container, so nested `docker run` is not
+        # available. A single static intermasq-ci + 3 downloaded dnsmasq
+        # tarballs (CC-only build, ~10s each) inside the same container is
+        # the simplest reliable matrix. The fedora:44 default dnsmasq is
+        # already exercised by the default L3 step above; this step adds the
+        # *other* version points.
+        #
+        # Default CI is not affected: opt-in only.
+        if: success() && github.event.inputs.run_compat_matrix == 'true'
+        run: |
+          set +e
+
+          echo "=== dnsmasq version map ==="
+          # System default shipped by the fedora:44 base image:
+          SHIPPED=$(dnsmasq --version 2>/dev/null | head -n 1 || echo "(unavailable)")
+          echo "fedora:44 system dnsmasq: $SHIPPED"
+          echo "matrix src-build versions : 2.80 (2018), 2.86 (2021), 2.90 (2024)"
+          echo
+
+          # dnsmasq's Makefile needs `make`; the base image only pulls in gcc.
+          echo "::group::Install dnsmasq build dep (make)"
+          dnf install -y --setopt=install_weak_deps=False make >/dev/null 2>&1
+          echo "::endgroup::"
+
+          COMPAT_TOTAL_RC=0
+          for DNSMASQ_VERSION in 2.80 2.86 2.90; do
+            echo "::group::dnsmasq ${DNSMASQ_VERSION}"
+            TBALL="/tmp/dnsmasq-${DNSMASQ_VERSION}.tar.gz"
+            SRC_DIR="/tmp/dnsmasq-${DNSMASQ_VERSION}"
+            # Upstream mirror: http://thekelleys.org.uk/dnsmasq/. Public CA,
+            # reachable from the container the same way go.dev is.
+            curl -fsSL "https://thekelleys.org.uk/dnsmasq/dnsmasq-${DNSMASQ_VERSION}.tar.gz" -o "$TBALL"
+            if [ "$?" -ne 0 ]; then
+              echo "::error::dnsmasq ${DNSMASQ_VERSION}: download failed"
+              COMPAT_TOTAL_RC=1
+              echo "::endgroup::"
+              continue
+            fi
+            rm -rf "$SRC_DIR"
+            tar -C /tmp -xzf "$TBALL"
+            # Top-level Makefile delegates to src/; default target builds
+            # src/dnsmasq. COPTS empty — vanilla build.
+            make -C "$SRC_DIR" -j2 >/tmp/dnsmasq-${DNSMASQ_VERSION}-build.log 2>&1
+            MAKE_RC=$?
+            if [ "$MAKE_RC" -ne 0 ]; then
+              echo "::error::dnsmasq ${DNSMASQ_VERSION} build failed (rc=$MAKE_RC):"
+              tail -n 40 /tmp/dnsmasq-${DNSMASQ_VERSION}-build.log
+              COMPAT_TOTAL_RC=1
+              echo "::endgroup::"
+              continue
+            fi
+            DNSMASQ_BIN_PATH="$SRC_DIR/src/dnsmasq"
+            chmod 0755 "$DNSMASQ_BIN_PATH"
+            echo "Built: $DNSMASQ_BIN_PATH"
+            "$DNSMASQ_BIN_PATH" --version | head -n 2
+
+            # Per-version isolation: distinct port/conf-dir/db so state from
+            # one version never leaks into the next. setup_required stays
+            # true on the first probe (fresh -db file), so smoke.sh's
+            # preflight suite runs POST /api/setup for each iteration.
+            PORT=18091
+            CONF_DIR_CI="/tmp/compat-conf-${DNSMASQ_VERSION}"
+            HIST_DIR_CI="/tmp/compat-history-${DNSMASQ_VERSION}"
+            rm -rf "$CONF_DIR_CI" "$HIST_DIR_CI"
+            mkdir -p "$CONF_DIR_CI" "$HIST_DIR_CI"
+            rm -f "/tmp/compat-users-${DNSMASQ_VERSION}.json"
+
+            ./intermasq-ci \
+              -port "$PORT" \
+              -conf-dir "$CONF_DIR_CI" \
+              -db "/tmp/compat-users-${DNSMASQ_VERSION}.json" \
+              -audit-log "/tmp/compat-audit-${DNSMASQ_VERSION}.log" \
+              -history-dir "$HIST_DIR_CI" \
+              -templates "/tmp/compat-templates-${DNSMASQ_VERSION}.json" \
+              -leases "/tmp/compat-leases-${DNSMASQ_VERSION}" \
+              -arp-file tests/fixtures/arp-sample.txt \
+              -dnsmasq-bin "$DNSMASQ_BIN_PATH" \
+              -init-system=none \
+              -ci-mode=true &
+            SERVER_PID=$!
+            for i in $(seq 1 10); do
+              if curl -sf "http://localhost:${PORT}/api/status" >/dev/null 2>&1; then break; fi
+              sleep 1
+            done
+
+            echo "--- smoke vs dnsmasq ${DNSMASQ_VERSION} ---"
+            BASE="http://localhost:${PORT}" CONF_DIR="$CONF_DIR_CI" ./tests/smoke.sh
+            SMOKE_RC=$?
+            kill $SERVER_PID 2>/dev/null || true
+            wait $SERVER_PID 2>/dev/null || true
+            echo "dnsmasq ${DNSMASQ_VERSION}: smoke rc=$SMOKE_RC"
+            if [ "$SMOKE_RC" -ne 0 ]; then
+              echo "::error::smoke vs dnsmasq ${DNSMASQ_VERSION}: rc=$SMOKE_RC (unexpected failures — see suite output above)"
+              COMPAT_TOTAL_RC=1
+            fi
+            echo "::endgroup::"
+          done
+
+          if [ "$COMPAT_TOTAL_RC" -ne 0 ]; then
+            echo "::error::compat-matrix had failures — see per-version ::error:: above"
+            exit 1
+          fi
+          echo "compat-matrix: all 3 dnsmasq versions passed smoke (no unexpected fails)"
 
       - name: Perf/stress scenarios (Gap 5, opt-in)
         if: success() && github.event.inputs.run_perf_tests == 'true'
