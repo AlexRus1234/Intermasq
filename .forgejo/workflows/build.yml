@@ -140,11 +140,27 @@ jobs:
         env:
           CGO_ENABLED: "1"
         run: |
+          # -fuzz requires a SINGLE package (./... expands to multiple pkgs
+          # here, e.g. intermask/docs, which makes go test bail with
+          # "fuzz testing requires a single package"). Use '.' = the main
+          # package where fuzz_test.go lives.
+          FUZZ_RC=0
           for target in FuzzParseDhcpHostLine FuzzParseArpContent FuzzParseAliasLine FuzzParseLeasesContent; do
             echo "::group::fuzz $target (30s)"
-            go test -run='^$' -fuzz="^${target}$" -fuzztime=30s ./...
+            echo "-> go test -run='^\$' -fuzz=\"^${target}\$\" -fuzztime=30s ."
+            if go test -run='^$' -fuzz="^${target}$" -fuzztime=30s . 2>&1; then
+              echo "fuzz $target: PASS (no crash in 30s)"
+            else
+              rc=$?
+              echo "::warning::fuzz $target exited $rc — crash artefact (if any) is in testdata/fuzz/${target}/"
+              FUZZ_RC=$rc
+            fi
             echo "::endgroup::"
           done
+          if [ "$FUZZ_RC" -ne 0 ]; then
+            echo "::error::one or more fuzz targets found a crash (rc=$FUZZ_RC); inspect testdata/fuzz/ in the workspace"
+            exit $FUZZ_RC
+          fi
 
       - name: Coverage report
         # Separate step (no -race) so instrumentation overhead & race detector
