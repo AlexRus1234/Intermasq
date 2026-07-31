@@ -28,6 +28,11 @@ on:
         required: true
         default: false
         type: boolean
+      run_fuzz_tests:
+        description: "Run Go fuzz targets (each 30s, opt-in)?"
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   build-test:
@@ -124,6 +129,22 @@ jobs:
         run: |
           echo "Running: go test ./... $RACE_FLAG -count=1"
           go test ./... $RACE_FLAG -count=1
+
+      - name: Fuzz parsers (opt-in, time-bounded)
+        # Runs the four native Go fuzz targets (fuzz_test.go) for 30s each in
+        # real -fuzz mode (not just the f.Add seed corpus that the default L1/L2
+        # step already exercises as unit subtests). Crash artefacts Go writes
+        # to testdata/fuzz/<FuzzName>/ — these become a regression corpus and
+        # MUST be committed (the default `go test` then replays them as units).
+        if: success() && github.event.inputs.run_fuzz_tests == 'true'
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          for target in FuzzParseDhcpHostLine FuzzParseArpContent FuzzParseAliasLine FuzzParseLeasesContent; do
+            echo "::group::fuzz $target (30s)"
+            go test -run='^$' -fuzz="^${target}$" -fuzztime=30s ./...
+            echo "::endgroup::"
+          done
 
       - name: Coverage report
         # Separate step (no -race) so instrumentation overhead & race detector
