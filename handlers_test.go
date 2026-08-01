@@ -39,6 +39,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // ===== Test helpers =====
@@ -1579,5 +1580,236 @@ func TestNormalizeHostTags(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ===== Coverage sweep §3 (Этап 3): handler success-ветки =====
+//
+// These tests close the success/feature branches flagged in
+// логи/Quality_sweep.md §3 for handlers that do NOT depend on a real
+// `dnsmasq --test` (so they run on Windows too, raising both local and CI
+// coverage). The dnsmasq-dependent success paths already live in
+// linux_test.go (Coverage sweep B via fakeDnsmasq); here we add the
+// handler-level 400 (dnsmasq_test_failed) branches there as well.
+
+// ----- historyDiffHandler: success + diff branches (was 44%) -----
+
+// TestHistoryDiffHandler_Success_Current covers the success-200 path with
+// to="" (diff a stored version against the current on-disk content). This
+// is the primary feature of the endpoint and was entirely uncovered.
+func TestHistoryDiffHandler_Success_Current(t *testing.T) {
+	dir := newTestDir(t)
+	*HistoryDir = t.TempDir()
+	*HistoryDepth = 5
+	file := filepath.Join(dir, "h.conf")
+	if err := os.WriteFile(file, []byte("line1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	createLocalBackup(file) // snapshot "line1\n"
+	fromVer := firstVersion(t, file)
+	// Mutate the on-disk content so the diff has something to say.
+	if err := os.WriteFile(file, []byte("line1\nline2\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	w, c := newJSONContext("GET", "/api/history/diff?file="+url.QueryEscape(file)+"&from="+url.QueryEscape(fromVer), "")
+	historyDiffHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "\"diff\"") {
+		t.Errorf("response missing diff field: %s", body)
+	}
+	if !strings.Contains(body, "+line2") {
+		t.Errorf("diff should mark line2 as added: %s", body)
+	}
+}
+
+// TestHistoryDiffHandler_Success_VersionToVersion covers the to=<version>
+// branch: diff between two stored versions (not the current file).
+func TestHistoryDiffHandler_Success_VersionToVersion(t *testing.T) {
+	dir := newTestDir(t)
+	*HistoryDir = t.TempDir()
+	*HistoryDepth = 5
+	file := filepath.Join(dir, "h.conf")
+	if err := os.WriteFile(file, []byte("alpha\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	createLocalBackup(file) // version A: "alpha\n"
+	if err := os.WriteFile(file, []byte("alpha\nbeta\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	createLocalBackup(file) // version B: "alpha\nbeta\n"
+
+	versions, err := listHistory(file)
+	if err != nil {
+		t.Fatalf("listHistory: %v", err)
+	}
+	if len(versions) < 2 {
+		t.Fatalf("expected >=2 versions, got %d", len(versions))
+	}
+	// listHistory returns newest-first: versions[0]=B, versions[1]=A.
+	fromOld, toNew := versions[1].Version, versions[0].Version
+
+	w, c := newJSONContext("GET", "/api/history/diff?file="+url.QueryEscape(file)+"&from="+url.QueryEscape(fromOld)+"&to="+url.QueryEscape(toNew), "")
+	historyDiffHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "+beta") {
+		t.Errorf("diff should mark beta as added: %s", w.Body.String())
+	}
+}
+
+// TestHistoryDiffHandler_UnsafePath covers the isSafePath guard (400
+// invalid_path) — defense-in-depth for the history diff endpoint.
+func TestHistoryDiffHandler_UnsafePath(t *testing.T) {
+	w, c := newJSONContext("GET", "/api/history/diff?file=/etc/passwd&from=20240101-000000", "")
+	historyDiffHandler(c)
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for unsafe path, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "invalid_path") {
+		t.Errorf("expected invalid_path body, got: %s", w.Body.String())
+	}
+}
+
+// TestHistoryDiffHandler_CurrentNotFound covers the to="" branch when the
+// current file no longer exists on disk (404 current_not_found).
+func TestHistoryDiffHandler_CurrentNotFound(t *testing.T) {
+	dir := newTestDir(t)
+	*HistoryDir = t.TempDir()
+	*HistoryDepth = 5
+	file := filepath.Join(dir, "h.conf")
+	if err := os.WriteFile(file, []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	createLocalBackup(file)
+	fromVer := firstVersion(t, file)
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+
+	w, c := newJSONContext("GET", "/api/history/diff?file="+url.QueryEscape(file)+"&from="+url.QueryEscape(fromVer), "")
+	historyDiffHandler(c)
+	if w.Code != 404 {
+		t.Fatalf("expected 404 (current_not_found), got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "current_not_found") {
+		t.Errorf("expected current_not_found body, got: %s", w.Body.String())
+	}
+}
+
+// TestHistoryDiffHandler_UnknownToVersion covers the to=<bad-version> branch
+// (404 version_not_found for the "to" side).
+func TestHistoryDiffHandler_UnknownToVersion(t *testing.T) {
+	dir := newTestDir(t)
+	*HistoryDir = t.TempDir()
+	*HistoryDepth = 5
+	file := filepath.Join(dir, "h.conf")
+	if err := os.WriteFile(file, []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	createLocalBackup(file)
+	fromVer := firstVersion(t, file)
+
+	w, c := newJSONContext("GET", "/api/history/diff?file="+url.QueryEscape(file)+"&from="+url.QueryEscape(fromVer)+"&to=19990101-000000", "")
+	historyDiffHandler(c)
+	if w.Code != 404 {
+		t.Fatalf("expected 404 for unknown 'to' version, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "version_not_found") {
+		t.Errorf("expected version_not_found body, got: %s", w.Body.String())
+	}
+}
+
+// ----- rollbackHandler: success 200 path (was 70%) -----
+
+// TestRollbackHandler_Success covers the success path: an existing .bak is
+// restored, audit is written, and 200 rollback_ok is returned. rollbackFile
+// does not run dnsmasq --test, so this is portable.
+func TestRollbackHandler_Success(t *testing.T) {
+	dir := newTestDir(t)
+	*HistoryDir = t.TempDir()
+	*HistoryDepth = 5
+	file := filepath.Join(dir, "r.conf")
+	if err := os.WriteFile(file, []byte("new-broken\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file+".bak", []byte("old-good\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"file":"` + jsonPath(file) + `"}`
+	w, c := newJSONContext("POST", "/api/rollback", body)
+	rollbackHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "rollback_ok") {
+		t.Errorf("expected rollback_ok body, got: %s", w.Body.String())
+	}
+	got, _ := os.ReadFile(file)
+	if string(got) != "old-good\n" {
+		t.Errorf("file should be restored from .bak: got %q", got)
+	}
+}
+
+// ----- changePasswordHandler: success 200 path (was 50%) -----
+
+// TestChangePasswordHandler_Success exercises the full success path with a
+// real bcrypt hash: correct old password → hash regenerated → 200. The
+// pre-existing TestChangePassword used a dummy "$2a$10$1" hash that bcrypt
+// rejects, so the success branch was never reached.
+func TestChangePasswordHandler_Success(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	hash, err := bcrypt.GenerateFromPassword([]byte("old-secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	users = map[string]string{"admin": string(hash)}
+
+	w, c := newJSONContext("POST", "/api/users/password", `{"old_password":"old-secret","new_password":"new-secret"}`)
+	changePasswordHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	newHash, ok := users["admin"]
+	if !ok {
+		t.Fatal("admin user vanished after password change")
+	}
+	if newHash == string(hash) {
+		t.Error("password hash should have changed")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(newHash), []byte("new-secret")); err != nil {
+		t.Errorf("new hash does not verify against new password: %v", err)
+	}
+	// Old password must no longer verify.
+	if err := bcrypt.CompareHashAndPassword([]byte(newHash), []byte("old-secret")); err == nil {
+		t.Error("old password should no longer verify")
+	}
+}
+
+// TestChangePasswordHandler_EmptyNewPassword covers the missing_fields guard
+// (empty new_password → 400), a branch not previously exercised.
+func TestChangePasswordHandler_EmptyNewPassword(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	users = map[string]string{"admin": "$2a$10$irrelevant"}
+
+	w, c := newJSONContext("POST", "/api/users/password", `{"old_password":"x","new_password":""}`)
+	changePasswordHandler(c)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for empty new_password, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "missing_fields") {
+		t.Errorf("expected missing_fields body, got: %s", w.Body.String())
 	}
 }

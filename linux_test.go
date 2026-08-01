@@ -603,3 +603,111 @@ func TestLoadPlugins_BrokenManifest(t *testing.T) {
 		}
 	}
 }
+
+// ===== T-B.9 putFileHandler: dnsmasq-test-failure → 400 + rollback (A13) =====
+//
+// Coverage sweep §3 (Этап 3): the handler-level branch where writeFileRaw
+// returns a dnsmasq_test_failed error. Coverage sweep B only exercised the
+// success path (T-B.5); the rollback-on-invalid-syntax feature (A13) was
+// left at the 0-coverage 400 branch. fakeDnsmasq(1) makes dnsmasq --test
+// fail, so the file must be rolled back from .bak and the handler must
+// respond 400 dnsmasq_test_failed.
+
+func TestPutFileHandler_DnsmasqTestFail_400(t *testing.T) {
+	fakeDnsmasq(t, 1)
+	dir := newTestDir(t)
+	name := "raw.conf"
+	path := filepath.Join(dir, name)
+	orig := []byte("# preserved\n")
+	if err := os.WriteFile(path, orig, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"content":"# would-be-bad\ndomain=lan\n"}`
+	w, c := newJSONContext("PUT", "/api/files/"+name, body)
+	c.Params = gin.Params{{Key: "name", Value: name}}
+	putFileHandler(c)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400 on dnsmasq test failure, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "dnsmasq_test_failed") {
+		t.Errorf("expected dnsmasq_test_failed body, got: %s", w.Body.String())
+	}
+	got, _ := os.ReadFile(path)
+	if !bytes.Equal(got, orig) {
+		t.Errorf("rollback failed: file changed (got %q, want %q)", got, orig)
+	}
+}
+
+// ===== T-B.10 updateConfigHandler: dnsmasq-test-failure → 400 + rollback =====
+
+func TestUpdateConfigHandler_DnsmasqTestFail_400(t *testing.T) {
+	fakeDnsmasq(t, 1)
+	dir := newTestDir(t)
+	target := filepath.Join(dir, "conf.conf")
+	if err := os.WriteFile(target, []byte("# preserved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"file":"` + jsonPath(target) + `","directives":[{"key":"domain","value":"lan","active":true}]}`
+	w, c := newJSONContext("PUT", "/api/config", body)
+	updateConfigHandler(c)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400 on dnsmasq test failure, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "dnsmasq_test_failed") {
+		t.Errorf("expected dnsmasq_test_failed body, got: %s", w.Body.String())
+	}
+	got, _ := os.ReadFile(target)
+	if !bytes.Contains(got, []byte("preserved")) {
+		t.Errorf("rollback failed: original content lost (got %q)", got)
+	}
+}
+
+// ===== T-B.11 restoreBackupHandler: dnsmasq-test-failure → 400 + rollback =====
+
+func TestRestoreBackupHandler_DnsmasqTestFail_400(t *testing.T) {
+	fakeDnsmasq(t, 1)
+	dir := newTestDir(t)
+	// Pre-existing file that the restore would overwrite; after a failed
+	// dnsmasq --test it must be rolled back from .restore.bak.
+	existing := filepath.Join(dir, "alpha.conf")
+	if err := os.WriteFile(existing, []byte("# original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	zipBuf := &bytes.Buffer{}
+	zw := zip.NewWriter(zipBuf)
+	fw, err := zw.Create("alpha.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write([]byte("# restored\ndomain=lan\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	mpBuf := &bytes.Buffer{}
+	mw := multipartWriter(t, mpBuf, "backup.zip", zipBuf.Bytes())
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest("POST", "/api/backup/restore", mpBuf)
+	c.Request.Header.Set("Content-Type", mw.FormDataContentType())
+	c.Set("user", "admin")
+	restoreBackupHandler(c)
+
+	if rec.Code != 400 {
+		t.Fatalf("expected 400 on dnsmasq test failure, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "dnsmasq_test_failed") {
+		t.Errorf("expected dnsmasq_test_failed body, got: %s", rec.Body.String())
+	}
+	got, _ := os.ReadFile(existing)
+	if !bytes.Contains(got, []byte("original")) {
+		t.Errorf("rollback failed: original content lost (got %q)", got)
+	}
+}

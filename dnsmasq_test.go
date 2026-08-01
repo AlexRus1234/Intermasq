@@ -2950,3 +2950,57 @@ func TestDirectiveGroup(t *testing.T) {
 		}
 	}
 }
+
+// ========== Coverage sweep §3 (Этап 3): resolveAliasesTargetFile ==========
+
+// TestResolveAliasesTargetFile_EmptyCreatesDefault covers the empty-reqFile
+// branch (was 50%): when the caller omits the file, the default aliases file
+// (DefaultAliasesFileName) is created on demand inside ConfigDir and
+// returned. This is the path POST /api/aliases takes when the UI sends no
+// explicit target file.
+func TestResolveAliasesTargetFile_EmptyCreatesDefault(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+
+	path, ok := resolveAliasesTargetFile("")
+	if !ok {
+		t.Fatal("expected ok=true for empty reqFile")
+	}
+	want := filepath.Join(dir, DefaultAliasesFileName)
+	if path != want {
+		t.Errorf("path = %q, want %q", path, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Errorf("default aliases file should have been created: %v", err)
+	}
+}
+
+// TestResolveAliasesTargetFile_ExplicitSafe covers the explicit-path happy
+// path: a pre-existing safe file inside ConfigDir is returned verbatim.
+func TestResolveAliasesTargetFile_ExplicitSafe(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+	given := filepath.Join(dir, "custom.conf")
+	if err := os.WriteFile(given, []byte("address=/x/1.2.3.4\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	path, ok := resolveAliasesTargetFile(given)
+	if !ok {
+		t.Fatal("expected ok=true for safe explicit path")
+	}
+	if path != given {
+		t.Errorf("path = %q, want %q", path, given)
+	}
+}
+
+// TestResolveAliasesTargetFile_Unsafe covers the isSafePath rejection branch
+// (returns ok=false for a path outside ConfigDir).
+func TestResolveAliasesTargetFile_Unsafe(t *testing.T) {
+	dir := t.TempDir()
+	*ConfigDir = dir
+
+	if _, ok := resolveAliasesTargetFile("/etc/passwd"); ok {
+		t.Error("expected ok=false for unsafe path")
+	}
+}

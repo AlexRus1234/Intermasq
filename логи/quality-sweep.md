@@ -285,3 +285,90 @@ drop'алась из `KNOWN_BUGS` map — и чек становился loud FA
 - **Knock-on на этап 3:** когда handlers success-ветки будут покрываться (handler backup-restore, history-restore) на CI — fake-dnsmasq helper из Coverage sweep B возвращает exit 0 на `--test`, маскируя bug. Поэтому compat-matrix с реальным dnsmasq остаётся важным regression-слоем; удалять его нельзя, пока A14/A15 не пофикшены products-кодом. После fix'a — убрать A14/A15 из `known-bugs.txt` и smoke-чеки снова станут loud (что подтвердит fix).
 
 ---
+
+## Этап 3 — Handler success-ветки (довести coverage до ~85%) ✅ ВЫПОЛНЕН (2026-08-01)
+
+**Цель:** добить непокрытые success/feature-ветки (не error-500 хвост) в
+handler'ах из карты `Quality_sweep.md` §3. База: CI 81.3% / Windows 74.5%.
+
+### Подход
+
+Карта §3 помечена «локально Windows; на CI выше из-за B/D». Проверка
+`linux_test.go` показала, что Coverage sweep B **уже** покрыл success-пути
+dnsmasq-зависимых handler'ов (`writeConfigWithTest`, `restoreHistoryVersion`,
+`putFileHandler`/`updateConfigHandler`/`historyRestoreHandler`/`restoreBackupHandler`
+success через `fakeDnsmasq`) — но только на CI (Linux). Оставшиеся gap'ы:
+
+1. **Windows-coverable** (поднимают и local, и CI) — handler'ы БЕЗ зависимости
+   от `dnsmasq --test`: `historyDiffHandler`, `rollbackHandler`,
+   `changePasswordHandler`, `resolveAliasesTargetFile`.
+2. **Linux-gated handler-level 400-ветки** (только CI) — ветки
+   `dnsmasq_test_failed → c.JSON(400,...)` в putFile/updateConfig/restoreBackup,
+   которые sweep B не затронул (только success через `fakeDnsmasq(0)`).
+
+`fakeDnsmasq`-хелпер переиспользован из `linux_test.go` (не дублировался).
+Продуктовый код не тронут — правки только в 3 test-файлах.
+
+### Что сделано (по пунктам карты §3)
+
+| Карта §3 (file:fn) | Было (Win) | Стало (Win) | Тесты |
+|--------------------|-----------|------------|-------|
+| `handlers_safety.go:64 historyDiffHandler` | 44.0% | **100%** | `TestHistoryDiffHandler_Success_Current`, `_Success_VersionToVersion`, `_UnsafePath`, `_CurrentNotFound`, `_UnknownToVersion` (`handlers_test.go`) |
+| `handlers_safety.go:16 rollbackHandler` | 70.0% | **90.0%** | `TestRollbackHandler_Success` (`handlers_test.go`) |
+| `handlers_users.go:90 changePasswordHandler` | 50.0% | **85.0%** | `TestChangePasswordHandler_Success` (real bcrypt), `_EmptyNewPassword` (`handlers_test.go`) |
+| `handlers_aliases.go:22 resolveAliasesTargetFile` | 50.0% | **87.5%** | `TestResolveAliasesTargetFile_EmptyCreatesDefault`, `_ExplicitSafe`, `_Unsafe` (`dnsmasq_test.go`) |
+| `handlers_config.go:221 putFileHandler` | 20.0% | 20.0% (Win) | success = sweep B (Linux); + `TestPutFileHandler_DnsmasqTestFail_400` — A13 rollback-ветка (`linux_test.go`) |
+| `handlers_config.go:22 updateConfigHandler` | 50.0% | 50.0% (Win) | success = sweep B (Linux); + `TestUpdateConfigHandler_DnsmasqTestFail_400` (`linux_test.go`) |
+| `handlers_safety.go:147 restoreBackupHandler` | 18.2% | 18.2% (Win) | success = sweep B (Linux); + `TestRestoreBackupHandler_DnsmasqTestFail_400` (`linux_test.go`) |
+| `handlers_safety.go:100 historyRestoreHandler` | 50.0% | 50.0% (Win) | success = sweep B `TestHistoryRestoreHandler_Success` (Linux) — уже покрыто |
+| `dnsmasq.go:89 writeConfigWithTest` | 0.0% | 0.0% (Win) | sweep B `TestWriteConfigWithTest_Success`/`_TestFailRollback` (Linux) — уже покрыто |
+| `history.go:229 restoreHistoryVersion` | 0.0% | 0.0% (Win) | sweep B `TestRestoreHistoryVersion_Success`/`_TestFailRollback` (Linux) — уже покрыто |
+
+Все целевые handler'ы ≥80% (Win-измеримые — фактически; Linux-gated — на CI
+благодаря sweep B + новые 400-тесты).
+
+### Delta coverage
+
+- **Windows local total:** 74.5% → **75.6%** (+1.1%). Дельта = 4 handler'а
+  (#1–4), которые раньше не гонялись на Windows. На CI эти же тесты тоже
+  выполнятся → добавят к CI-базе.
+- **CI expected:** 81.3% + (~1.1% от Windows-coverable) + (~delta от 3 новых
+  Linux-gated 400-тестов на putFile/updateConfig/restoreBackup). Целевые
+  handler'ы на CI уходят ≥80%; total ожидаемо ~84–86% (точное число — следующий
+  CI-пуш; локально Linux-gated тесты skip'аются).
+- Измерение проводилось без перенаправления `>` (PowerShell UTF-16 quirk):
+  `go test "./..." -count=1 -coverprofile coverage.out` →
+  `go tool cover -func coverage.out`.
+
+### Финальная верификация (Windows local)
+
+- `gofmt -l handlers_test.go dnsmasq_test.go linux_test.go` — чист (0 файлов).
+- `go vet ./...` — чист (no output).
+- `go test "./..." -count=1 -coverprofile coverage.out` — **ok**, 10.4s,
+  coverage 75.6%, 0 fail.
+- `-v -run` новых тестов: 11 Windows-coverable **PASS**, 3 Linux-gated
+  **SKIP** (fakeDnsmasq shell-script unsupported on Windows — корректно,
+  отработают на CI).
+
+### Замечания / knock-on
+
+- **Продуктовый код не тронут** — правки только в test-файлах:
+  `handlers_test.go` (+блок §3 + bcrypt import), `dnsmasq_test.go` (+блок
+  resolveAliasesTargetFile), `linux_test.go` (+T-B.9/.10/.11 400-ветки).
+- **A13 regression covered:** `TestPutFileHandler_DnsmasqTestFail_400`
+  проверяет что PUT невалидного синтаксиса → 400 + файл откачен из `.bak`
+  (именно то, на чём споткнулся A13 в sweep A).
+- **changePasswordHandler success** раньше не проверялся реально: существующий
+  `TestChangePassword` (dnsmasq_test.go) использовал dummy-хэш `$2a$10$1`,
+  который bcrypt rejects → ветка success (regenerate hash, saveUsers, audit,
+  200) была мёртвой для покрытия. Новый тест генерирует настоящий bcrypt-хэш.
+- **Связь с этапом 2 (A14):** новые `restoreBackupHandler`/`updateConfigHandler`
+  400-тесты используют `fakeDnsmasq(1)` (exit 1 на `--test`) — это маскирует
+  A14 (отсутствие `--conf-file=`), т.к. фейк падает по любой причине.
+  Поэтому compat-matrix (этап 2) остаётся единственным слоем, ловящим A14 на
+  реальном dnsmasq; удалять его нельзя до products-fix'а A14.
+- **Не покрыто намеренно (ROI ≈ 0):** хвосты `if err!=nil {c.JSON(500);return}`
+  в handler'ах — как и предписывает §3 («Не гони дальше — ROI обрывается»).
+
+---
+
