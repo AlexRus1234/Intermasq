@@ -8,26 +8,27 @@
 
 | Слой | Coverage | Статус |
 |---|---|---|
-| L1+L2 Go (unit + httptest) | **65.6%\*** (измерено) | один package `main` → L1/L2 совместно не делятся. Парсеры/handler'ы 80-100%; разрыв сосредоточен в init-system/bootstrap/goroutine-коде (см. сноску) |
+| L1+L2 Go (unit + httptest) | **82.7%\*** (CI Linux) / 75.6% (Windows) | один package `main` → L1/L2 совместно не делятся. Парсеры/handler'ы ≥80%; остаточный разрыв сосредоточен в init-system/bootstrap/goroutine-коде (см. сноску + Gap 4) |
 | L3 — smoke.sh | ~75-80% API | ✓ 29 suite-файлов, 139 проверок; плагин-прокси покрыт (`82-plugins.sh`). Иная метрика — доля эндпоинтов, не строки |
 | L4 — Playwright UI | 34 теста (33 pass + 1 permanent-skip) | ✓ **финал**: батч 1+2 + фазы А,Б,В + Блок A (A5/A13 FIXED) + батч 4 + mutation-pass пройден. Hardening sweep (2026-07-29) добил: усилены 2 слабых spec'а (`hosts-sort`, `auth`) и разблокированы 2 infra-spec'а (`setup-screen` 2-я инстанция `:18084`, `sse-live` writable ARP). Единственный skip — `config-raw` (дублирует smoke, постоянный) |
 | L5 — Real VM (init/dnsmasq) | 0% | ✗ не реализован |
 | Perf/stress (opt-in) | реализовано, informational | ✓ `tests/perf.sh` (read/reload/CRUD+RSS/SSE); не coverage-слой |
 
-> **\*** `65.6%` — измерено `go test -cover ./...` (241+ тестов, package `main`)
-> ДО Hardening sweep. T1 (4 `FuzzXxx` + `parseLeasesContent`) добавляет ~+2-3%,
-> точную цифру нужно перемерить `go test -cover ./...`. Раньше в доках фигурировали
-> оценки «~85-90%», но то был подсчёт «handler'ов с
-> хотя бы одним тестом», а не statement-coverage. ~34% непокрытых строк
-> сосредоточены в: `system.go` (init-system exec — это и есть **Gap 4**),
-> `bins.go` (резолв linux-бинарных `sudo`/`systemctl`/`service`/`rc-service`/`sv`),
-> `main.go` (`main`/`loadPlugins` — bootstrap), `sse.go` (`startSSEBroadcaster`/
-> `reloadDnsmasq` — горутина + dnsmasq exec), `metrics.go` (`startDNSHealthChecker`/
-> `runDNSHealthPass`). Дотянуть до ~99% в текущем окружении **нереально** — нужно
-> закрывать Gap 4 (real VM) + рефакторить bootstrap (правка исходников).;
+> **\*** `82.7%` (CI Linux) / `75.6%` (Windows) — измерено
+> `go test "./..." -count=1 -coverprofile coverage.out` (Coverage sweep A+B+C+D
+> → Quality sweep Этап 3, 2026-08-01). Дельта CI/Windows = Linux-gated
+> fake-binary/dnsmasq тесты (`linux_test.go`), что skip'аются на Windows.
+> ~17% непокрытых строк сосредоточены в: `system.go` (init-system exec — это и
+> есть **Gap 4**), `bins.go` (резолв linux-бинарных `sudo`/`systemctl`/`service`/
+> `rc-service`/`sv`), `main.go` (`main`/`loadPlugins` — bootstrap), `sse.go`
+> (`startSSEBroadcaster`/`reloadDnsmasq` — горутина + dnsmasq exec),
+> `metrics.go` (`startDNSHealthChecker`/`runDNSHealthPass`). Дотянуть до ~99% в
+> текущем окружении **нереально** — нужно закрывать Gap 4 (real VM) +
+> рефакторить bootstrap (правка исходников).;
 
-**Суммарно:** Go-покрытие 65.6%\* (измерено); L3 API ~75-80% (иная метрика);
-L4/L5 — 0%. Метрики разных слоёв не суммируются в одно число.
+**Суммарно:** Go-покрытие 82.7% (CI Linux) / 75.6% (Windows); L3 API ~75-80%
+(иная метрика); L4 — 33 pass + 1 permanent-skip; L5 — 0%. Метрики разных
+слоёв не суммируются в одно число.
 
 ---
 
@@ -47,6 +48,11 @@ L4/L5 — 0%. Метрики разных слоёв не суммируются
 | **Gap 2** (финал, Блок A) — продуктовые фиксы A5 + A13 | A5: `BulkEditModal.vue` `store_hosts.find` → `.hosts.find` (1 строка), `test.fail` снят. A13: `writeFileRaw`/`writeConfigWithTest`/`restoreHistoryVersion` → `dnsmasq --test --conf-file=<path>` (3 строки); A13 убран из `known-bugs.txt`; smoke-чек `40-config-files` стал честным 400. A3/A4-хосты изолированы в `19-bugs.conf` (не отравляют `10-static.conf` для restore-валидации). | `gap2-blockA-a5a13-fixes.md` |
 | **Gap 2** (финал, Блок B) — батч 4 Playwright | +6 реализованных specs (audit-tab/plugins-iframe/i18n-api-error/config-template-fill/config-directive[A13 validation]/sse-live[simplified]) + 2 infra-skip (config-raw дублирует smoke, setup-screen нужна 2-я инстанция :18084). 25→33 теста (31 pass + 2 skip). Селекторы выведены из реальных компонентов. | `gap2-finish.md` |
 | **Hardening sweep** (2026-07-29) — T1+T2+T3+T4 | T1: fuzzing 4 парсеров (`fuzz_test.go`, рефакторинг `parseLeases`→`parseLeasesContent`). T2: A11 path-traversal defense-in-depth (`isSafePath` после `filepath.Join`). T3: усилены `hosts-sort` (assert порядка) + `auth` (`token===null`+401). T4: разблокированы `setup-screen` (2-я инстанция `:18084`) + `sse-live` (writable ARP). known-bugs.txt пуст. | `hardening-sweep.md` |
+| **Coverage sweep A+B+C+D** (2026-07-29) — statement-coverage | Go statement-coverage 65.6% → 81.3% на CI. Block B: `linux_test.go` + `fakeDnsmasq` seam (`dnsmasqBinPath`) для dnsmasq-зависимых success-путей. Block C: `setupServer()` extraction. Block D: fake init-system бинарники (`system_callers_test.go`). Block A: pure-helper тесты. | `coverage-sweep.md` |
+| **Quality sweep Этап 4** (2026-07-31) — Go mutation-testing | 12 ручных мутаций: 9 killed, 2 survived→regressed (R2/R3 regression-тесты в `dnsmasq_test.go`, коммит `f8fd404`), 1 equivalent. Mutation score 81.8% (до R2/R3). | `quality-sweep.md` |
+| **Quality sweep Этап 1** (2026-07-31) — Fuzz opt-in CI | Opt-in CI-шаг `run_fuzz_tests` (build.yml, по образцу `run_e2e_tests`): 4 `FuzzXxx` × 30s real `-fuzz`. Прогон ~2m54s — **no crash found**; `testdata/fuzz/` пуст. Дефолтный CI не затронут. | `quality-sweep.md` |
+| **Quality sweep Этап 2** (2026-07-31) — dnsmasq compat matrix | Opt-in CI-шаг `run_compat_matrix`: build-from-source 3 версий dnsmasq (2.80/2.86/2.90) × smoke.sh. 2.90=139/139, 2.86=138/139, 2.80=137/139. Найдены 2 реальных бага: **A14** (`backup.go:119` `--test` без `--conf-file=`) + **A15** (2.80 static.conf) — зарегистрированы как known, products-код не тронут. | `quality-sweep.md` |
+| **Quality sweep Этап 3** (2026-08-01) — Handler success-ветки | Success/feature-тесты для ~10 handler'ов из карты §3 (products не тронут). 4 Windows-coverable доведены ≥80% (`historyDiffHandler`→100%, `rollbackHandler`→90%, `changePasswordHandler`→85%, `resolveAliasesTargetFile`→87.5%); +3 Linux-gated handler 400-ветки (`fakeDnsmasq(1)`). **CI 81.3% → 82.7%**, коммит `1837a67`. | `quality-sweep.md` |
 
 ---
 
@@ -117,33 +123,42 @@ skip — `config-raw` (постоянный, дублирует smoke `40-config
 `FuzzParseArpContent`, `FuzzParseAliasLine`, `FuzzParseLeasesContent`) после
 рефакторинга `parseLeases` → чистая `parseLeasesContent`. Seed corpus через
 `f.Add` (compile-checked, работает как subtest'ы в дефолтном `go test`).
-**Отложено:** opt-in CI-шаг `run_fuzz_tests` (опционален по промту) — без него
-real `-fuzz` не гоняется, только seed'ы. См. `логи/hardening-sweep.md`.
+**Opt-in CI-шаг `run_fuzz_tests` ДОБАВЛЕН** (Quality sweep Этап 1,
+2026-07-31): 4 target'а × 30s real `-fuzz` на одиночном пакете `.`; прогон
+~2m54s — **no crash found**, `testdata/fuzz/` пуст. Дефолтный CI не затронут
+(opt-in). См. `логи/quality-sweep.md` (раздел «Этап 1»).
 
 ---
 
 ## Что нужно для 95-100% (в реальности 98-99%)
 
-Go statement-coverage сейчас **65.6%\***. Реалистичный потолок **в текущем
-окружении — ~80-85%**: остаточные unit-тесты (+3-5%), `system.go` callers через
-fake-бинарники на PATH (+8-12%, но тест против моков), Linux-gated exec-тесты
-для `reloadDnsmasq`/DNS-health (+3-5%). Дальше — потолок:
+Go statement-coverage сейчас **82.7%\*** (CI Linux) / 75.6% (Windows).
+Реалистичный потолок **в текущем окружении практически достигнут** (~83%):
+`system.go` callers закрыты fake-бинарниками на PATH (Coverage sweep D),
+`reloadDnsmasq`/DNS-health — Linux-gated exec-тестами (Coverage sweep B).
+Остаток (~17%) — потолок без закрытия Gap 4 + правки исходников:
 
 - **`main()`/`loadPlugins()`** — bootstrap, не юнит-тестируем без рефакторинга
   исходников (вынос логики в тестируемые функции).
 - **`detectInitSystem` + реальное init-взаимодействие** — это **Gap 4 (real
-  VM)**; в Fedora-контейнере PID 1 не systemd.
+  VM)**; в Fedora-контейнере PID 1 не systemd. Fake-бинарники (Coverage sweep
+  D) дали statement-%, но не реальную уверенность — функциональное покрытие
+  (Gap 4 на VM) ценнее (снимает критику «vanity-покрытие»).
 - **Фоновые горутины** (`startSSEBroadcaster`, `cleanBlacklistLoop`) — partial.
 
 То есть **~99% statement-coverage недостижимо без закрытия Gap 4 + правки
-исходников**. При этом statement-% `system.go` через фейки даёт число, но не
-реальную уверенность — функциональное покрытие (Gap 4 на VM) тут ценнее.
+исходников**. Дальнейший ROI обрывается (Quality sweep Этап 3 подтвердил:
+добивание success-веток дало +1.4%, а error-500 хвост — нулевой ROI).
 
 Оставшееся сверх реалистичного потолка — enterprise-grade:
 
-- **Mutation testing** — `go-mutesting`, проверяют что тесты ловят мутации
-- **Compatibility matrix** — разные версии dnsmasq (2.80, 2.89, 2.90+)
-- **Cross-distro** — Fedora, Debian, Alpine, Ubuntu, OpenSUSE
+- ~~**Mutation testing**~~ — ✅ ВЫПОЛНЕНО (Quality sweep Этап 4): 12 ручных
+  мутаций, 9 killed / 2 survived→regressed (R2/R3) / 1 equivalent.
+- ~~**Compatibility matrix**~~ — ✅ ВЫПОЛНЕНО (Quality sweep Этап 2): opt-in CI
+  с build-from-source 2.80/2.86/2.90; найдены A14/A15.
+- **Cross-distro** — Fedora, Debian, Alpine, Ubuntu, OpenSUSE (compat-matrix
+  покрывает version-axis через source-build; distro-контейнеры нуждаются в
+  docker-in-docker, недоступном на runner'е).
 - **Browser matrix** — Chrome, Firefox, Safari, Edge
 - **Real device testing** — phones с random MAC, IoT devices
 
@@ -159,8 +174,11 @@ fake-бинарники на PATH (+8-12%, но тест против моков
 | **P0✓** | **Bugfix sweep (2026-07-28) — закрыто:** A1, A2, A3, A4, A6, A8, A12 → FIXED с regression-тестами. См. `логи/bugfix-sweep.md`. | готово | smoke 0 Fail / 0 Known-fail |
 | **P0✓** | **Hardening sweep (2026-07-29) — A11 закрыто:** `getFileHandler`/`putFileHandler` (`handlers_config.go`) получили `isSafePath` после `filepath.Join` (defense-in-depth); regression-тесты `TestGetFileHandlerRejectsUnsafePath` / `TestPutFileHandlerRejectsUnsafePath`. `tests/known-bugs.txt` теперь пуст. См. `логи/hardening-sweep.md`. | готово | known-bugs.txt пуст |
 | **P1** | Playwright (Gap 2) — **ФИНАЛ** ✓ (34 tests: 33 pass + 1 permanent-skip `config-raw`); A5/A13 FIXED; батч 4 закрыт; mutation-pass пройден; 2 слабых spec'а (`hosts-sort`, `auth`) усилены; 2 infra-spec'а (`setup-screen`, `sse-live`) разблокированы (Hardening sweep, 2026-07-29) | готово | UI-покрытие закрыто полностью |
-| **P2** | L5 Real VM nightly (Gap 4) | 1-2 дня | +5% |
-| **P2✓** | Fuzzing для парсеров (Hardening sweep, 2026-07-29) — закрыто: рефакторинг `parseLeases` → `parseLeasesContent` (`arp_leases.go`) + 4 `FuzzXxx` в `fuzz_test.go` (seed corpus через `f.Add`). Opt-in `-fuzz` CI-шаг отложен. См. `логи/hardening-sweep.md`. | готово | ~+2-3% |
+| **P2** | L5 Real VM nightly (Gap 4) — единственный открытый пункт Quality sweep (этап ВМ, делать последним) | 1-2 дня | +функциональная уверенность (не statement-%) |
+| **P2✓** | Fuzzing для парсеров (Hardening sweep + Quality sweep Этап 1) — закрыто: 4 `FuzzXxx` в `fuzz_test.go` (seed corpus) **+ opt-in CI-шаг `run_fuzz_tests`** (4×30s real `-fuzz`, no crash). См. `логи/quality-sweep.md`. | готово | ~+2-3% |
+| **P2✓** | Quality sweep Этап 4 — Go mutation-testing (2026-07-31): 12 мутаций, 9 killed / 2 survived→regressed (R2/R3) / 1 equivalent. См. `логи/quality-sweep.md`. | готово | качество тестов (не %) |
+| **P2✓** | Quality sweep Этап 2 — dnsmasq compat matrix (2026-07-31): opt-in CI build-from-source 2.80/2.86/2.90; найдены A14/A15 (known). См. `логи/quality-sweep.md`. | готово | версионная уверенность |
+| **P2✓** | Quality sweep Этап 3 — Handler success-ветки (2026-08-01): success/feature-тесты для ~10 handler'ов; CI 81.3% → **82.7%**, все целевые ≥80%. См. `логи/quality-sweep.md`. | готово | +1.4% |
 
 ---
 
@@ -168,7 +186,7 @@ fake-бинарники на PATH (+8-12%, но тест против моков
 
 - [x] `tests/known-bugs.txt` пустой (или содержит только wontfix'ы)
 - [x] smoke.sh: 0 Fail, 0 Known-fail, 0 Skipped, ~140+ Pass (139/139 CLEAN PASS)
-- [x] L1+L2 Go test coverage ≥ 70% (`go test -cover ./...`) — 72.2% на CI Linux после coverage sweep A+B (логи/coverage-sweep.md)
+- [x] L1+L2 Go test coverage ≥ 70% (`go test -cover ./...`) — **82.7% на CI Linux** / 75.6% Windows (Coverage sweep A+B+C+D + Quality sweep Этап 3, `логи/quality-sweep.md`)
 - [x] Playwright: 20+ spec'ов, все зелёные (33 pass + 1 permanent-skip `config-raw`, покрыт smoke)
 - [ ] L5 nightly: 7 дней без красноты — Gap 4 открыт
 - [x] `tests/perf.sh`: 0 hard failures на дефолтных порогах

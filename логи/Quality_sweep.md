@@ -105,43 +105,22 @@ tarballs внутри того же fedora:44 контейнера (docker-in-do
 
 ---
 
-## Этап 3 — Handler success-ветки (довести coverage до ~85%)
+## Этап 3 — Handler success-ветки ✅ ВЫПОЛНЕН (2026-08-01)
 
-**Цель:** добить непокрытые **success/feature-ветки** (не error-500 хвост) в
-~5-6 handler'ах, где непокрытый путь = реальный feature, а не `return 500`.
-Цель: с 81.3% до ~85%. Не гнать дальше — ROI обрывается.
-
-**Карта (post A+B+C+D, локально Windows; на CI выше из-за B/D):**
-```
-handlers_config.go:221  putFileHandler            20.0%  → success write + rollback на невалидный синтаксис (A13)
-handlers_config.go:22   updateConfigHandler      50.0%  → success serialize+test
-handlers_safety.go:147  restoreBackupHandler     18.2%  → success unzip+restore
-handlers_safety.go:64   historyDiffHandler       44.0%  → unified-diff логика (history.go:unifiedDiff 94%)
-handlers_safety.go:100  historyRestoreHandler    50.0%  → success restore
-handlers_safety.go:16   rollbackHandler          70.0%  → reload-обратный путь
-history.go:229          restoreHistoryVersion     0.0%  → Linux+dnsmasq (success restore)
-dnsmasq.go:89           writeConfigWithTest       0.0%  → Linux+dnsmasq (success+rollback)
-handlers_users.go:90    changePasswordHandler    50.0%  → success + wrong-old-pass
-handlers_aliases.go:22 resolveAliasesTargetFile 50.0%  → empty-file branch
-```
-**Seam (из Coverage sweep):** `dnsmasqBinPath` (`bins.go`) — записываемая; для
-success-веток с `dnsmasq --test` положи fake `dnsmasq` скрипт (exit 0 на
-`--test`), `dnsmasqBinPath=tmp/dnsmasq`, `chmod 0755`, `runtime.GOOS!="windows"`
-guard → success покрыт без реального dnsmasq. Для error-ветки (rollback) fake
-dnsmasq exit 1 → проверь `rollbackFile`/`.bak`.
-
-**Где писать:** `dnsmasq_test.go` (history/aliases/config-snapshot домен),
-`handlers_test.go` (handler httptest). НЕ дублируй существующие success-тесты
-(напр. `getFileHandler` уже 84% — там только добей 403/iso path). Для каждого
-handler: success-200 path + один-два feature-specific edge.
-**Что НЕ делать:** не покрывай хвост `if err!=nil {c.JSON(500);return}` ради
-цифры — ROI нулевой. Только success/feature-ветки из карты выше.
-
-**Верификация:** `go test "./..." -count=1 -coverprofile coverage.out` →
-`go tool cover -func coverage.out` — целевые handler'ы ≥80%, total ~84-86%.
-`go vet` чист, существующие тесты зелёные.
-**Knock-on:** fake-dnsmasq-хелпер уже должен быть в Coverage sweep B
-(`dnsmasq_test.go`) — переиспользуй, не дублируй. Запиши delta % в лог.
+Добавлены success/feature-тесты для непокрытых веток handler'ов из карты §3
+(продуктовый код не тронут — правки только в `handlers_test.go`,
+`dnsmasq_test.go`, `linux_test.go`). 4 Windows-coverable handler'а доведены
+≥80%: `historyDiffHandler` 44→100%, `rollbackHandler` 70→90%,
+`changePasswordHandler` 50→85% (real bcrypt), `resolveAliasesTargetFile`
+50→87.5% (empty-creates-default). +3 Linux-gated handler-level 400-ветки через
+`fakeDnsmasq(1)` (reuse Coverage sweep B): putFile (A13 rollback),
+updateConfig, restoreBackup — `dnsmasq_test_failed → 400 + .bak rollback`.
+Остальные пункты карты (writeConfigWithTest / restoreHistoryVersion /
+putFile / updateConfig / historyRestore / restoreBackup success) уже покрыты
+в Coverage sweep B (`linux_test.go`, Linux-only). **CI coverage 81.3% →
+82.7%** (до ~85% не дотянули — ROI-обрыв по §3; все целевые handler'ы ≥80%).
+Коммит `1837a67`. Полную сводку и delta-таблицу см. в `логи/quality-sweep.md`
+(раздел «Этап 3»). Дефолтный CI не затронут; продуктовый Go-код не тронут.
 
 ---
 
