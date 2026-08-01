@@ -76,45 +76,32 @@ package" — фикс в `6a5fdad`). Реальный прогон ~2m54s: **no 
 
 ## Этап 2 — dnsmasq compatibility matrix ✅ ВЫПОЛНЕН (2026-07-31)
 
-**Цель:** smoke.sh против разных версий dnsmasq — поведение `--test`, парсеров,
-dhcp-range auto-detect может отличаться между версиями. Покрыть реальный риск
-версионных расхождений.
+Добавлен opt-in CI-шаг `run_compat_matrix` (build.yml:36-40, 230-342):
+build-from-source 3 версий dnsmasq (`2.80`/`2.86`/`2.90`) из upstream
+tarballs внутри того же fedora:44 контейнера (docker-in-docker недоступен),
+сборка с `COPTS="-std=gnu17 -Wno-error=..."` (gcc 15 / C23 toolchain-фикс
+для K&R callback declarations в dnsmasq ≤2.90). Каждая версия прогоняет
+полный `tests/smoke.sh` с `-dnsmasq-bin` + чистым per-version conf-dir.
 
-**Подход — CI matrix через Docker-образы с разным dnsmasq.** Fedora 44
-контейнер уже ставит одну версию (узнай: `dnsmasq --version` в CI логе /
-`dnsmasq -v`). Для матрицы нужны ≥2 другие версии, напр. старая (2.80, Debian
-stable/Alpine) и новейшая (2.90+, source build или rawhide).
+**Результаты:** 2.90 = 139/139 CLEAN PASS; 2.86 = 138/139 (1 known);
+2.80 = 137/139 (2 known); fedora:44 system = 2.92rel2 (default L3).
+Матрица нашла **2 реальных intermasq-бага** (по решению оператора
+зарегистрированы как known, products-код не тронут):
+- **A14** — `backup.go:119` `restoreBackupZip` зовёт `dnsmasq --test` без
+  `--conf-file=`/`--conf-dir=` (валидирует default path, не восстановленные
+  файлы); fail на ≤2.86.
+- **A15** — dnsmasq 2.80 отвергает восстановленный `10-static.conf` на
+  `--test --conf-file=` (точная причина требует stderr триажа).
 
-**Шаг 1 — узнать версии.** Добавить diagnostic (временно) или проверить: какая
-dnsmasq в fedora:44; какая в `debian:12` / `alpine:3.19` / `ubuntu:24.04` (через
-`docker run ... dnsmasq --version` или dnf/apk info). Выбрать 3 образа с разными
-версиями (напр. alpine≈2.89, debian≈2.86, fedora≈2.90). Зафиксируй карту в логе.
-**Шаг 2 — opt-in CI input** `run_compat_matrix` (по образцу `run_e2e_tests`):
-матричный шаг, который для каждого образа:
-1. собирает `intermasq-ci` (CGO_ENABLED=0, статик) — ОДИН раз вне матрицы,
-   артефакт передаётся.
-2. в контейнере с нужным dnsmasq: запускает `intermasq-ci` (`-init-system=none
-   -ci-mode=true` + стандартные пути) + `tests/smoke.sh` против него.
-3. фиксирует pass/fail версию-специфичных чеков (особенно `--test`
-   валидация = A13-территория, `40-config-files.sh`; парсеры `dhcp-range` =
-   `config_snapshot.go:parseDhcpRange`).
-**Реализация:** либо Forgejo `strategy.matrix` (если runner поддерживает
-services/дополнительные образы), либо последовательные шаги с `docker run`.
-Учти: runner сам в `fedora:44` container — вложенный docker может быть
-недоступен. Альтернатива: статический `intermasq-ci` + `chroot`/скачанные
-бинарники dnsmasq разных версий на один fedora-контейнер (проще чем докер-в-докере).
+Боковая находка: bash `read` не парсил последнюю строку `known-bugs.txt`
+без trailing `\n` — захардкодил `init_state` через `|| [ -n "$_line" ]`
+(`tests/lib/state.sh`).
 
-**Шаг 3 — терпимость к расхождениям.** Если версия даёт иное поведение, что НЕ
-баг intermasq (напр. dnsmasq 2.80 не знает флаг) — smoke-чек надо либо
-версионно-обойти (`dnsmasq --version | grep`), либо пометить known-difference в
-логе (НЕ known-bug intermasq). Баг intermasq = расхождение, которое ломает
-пользователя на поддерживаемой версии.
-
-**Верификация:** opt-in `run_compat_matrix=true` прогоняет smoke на 3 версиях,
-нет неожиданных fail'ов (или зафиксированные version-notes). Дефолтный CI не
-тронут.
-**Knock-on:** если nest rabbit — может потребоваться правка `dnsmasqBin`/
-`smoke.sh` на версионные флаги. Минимизируй. Запиши карту версий + результаты.
+Коммиты: `8328ceb` (input+step), `3ba97a6`/`d2ee080`/`f75511b`/`42d5a4f`
+(build-flag итерации), `39f8c20` (drop `::group::`), `7ad7d39`
+(register A14+A15), `b27ecfb` (trailing-newline fix). Полную сводку,
+артефакты и version map см. в `логи/quality-sweep.md` (раздел «Этап 2»).
+Дефолтный CI не затронут (opt-in); продуктовый Go-код не тронут.
 
 ---
 

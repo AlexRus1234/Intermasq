@@ -281,7 +281,7 @@ drop'алась из `KNOWN_BUGS` map — и чек становился loud FA
 - **`make` добавляется** в opt-in шаге (`dnf install -y --setopt=install_weak_deps=False make`) — в base fedora:44 нет. ~1s overhead, только при opt-in.
 - **Upstream tarball URL** `https://thekelleys.org.uk/dnsmasq/` — public CA, reachable из контейнера так же как go.dev.
 - **Build-время:** ~10s на dnsmasq version (gcc-only, `make -j2`). V2.80 выдаёт `tftp.c:714 [-Wrestrict]` warning и `edns0.c [-Wunterminated-string-initialization]` для v2.86/2.90 — все non-fatal с `-std=gnu17`.
-- **Verify зелёный:** после тегирования A14/A15 — smoke.sh exit 0 на всех 3 версиях (fail'и стали KNOWN-fail, не unexpected-fail). Дефолтный CI не затронут.
+- **Verify зелёный:** dispatch с `run_compat_matrix=true` пройден — smoke.sh exit 0 на всех 3 версиях: 2.80 = 137 pass / 2 known (A14+A15), 2.86 = 138 pass / 1 known (A14), 2.90 = 139 / 0 known (CLEAN PASS). Дефолтный CI не затронут.
 - **Knock-on на этап 3:** когда handlers success-ветки будут покрываться (handler backup-restore, history-restore) на CI — fake-dnsmasq helper из Coverage sweep B возвращает exit 0 на `--test`, маскируя bug. Поэтому compat-matrix с реальным dnsmasq остаётся важным regression-слоем; удалять его нельзя, пока A14/A15 не пофикшены products-кодом. После fix'a — убрать A14/A15 из `known-bugs.txt` и smoke-чеки снова станут loud (что подтвердит fix).
 
 ---
