@@ -29,7 +29,7 @@
 | A12 | HIGH | backend (main.go aliasDomainRegex) | FIXED | smoke.sh: `A12: Add TXT with underscore domain` |
 | A13 | HIGH | backend (dnsmasq.go writeFileRaw) | FIXED | smoke.sh: `PUT with invalid dnsmasq syntax → 400` (стал честным) |
 | A14 | HIGH | backend (backup.go restoreBackupZip) | FIXED | smoke.sh: `Restore valid ZIP → 200` (стал честным); L2 `TestRestoreBackupHandler_PassesConfFileToTest` (wiring argv) |
-| A15 | MEDIUM | backend (dnsmasq 2.80 dhcp-host tag-set strictness) | KNOWN-CONDITIONAL | smoke.sh: `Restore known version → 200` (tag A15, body-pattern `dnsmasq_test_failed`, KNOWN-fail только на dnsmasq 2.80) |
+| A15 | MEDIUM | backend (dnsmasq 2.80 dhcp-host tag-set strictness) | KNOWN-CONDITIONAL | smoke.sh: `Restore known version → 200` (suite 51) + `Restore valid ZIP → 200` (suite 52) — оба tag A15 + body-pattern `dnsmasq_test_failed`, KNOWN-fail только на dnsmasq 2.80 |
 
 **Итого:** 7 из 9 багов закрыты в Bugfix sweep (2026-07-28): A1, A2, A3, A4,
 A6, A8, A12 → FIXED. Ранее A5 + A13 уже закрыты (Блок A). A11 закрыт в
@@ -563,7 +563,11 @@ intermasq — сериализация `dhcp-host=` в `10-static.conf`, ген�
 `10-static.conf` через `POST /api/history/restore` возвращает 500
 `restore_error: dnsmasq_test_failed: ...`, потому что `restoreHistoryVersion`
 (`history.go:245`, уже корректно вызывает `--conf-file=`) падает на
-`dnsmasq --test`. Тот же файл принимается 2.86 и 2.90 без ошибок.
+`dnsmasq --test`. Тот же контент в backup ZIP роняет и `POST /api/backup/
+restore` (400 `dnsmasq_test_failed` через `restoreBackupZip` per-file
+`--conf-file=`) — этот путь был замаскирован A14 (bare `--test` падал раньше,
+не доходя до контента); после фикса A14 (2026-08-02) backup-restore тоже
+проявляет A15 на 2.80. На 2.86 и 2.90 оба пути принимаются без ошибок.
 
 **Корень:** точная причина не триажена (нужен capture stderr с `-v`).
 Подозрение (`логи/quality-sweep.md:227`): dhcp-host tag-set синтаксис
@@ -578,9 +582,13 @@ exit 1.
    (и обновить `README` + compat-matrix).
 
 **Regression test:** `tests/smoke.sh` —
-`51-history-diff-restore.sh:37`: `check "Restore known version → 200"
-200 "$S" A15 'dnsmasq_test_failed'` — на 2.80 KNOWN-fail с
-body-pattern matчем; на 2.86/2.90 PASS.
+`51-history-diff-restore.sh:40`: `check "Restore known version → 200"
+200 "$S" A15 'dnsmasq_test_failed'` (history-restore path). Тот же root
+cause проявляется и на backup-restore path после фикса A14
+(`52-backup-restore.sh:21`: `check "Restore valid ZIP → 200" 200 "$S" A15
+'dnsmasq_test_failed'`) — если backup ZIP содержит `10-static.conf` с
+A15-контентом, per-file `--test` на 2.80 также падает. Оба чека на 2.80
+KNOWN-fail с body-pattern matчем; на 2.86/2.90 — PASS.
 
 ---
 
