@@ -23,6 +23,22 @@ detect_init() {
     else echo "FATAL: neither systemd nor openrc"; exit 3; fi
 }
 INIT="$(detect_init)";  log "init: $INIT"
+
+# Если runner scp'нул свежий бинарник в /tmp/intermasq-ci.upload — ставим его.
+# Нельзя перезаписать исполняемый файл (ETXTBSY): стопаем сервисы, потом mv
+# (атомарный rename — старый inode остаётся живому процессу, новый открываем).
+if [ -f /tmp/intermasq-ci.upload ]; then
+    log "installing new binary from /tmp/intermasq-ci.upload"
+    if [ "$INIT" = systemd ]; then
+        systemctl stop intermasq intermasq-rootless 2>/dev/null || true
+    else
+        rc-service intermasq stop 2>/dev/null || true
+        rc-service intermasq-rootless stop 2>/dev/null || true
+    fi
+    mv -f /tmp/intermasq-ci.upload "$BIN"
+    chmod +x "$BIN"
+fi
+
 [ -x "$BIN" ] || { log "FATAL: $BIN missing (runner scp first)"; exit 4; }
 
 # ── 1. packages ──────────────────────────────────────────────────────────

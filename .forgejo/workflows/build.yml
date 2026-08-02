@@ -547,11 +547,11 @@ jobs:
               echo "  UserKnownHostsFile ~/.ssh/known_hosts"
             } >> ~/.ssh/config
             echo "===== L5: $INIT ($HOST) ====="
-            scp -o StrictHostKeyChecking=accept-new ./intermasq-ci "l5vm-$INIT:/usr/local/bin/intermasq-ci" \
+            scp -o StrictHostKeyChecking=accept-new ./intermasq-ci "l5vm-$INIT:/tmp/intermasq-ci.upload" \
               || { echo "::error::scp binary to $INIT failed"; L5_TOTAL_RC=1; continue; }
             scp -o StrictHostKeyChecking=accept-new tests/l5/provision.sh tests/l5/vm-check.sh "l5vm-$INIT:/tmp/" \
               || { echo "::error::scp scripts to $INIT failed"; L5_TOTAL_RC=1; continue; }
-            ssh -o ConnectTimeout=15 "l5vm-$INIT" "chmod +x /usr/local/bin/intermasq-ci && INTERMASQ_SECRET='$L5_INTERMASQ_SECRET' bash /tmp/provision.sh" \
+            ssh -o ConnectTimeout=15 "l5vm-$INIT" "INTERMASQ_SECRET='$L5_INTERMASQ_SECRET' bash /tmp/provision.sh" \
               || { echo "::error::provision.sh failed on $INIT"; L5_TOTAL_RC=1; continue; }
             ssh "l5vm-$INIT" "EXPECTED_INIT=$INIT bash /tmp/vm-check.sh" \
               || { echo "::error::vm-check.sh failed on $INIT"; L5_TOTAL_RC=1; continue; }
