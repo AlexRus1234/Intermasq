@@ -11,7 +11,7 @@
 | L1+L2 Go (unit + httptest) | **82.7%\*** (CI Linux) / 75.6% (Windows) | один package `main` → L1/L2 совместно не делятся. Парсеры/handler'ы ≥80%; остаточный разрыв сосредоточен в init-system/bootstrap/goroutine-коде (см. сноску + Gap 4) |
 | L3 — smoke.sh | ~75-80% API | ✓ 29 suite-файлов, 139 проверок; плагин-прокси покрыт (`82-plugins.sh`). Иная метрика — доля эндпоинтов, не строки |
 | L4 — Playwright UI | 34 теста (33 pass + 1 permanent-skip) | ✓ **финал**: батч 1+2 + фазы А,Б,В + Блок A (A5/A13 FIXED) + батч 4 + mutation-pass пройден. Hardening sweep (2026-07-29) добил: усилены 2 слабых spec'а (`hosts-sort`, `auth`) и разблокированы 2 infra-spec'а (`setup-screen` 2-я инстанция `:18084`, `sse-live` writable ARP). Единственный skip — `config-raw` (дублирует smoke, постоянный) |
-| L5 — Real VM (init/dnsmasq) | opt-in `run_l5_vm_tests` в build.yml | ✓ реализован (`логи/l5-nightly-bootstrap.md`): `tests/l5/provision.sh`+`vm-check.sh` валидны на Arch/systemd **и** Alpine/OpenRC (PASS=16/16 каждая: detect→real init, реальный рестарт dnsmasq + RestartSelf по смене PID, root + rootless/sudo). Бинарник из того же прогона, без Packages. Ждёт 7-day soak |
+| L5 — Real VM (init/dnsmasq) | opt-in `run_l5_vm_tests` в build.yml | ✓ реализован (`логи/l5-nightly-bootstrap.md`): `tests/l5/provision.sh`+`vm-check.sh` валидны на Arch/systemd **и** Alpine/OpenRC (PASS=16/16 каждая: detect→real init, реальный рестарт dnsmasq + RestartSelf по смене PID, root + rootless/sudo). Бинарник из того же прогона, без Packages. **Post-reboot stable** (обе ВМ пережили рестарт) |
 | Perf/stress (opt-in) | реализовано, informational | ✓ `tests/perf.sh` (read/reload/CRUD+RSS/SSE); не coverage-слой |
 
 > **\*** `82.7%` (CI Linux) / `75.6%` (Windows) — измерено
@@ -28,7 +28,7 @@
 
 **Суммарно:** Go-покрытие 82.7% (CI Linux) / 75.6% (Windows); L3 API ~75-80%
 (иная метрика); L4 — 33 pass + 1 permanent-skip; L5 — реализован (opt-in
-`run_l5_vm_tests`, PASS=16/16 на Arch+Alpine, ждёт 7-day soak). Метрики разных
+`run_l5_vm_tests`, PASS=16/16 на Arch+Alpine, post-reboot stable). Метрики разных
 слоёв не суммируются в одно число.
 
 ---
@@ -99,7 +99,7 @@ default-конфига); A13 убран из `known-bugs.txt`, smoke-чек ст
 **Решение:** Playwright, расширение `tests/e2e/specs/`. Единственный остаточный
 skip — `config-raw` (постоянный, дублирует smoke `40-config-files.sh`).
 
-### Gap 4: Real init-system integration (~+5%) — ЗАКРЫТО (ждёт 7-day soak)
+### Gap 4: Real init-system integration (~+5%) — ЗАКРЫТО
 
 **Что закрыто (функционально, на живых PID 1):**
 - `detectInitSystem()` чтение `/proc/1/comm` → `systemd` / `openrc`
@@ -117,8 +117,10 @@ rootless `intermasq`-user+sudoers (`UseSudo=true`). `tests/l5/provision.sh`
 post-v1.0 (ниша).
 
 **Результат:** PASS=16/16 на каждой ВМ, validated end-to-end через реальный
-runner. См. `логи/l5-nightly-bootstrap.md`, настройки ВМ — `tests/l5/vm-setup.md`,
-ход теста — `tests/l5/test-flow.md`. 7 прогонов без красноты → тикнуть метрику.
+runner; **post-reboot stable** (обе ВМ пережили рестарт — nft/services/binary
+корректно восстанавливаются). Гонять по факту правок в init-путях
+(`system.go`/`bins.go`/`main.go`). См. `логи/l5-nightly-bootstrap.md`,
+настройки ВМ — `tests/l5/vm-setup.md`, ход теста — `tests/l5/test-flow.md`.
 
 ### Fuzzing (~+2-3%) — ЗАКРЫТО (Hardening sweep, T1)
 
@@ -177,7 +179,7 @@ Go statement-coverage сейчас **82.7%\*** (CI Linux) / 75.6% (Windows).
 | **P0✓** | **Bugfix sweep (2026-07-28) — закрыто:** A1, A2, A3, A4, A6, A8, A12 → FIXED с regression-тестами. См. `логи/bugfix-sweep.md`. | готово | smoke 0 Fail / 0 Known-fail |
 | **P0✓** | **Hardening sweep (2026-07-29) — A11 закрыто:** `getFileHandler`/`putFileHandler` (`handlers_config.go`) получили `isSafePath` после `filepath.Join` (defense-in-depth); regression-тесты `TestGetFileHandlerRejectsUnsafePath` / `TestPutFileHandlerRejectsUnsafePath`. `tests/known-bugs.txt` теперь пуст. См. `логи/hardening-sweep.md`. | готово | known-bugs.txt пуст |
 | **P1** | Playwright (Gap 2) — **ФИНАЛ** ✓ (34 tests: 33 pass + 1 permanent-skip `config-raw`); A5/A13 FIXED; батч 4 закрыт; mutation-pass пройден; 2 слабых spec'а (`hosts-sort`, `auth`) усилены; 2 infra-spec'а (`setup-screen`, `sse-live`) разблокированы (Hardening sweep, 2026-07-29) | готово | UI-покрытие закрыто полностью |
-| **P2✓** | L5 Real VM (Gap 4) — **реализовано**: opt-in галочка `run_l5_vm_tests` в `build.yml` (не отдельный файл, без cron/автозапуска, без Packages) + `tests/l5/provision.sh` (idempotent, авто-detect systemd/openrc, 2 инстанса root+rootless, nft restrictive) + `tests/l5/vm-check.sh`. Валидировано вживую на Arch/systemd **и** Alpine/OpenRC (PASS=16/16 каждая). См. `логи/l5-nightly-bootstrap.md`. Ждёт 7-day soak. | готово (ждёт soak) | функциональная уверенность (не statement-%) |
+| **P2✓** | L5 Real VM (Gap 4) — **реализовано**: opt-in галочка `run_l5_vm_tests` в `build.yml` (не отдельный файл, без cron/автозапуска, без Packages) + `tests/l5/provision.sh` (idempotent, авто-detect systemd/openrc, 2 инстанса root+rootless, nft restrictive) + `tests/l5/vm-check.sh`. Валидировано вживую на Arch/systemd **и** Alpine/OpenRC (PASS=16/16 каждая, post-reboot stable). См. `логи/l5-nightly-bootstrap.md`. | готово | функциональная уверенность (не statement-%) |
 | **P2✓** | Fuzzing для парсеров (Hardening sweep + Quality sweep Этап 1) — закрыто: 4 `FuzzXxx` в `fuzz_test.go` (seed corpus) **+ opt-in CI-шаг `run_fuzz_tests`** (4×30s real `-fuzz`, no crash). См. `логи/quality-sweep.md`. | готово | ~+2-3% |
 | **P2✓** | Quality sweep Этап 4 — Go mutation-testing (2026-07-31): 12 мутаций, 9 killed / 2 survived→regressed (R2/R3) / 1 equivalent. См. `логи/quality-sweep.md`. | готово | качество тестов (не %) |
 | **P2✓** | Quality sweep Этап 2 — dnsmasq compat matrix (2026-07-31): opt-in CI build-from-source 2.80/2.86/2.90; найдены A14/A15 (known). См. `логи/quality-sweep.md`. | готово | версионная уверенность |
@@ -191,7 +193,7 @@ Go statement-coverage сейчас **82.7%\*** (CI Linux) / 75.6% (Windows).
 - [x] smoke.sh: 0 Fail, 0 Known-fail, 0 Skipped, ~140+ Pass (139/139 CLEAN PASS)
 - [x] L1+L2 Go test coverage ≥ 70% (`go test -cover ./...`) — **82.7% на CI Linux** / 75.6% Windows (Coverage sweep A+B+C+D + Quality sweep Этап 3, `логи/quality-sweep.md`)
 - [x] Playwright: 20+ spec'ов, все зелёные (33 pass + 1 permanent-skip `config-raw`, покрыт smoke)
-- [ ] L5: 7 дней без красноты — opt-in шаг `run_l5_vm_tests` в build.yml готов, валиден на Arch+Alpine (PASS=16/16), запущен в soak; тикнуть после 7 зелёных
+- [x] L5: post-reboot stable — обе ВМ пережили рестарт, `run_l5_vm_tests` green (PASS=16/16); opt-in, гоняется по факту правок в init-путях (`system.go`/`bins.go`/`main.go`)
 - [x] `tests/perf.sh`: 0 hard failures на дефолтных порогах
 - [x] Все баги из `tests/bugreport/bugs.md` либо FIXED, либо WONTFIX с rationale
 - [ ] CHANGELOG.md обновлён

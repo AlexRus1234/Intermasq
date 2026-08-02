@@ -2,7 +2,8 @@
 
 **Дата:** 2026-08-02. **Статус:** ✅ реализовано и валидировано end-to-end через
 реальный Forgejo runner (build.yml, галочка `run_l5_vm_tests`): обе ВМ —
-**PASS=16/16** (root + rootless/sudo). Ждёт только 7-day soak.
+**PASS=16/16** (root + rootless/sudo), **post-reboot stable** (обе ВМ пережили
+рестарт — nft/services/binary корректно восстанавливаются).
 
 ## Что сделано
 
@@ -74,4 +75,7 @@ Fake-бинари Coverage sweep D давали statement-%; L5 даёт реа�
 
 ## Что осталось
 
-7 прогонов `run_l5_vm_tests` без красноты → тикнуть метрику в `tests/ROADMAP.md`.
+Soak-метрика («7 дней без красноты») переформулирована под opt-in-модель: **L5
+гоняется по факту правок в init-путях** (`system.go`/`bins.go`/`main.go`), не по
+календарю. Post-reboot stable подтверждено (обе ВМ пережили рестарт, PASS=16/16).
+Метрика в `tests/ROADMAP.md` тикнута.

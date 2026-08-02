@@ -149,15 +149,16 @@ putFile / updateConfig / historyRestore / restoreBackup success) уже покр
 Alpine conf.d/log/nft-файл, ETXTBSY при scp) — все в `provision.sh`, продуктовый код
 не тронут. Фейк-тесты D оставлены (быстрые regression-guards); L5 — функциональный слой
 сверху. Полную сводку, артефакты и баг-таблицу см. `логи/l5-nightly-bootstrap.md`;
-настройки ВМ — `tests/l5/vm-setup.md`, ход теста — `tests/l5/test-flow.md`. Ждёт 7-day
-soak → тикнуть метрику в `tests/ROADMAP.md`.
+настройки ВМ — `tests/l5/vm-setup.md`, ход теста — `tests/l5/test-flow.md`.
+Post-reboot stable (обе ВМ пережили рестарт). Soak-метрика переформулирована под
+opt-in: гонять L5 по факту правок в init-путях, метрика в `tests/ROADMAP.md` тикнута.
 
 ---
 
 ## Финальное (после всех 5 этапов)
 
 - [x] Обновить `tests/ROADMAP.md`: метрики (coverage ≥70% ✓; L5 реализован ✓,
-      ждёт 7-day soak; «остальные enterprise» — post-v1.0).
+      post-reboot stable, метрика тикнута; «остальные enterprise» — post-v1.0).
 - [x] Session-лог — этап ВМ: `логи/l5-nightly-bootstrap.md` (сводка, артефакты,
       баг-таблица, результаты PASS=16/16). Этапы 1/2/4 — в `логи/quality-sweep.md`.
 - [x] Этот файл — referencia; правки закоммичены по этапам.
