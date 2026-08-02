@@ -124,56 +124,40 @@ putFile / updateConfig / historyRestore / restoreBackup success) уже покр
 
 ---
 
-## Этап ВМ — L5 Real VM nightly (Gap 4, СДЕЛАТЬ ПОСЛЕДНИМ)
+## Этап ВМ — L5 Real VM (Gap 4) ✅ ВЫПОЛНЕН (2026-08-02)
 
-**Цель:** единственный нулевой слой (L5 = 0%). Закрыть функциональную дыру,
-которую Coverage sweep D (fake-init бинарники) только «закрасил цифрой», не
-дав реальной уверенности: проверить что `sudo systemctl restart dnsmasq`
-ДЕЙСТВИТЕЛЬНО рестартит dnsmasq на живом systemd/openrc/runit, и `detectInitSystem`
-правильно детектит на реальной VM.
+Закрыт единственный нулевой слой (L5) — **функционально**, не цифрой: `detectInitSystem()`
+и реальные init-рестарты проверены на живых systemd и openrc (PID 1).
 
-**Что не покрыто (system.go, 0% на Windows, partial на CI через fakes):**
-- `detectInitSystem()` чтение `/proc/1/comm` на реальной VM (systemd/runit/init)
-- реальные `exec.Command("systemctl"/"service"/"rc-service"/"sv", ...)` calls
-- systemd-user vs system caller detection (`os.Getuid`)
-- `sudo systemctl restart dnsmasq` через sudoers (rootless-режим)
-- OpenRC, runit, sysvinit callers
+Реализация (по итогам корректировок оператора — **НЕ** отдельный nightly-файл/cron,
+**без** зависимости от Packages):
+- **2 persistent ВМ:** Arch/systemd (172.20.5.18) + Alpine/openrc (172.20.5.19).
+  runit/sysvinit — post-v1.0.
+- **Opt-in галочка `run_l5_vm_tests` в `build.yml`** (как `run_e2e_tests`): ручной
+  `workflow_dispatch`, без автозапуска. Бинарник `./intermasq-ci` берётся из того же
+  прогона (scp в `/tmp/` + `mv` — нельзя писать в работающий binary).
+- **`tests/l5/provision.sh`** (idempotent, авто-detect init): изолированный bridge
+  `br-l5` (`10.5.0.0/24`), dnsmasq только на `10.5.0.1:53` (`bind-interfaces`+`no-resolv`),
+  nftables restrictive (policy drop + SSH:22/lo/br-l5; файл per-init: `.conf`/`.nft`),
+  **2 инстанса** intermasq — root (`UseSudo=false`) и rootless user `intermasq`+sudoers
+  (`UseSudo=true`).
+- **`tests/l5/vm-check.sh`**: assert `[INIT] System:` + реальный рестарт dnsmasq (смена
+  PID + `dig`-проб) + RestartSelf (смена PID) — для обоих инстансов.
 
-**Решение — nightly job на persistent test VM.** Это infra-задача (1-2 дня на
-bootstrap, дальше работает само):
-1. **Persistent VM** (Proxmox API или libvirt/virsh) с snapshot → откат к
-   чистому состоянию перед прогоном.
-2. **Установить intermasq-ci как systemd-unit** на VM (или запустить вручную с
-   `-init-system=systemd`).
-3. **Прогнать `tests/smoke.sh` с `-init-system=systemd`** → assert dnsmasq
-   реально рестартует (не просто `exec.Command` exit 0, а проверка что порт/
-   lease обновляется).
-4. **Проверить reload/restart-self** через `/api/reload` + restart-self API →
-   убедиться что dnsmasq/intermasq реально перезапускаются.
-5. **Повторить** с `systemd-user`, `openrc`, `runit` (контейнер/VM per init —
-   openrc лучше Alpine-VM, runit — Void/Artix).
-6. **Отчёт:** nightly лог, 7 дней без красноты → тикнуть v1.0-метрику
-   «L5 nightly: 7 дней без красноты» в `tests/ROADMAP.md`.
-
-**Где живёт:** новый `.forgejo/workflows/l5-nightly.yml` (отдельный schedule
-`cron`, не в `build.yml`) либо внешний runner с доступом к VM API. intermasq-ci
-бинарник берётся из Forgejo Packages (артефакт основного build.yml) или
-собирается на VM.
-**Верификация:** nightly зелёный ≥1 прогона per init-system; smoke через `-init-
-system=systemd`/`openrc`/`runit` проходит; dnsmasq реально рестартует (не mock).
-**Knock-on:** это снимает критику «D = vanity»: fake-бинари дали statement-%, а
-L5 даёт реальную уверенность для тех же system.go путей. НЕ удаляй fake-тесты
-D — они быстрые regression-guards; L5 — функциональный nightly-слой сверху.
-**Запиши в лог:** какая VM-инфра выбрана, какие init проверены, результаты, кто
-держит nightly.
+**Результат (через реальный runner):** обе ВМ **PASS=16/16** (root + rootless/sudo в
+каждой). Найдено и пофиксено 7 инфра-багов (Type=dbus stall, dnsmasq wildcard leak,
+Alpine conf.d/log/nft-файл, ETXTBSY при scp) — все в `provision.sh`, продуктовый код
+не тронут. Фейк-тесты D оставлены (быстрые regression-guards); L5 — функциональный слой
+сверху. Полную сводку, артефакты и баг-таблицу см. `логи/l5-nightly-bootstrap.md`;
+настройки ВМ — `tests/l5/vm-setup.md`, ход теста — `tests/l5/test-flow.md`. Ждёт 7-day
+soak → тикнуть метрику в `tests/ROADMAP.md`.
 
 ---
 
 ## Финальное (после всех 5 этапов)
 
-- [ ] Обновить `tests/ROADMAP.md`: метрики (coverage ≥70% ✓ уже; L5 nightly 7
-      дней — после этапа ВМ; «остальныеenterprise» — post-v1.0).
-- [ ] Session-лог `логи/quality-sweep.md` — по-этапно: что сделано, verify,
-      артефакты (mutation-таблица, fuzz crash'и, compat-карта, delta %, VM-infra).
-- [ ] Не забыть: этот файл (`Coverage_sweep.md`-стиль) — referencia; реальные
-      правки коммитить по этапам.
+- [x] Обновить `tests/ROADMAP.md`: метрики (coverage ≥70% ✓; L5 реализован ✓,
+      ждёт 7-day soak; «остальные enterprise» — post-v1.0).
+- [x] Session-лог — этап ВМ: `логи/l5-nightly-bootstrap.md` (сводка, артефакты,
+      баг-таблица, результаты PASS=16/16). Этапы 1/2/4 — в `логи/quality-sweep.md`.
+- [x] Этот файл — referencia; правки закоммичены по этапам.

@@ -1,136 +1,77 @@
-# Этап ВМ — L5 Real VM nightly (Gap 4) — bootstrap
+# Этап ВМ — L5 Real VM (Gap 4) — ВЫПОЛНЕНО
 
-**Дата:** 2026-08-01. **Статус:** инфраструктура поднята, Arch/systemd доказан
-вживую (PASS=2/2), Alpine/OpenRC — конфиг частично готов, правки ушли в
-`tests/l5/provision.sh` (см. ниже). Nightly workflow + vm-check написаны.
+**Дата:** 2026-08-02. **Статус:** ✅ реализовано и валидировано end-to-end через
+реальный Forgejo runner (build.yml, галочка `run_l5_vm_tests`): обе ВМ —
+**PASS=16/16** (root + rootless/sudo). Ждёт только 7-day soak.
 
-## Решения (из плана, подтверждены оператором)
+## Что сделано
 
-- **2 ВМ:** `l5-systemd` (Arch, 172.20.5.18) + `l5-openrc` (Alpine 3.24.1,
+Единственный нулевой слой (L5) закрыт **функционально**, не цифрой: `detectInitSystem()`
+и реальные init-рестарты проверены на живых systemd и openrc (PID 1), в обеих ветках
+каждого caller'а (`UseSudo:false` — root, `UseSudo:true` — rootless через sudoers).
+Fake-бинари Coverage sweep D давали statement-%; L5 даёт реальную уверенность для
+тех же `system.go` путей.
+
+## Решения
+
+- **2 persistent ВМ:** `l5-systemd` (Arch, 172.20.5.18) + `l5-openrc` (Alpine 3.24.1,
   172.20.5.19). runit/sysvinit — post-v1.0.
-- **Транспорт:** SSH + SCP из текущего fedora:44 Forgejo runner'а (Model A:
-  smoke/vm-check гоняются **внутри** ВМ, через границу идёт только SSH:22;
-  API-трафик не покидает ВМ).
-- **Rollback:** пока без snapshot — `provision.sh` idempotent и чистит per-run
-  state (`/etc/intermasq/conf/*`, `/etc/intermasq/users.json`, history).
-- **Сеть:** изолированный bridge `br-l5` (`10.5.0.0/24`, без uplink, без
-  IP-forward). dnsmasq слушает ТОЛЬКО на `10.5.0.1:53` + DHCP на `br-l5`
-  (`interface=br-l5`+`bind-interfaces`+`no-resolv`+`local=/l5.test/` → DNS не
-  форвардится наружу). intermasq API на `127.0.0.1:18081`.
-- **Opt-in:** галочка `run_l5_vm_tests` в основном `.forgejo/workflows/build.yml`
-  (как `run_e2e_tests`/`run_perf_tests`). **НЕ отдельный файл, НЕ cron, НЕ
-  автозапуск по push** — только ручной `workflow_dispatch` с галочкой. Бинарник
-  берётся из того же прогона (`./intermasq-ci`) — **не зависит от Forgejo
-  Packages / артефактов** (по требованию оператора).
+- **Транспорт:** SSH+SCP из fedora:44 runner'а; smoke/vm-check гоняются **внутри** ВМ
+  (через границу — только SSH:22, API-трафик не покидает ВМ).
+- **Бинарник:** `./intermasq-ci` из того же прогона `build.yml` (scp в `/tmp/` + `mv`,
+  т.к. нельзя писать в работающий binary). **Никаких Packages / артефактов.**
+- **Opt-in:** галочка `run_l5_vm_tests` в `build.yml` (как `run_e2e_tests`). **НЕ
+  отдельный файл, НЕ cron, НЕ автозапуск** — только ручной `workflow_dispatch`.
+- **Rollback:** без snapshot — `provision.sh` idempotent, чистит per-run state.
+- **Сеть:** изолированный bridge `br-l5` (`10.5.0.0/24`, без uplink); dnsmasq только
+  на `10.5.0.1:53`+DHCP/br-l5 (`bind-interfaces`+`no-resolv`); intermasq API на
+  `127.0.0.1:18081/18082`; **nftables** restrictive (policy drop + SSH:22/lo/br-l5).
+- **2 инстанса на ВМ:** `intermasq:18081` (root) + `intermasq-rootless:18082`
+  (user `intermasq` + sudoers) — покрывают обе ветки `SystemCaller`.
 
-## Что проверено на живых ВМ
-
-### `l5-systemd` (Arch, 172.20.5.18) — ДОКАЗАНО
-
-`detectInitSystem()` → `"systemd"` (`/proc/1/comm`=`systemd`,
-`system.go:258`). intermasq под root → `SystemdSystemCaller{UseSudo:false}`.
-Ручной прогон `tests/l5/_scratch/l5test.sh`:
-
-| Ассерт | Результат |
-|---|---|
-| `[INIT] System: systemd (root)` в логе | ✓ |
-| `GET /api/status` → `dnsmasq_active:true` (real `systemctl is-active`) | ✓ |
-| `POST /api/reload` → dnsmasq `ActiveEnterTimestamp` `16:31:53→16:36:02` | ✓ реально рестартовал |
-| `POST /api/restart-self` → intermasq `MainPID` `1393→1467`, back in 1s | ✓ реально self-restart |
-
-`-ci-mode` НЕ передан → дефолт `false` → `/api/restart-self` зовёт
-`sysCaller.RestartSelf()` (`main.go:264` `if !*CiMode`).
-
-### `l5-openrc` (Alpine, 172.20.5.19) — конфиг частично готов
-
-`detectInitSystem()` → `"openrc"` (`/proc/1/comm`=`init` + `/sbin/rc-service`
-есть, `system.go:258-262`). `br-l5` поднят (openrc-сервис оператором). Найдены
-баги сетапа (правит `provision.sh`):
-- **dnsmasq утекал в глобальную сеть:** слушал `0.0.0.0:53` (процесс стартовал
-  до дозревания конфига) → `rc-service dnsmasq restart` + корректный l5.conf.
-- **`/etc/init.d/intermasq` недописан:** нет `INTERMASQ_SECRET`, нет
-  `command_args`, stdout не залогирован (нельзя assert `[INIT] System:`), имя
-  бинарника `intermasq` vs `intermasq-ci`.
-
-## Баги найдены и пофиксены (Arch, во время bootstrap)
-
-1. **dnsmasq unit `Type=dbus` + мой drop-in убрал `--enable-dbus`** → systemd
-   ждал readiness-сигнал вечно (`activating`, `systemctl restart` блокировал).
-   Фикс: drop-in с `Type=simple` (`/etc/systemd/system/dnsmasq.service.d/l5.conf`).
-2. **l5.conf не грузился:** `/etc/dnsmasq.conf` без активного `conf-dir`, а мой
-   `grep -q conf-dir` матчил закомментированные строки → `|| echo` не сработал.
-   dnsmasq биндил wildcard `0.0.0.0:53` → конфликт с `systemd-resolved`
-   (`127.0.0.53:53`, "Address already in use"). Фикс: drop-in пинит
-   `--conf-file=/etc/dnsmasq.d/l5.conf` явно.
-3. (PS-quicks, не баг проекта) PowerShell 5.1 сгрызает `\n` и double-quotes в
-   args native-команд → писал файлы через scp/printf-on-remote, не инлайн.
-
-## Артефакты в репо (этот этап)
-
-- `.forgejo/workflows/build.yml` — добавлена opt-in галочка `run_l5_vm_tests` +
-  шаг «L5 — Real VM»: ставит openssh, scp'ит **`./intermasq-ci` из того же
-  прогона** (без Packages) + `tests/l5/*` на обе ВМ, гоняет provision + vm-check.
-- `tests/l5/provision.sh` — idempotent-настройка обеих ВМ (br-l5, dnsmasq c
-  изоляцией + nft restrictive, 2 инстанса intermasq root + rootless, sudoers).
-- `tests/l5/vm-check.sh` — assert detect (`[INIT] System:`) + реальный restart
-  dnsmasq (`ActiveEnterTimestamp`/PID) + RestartSelf (PID) — для обоих инстансов.
-- `tests/l5/intermasq.service` (systemd) / `tests/l5/intermasq.openrc` (Alpine).
-- `tests/l5/README.md` — как поднять ВМ руками + соответствие секретов.
-
-## Секреты Forgejo (для оператора)
-
-`L5_SSH_KEY`, `L5_SYSTEMD_HOST` (`root@172.20.5.18`),
-`L5_OPENRC_HOST` (`root@172.20.5.19`), `L5_INTERMASQ_SECRET`.
-**Packages/`UPLOAD_TOKEN`/`L5_BINARY_VERSION` — НЕ нужны.**
-
-## Держит nightly
-
-Оператор (ВМ — persistent на гипервизоре пользователя; nightly гоняет
-fedora:44 runner по SSH). 7 дней green → тикнуть `tests/ROADMAP.md` метрику
-«L5 nightly: 7 дней без красноты».
-
----
-
-## Update (2026-08-01): 2 инстанса (root + rootless/sudo) + nftables
-
-По просьбе оператора добавлены:
-- **nftables** на обе ВМ (`/etc/nftables.conf`): на внешнем iface гасятся
-  intermasq API `18081/18082` и dnsmasq `:53/:67`; lo/br-l5/SSH свободны,
-  forward policy drop. Defense-in-depth к `bind-interfaces`.
-- **rootless-инстанс** (`intermasq-rootless:18082`, user `intermasq` + sudoers
-  `/etc/sudoers.d/intermasq` с резолв. путями) → покрывает `UseSudo:true`
-  ветки: `system.go:40` (is-active), `:51` (restart dnsmasq), `:61` (restart-self).
-- Корневой инстанс оставлен canonical именем `intermasq` (т.к. `RestartSelf`
-  хардкодит это имя, `system.go:61`) → root restart-self=self; rootless
-  restart-self бьёт по root-sibling (PID-change доказывает выполнение sudo-ветки).
-
-**Архив валидации:**
+## Результаты валидации (через реальный runner)
 
 | ВМ | init | root (UseSudo=false) | rootless (UseSudo=true) | итог |
 |---|---|---|---|---|
-| Arch 172.20.5.18 | systemd | detect `systemd (root)`, reload/restart-self PID-change | detect `systemd (via sudo)`, reload PID-change (sudo `systemctl restart dnsmasq`), restart-self PID-change (sudo `systemctl restart intermasq`) | **PASS=16 FAIL=0** |
-| Alpine 172.20.5.19 | openrc | detect `openrc (root)`, reload/restart-self PID-change | detect `openrc (via sudo)`, reload PID-change (sudo `rc-service dnsmasq restart`), restart-self PID-change (sudo `rc-service intermasq restart`) | **PASS=16 FAIL=0** |
+| Arch 172.20.5.18 | systemd | `systemd (root)`, reload `systemctl restart dnsmasq`, restart-self | `systemd (via sudo)`, reload/restart-self через `sudo systemctl …` | **PASS=16** |
+| Alpine 172.20.5.19 | openrc | `openrc (root)`, reload `rc-service dnsmasq restart`, restart-self | `openrc (via sudo)`, reload/restart-self через `sudo rc-service …` | **PASS=16** |
 
-**Баг найден при rootless на Alpine:** openrc source'ит `/etc/conf.d/<svcname>`
-per-service, а секрет писался только в `/etc/conf.d/intermasq` →
-`intermasq-rootless` стартовал без `INTERMASQ_SECRET` → падал. Фикс в
-`provision.sh`: секрет пишется и в `/etc/conf.d/intermasq-rootless`. Alpine ВМ
-ушла в даун (network/power) до re-run'а — вернётся, прогон добьёт rootless.
+Каждый ассерт = смена PID (реальный рестарт, не `exit 0`) + `dig @10.5.0.1 probe.l5.test → 10.5.0.9`.
 
-**Баг rootless-log на Alpine:** busybox `start-stop-daemon` открывает
-`output_log` **после** `command_user` (drop privs), а `/var/log/intermasq-rw.log`
-был root-owned → permission denied → сервис крутился на буте. Фикс в
-`provision.sh`: `chown intermasq:intermasq /var/log/intermasq-rw.log`.
+## Баги найдены и пофиксены (все в `provision.sh`, продуктовый код не тронут)
 
-**Баг nft на Alpine (стоил SSH-доступа):** Alpine nftables-сервис грузит
-**`/etc/nftables.nft`** (init.d default `${rules_file}`), а НЕ `.conf`. provision.sh
-писал `.conf` → сервис не видел его и грузил дефолтный `table inet filter`
-(policy drop, **без правила SSH:22**) → на `rc-service nftables restart`/ребуте
-SSH дропался. Фикс: provision.sh определяет rules-файл per-init (systemd
-`/etc/nftables.conf`, openrc `/etc/nftables.nft`) и пишет туда **restrictive**
-ruleset (policy drop + явные allow: lo/established/br-l5/**SSH:22**/icmp +
-дроп sensitive-портов на ext iface). Теперь restrictive и reboot-safe на обеих ВМ.
+1. **dnsmasq `Type=dbus` без `--enable-dbus`** (Arch) → `activating` вечно, `systemctl
+   restart` блокировал. Фикс: drop-in `Type=simple` + `--conf-file=l5.conf` явно.
+2. **l5.conf не грузился** (Arch) — `/etc/dnsmasq.conf` без активного `conf-dir` →
+   wildcard `0.0.0.0:53` → конфликт с `systemd-resolved`. Фикс: drop-in пинит conf-file.
+3. **Alpine dnsmasq утекал в сеть** — слушал `0.0.0.0:53` (стартовал до конфига). Фикс:
+   `rc-service dnsmasq restart` после корректного l5.conf.
+4. **Alpine rootless падал** — openrc source'ит `/etc/conf.d/<svcname>` per-service, секрет
+   был только в `intermasq`. Фикс: секрет пишется в оба conf.d.
+5. **Alpine rootless лог** — busybox `start-stop-daemon` открывает `output_log` после
+   drop-privs → root-owned лог → permission denied. Фикс: `chown intermasq:intermasq`.
+6. **Alpine nft ломал SSH** — сервис грузит `/etc/nftables.nft` (не `.conf`); дефолтный
+   `table inet filter` без SSH:22 → на ребуте доступ пропадал. Фикс: rules-файл per-init,
+   restrictive ruleset с явным `tcp dport 22 accept`.
+7. **scp поверх работающего binary** → ETXTBSY (`dest open: Failure`). Фикс: scp в
+   `/tmp/intermasq-ci.upload` + `mv` после стопа сервисов.
 
-**PS-напоминание:** PowerShell 5.1 сгрызает `\n` и double-quotes в args native
-(ssh) — файлы на ВМ пишутся через `scp`/heredoc, не инлайн-`printf`. nft-конфиг
-пишется из heredoc в provision.sh (на ВМ, не через PS).
+## Артефакты в репо
+
+- `.forgejo/workflows/build.yml` — input `run_l5_vm_tests` + шаг «L5 — Real VM».
+- `tests/l5/provision.sh` — idempotent-настройка (br-l5, dnsmasq, nft, 2 инстанса,
+  sudoers) + установка бинарника из `/tmp`.
+- `tests/l5/vm-check.sh` — assert detect + реальный restart dnsmasq + RestartSelf
+  (обоих инстансов).
+- `tests/l5/vm-setup.md` — точные настройки каждой ВМ по пунктам.
+- `tests/l5/test-flow.md` — как проходит тест L5.
+- `tests/l5/README.md` — краткий индекс.
+
+## Секреты Forgejo
+
+`L5_SSH_KEY`, `L5_SYSTEMD_HOST` (`root@172.20.5.18`), `L5_OPENRC_HOST`
+(`root@172.20.5.19`), `L5_INTERMASQ_SECRET`. Packages/`UPLOAD_TOKEN` — НЕ нужны.
+
+## Что осталось
+
+7 прогонов `run_l5_vm_tests` без красноты → тикнуть метрику в `tests/ROADMAP.md`.

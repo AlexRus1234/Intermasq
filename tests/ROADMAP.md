@@ -27,7 +27,8 @@
 > рефакторить bootstrap (правка исходников).;
 
 **Суммарно:** Go-покрытие 82.7% (CI Linux) / 75.6% (Windows); L3 API ~75-80%
-(иная метрика); L4 — 33 pass + 1 permanent-skip; L5 — 0%. Метрики разных
+(иная метрика); L4 — 33 pass + 1 permanent-skip; L5 — реализован (opt-in
+`run_l5_vm_tests`, PASS=16/16 на Arch+Alpine, ждёт 7-day soak). Метрики разных
 слоёв не суммируются в одно число.
 
 ---
@@ -98,24 +99,26 @@ default-конфига); A13 убран из `known-bugs.txt`, smoke-чек ст
 **Решение:** Playwright, расширение `tests/e2e/specs/`. Единственный остаточный
 skip — `config-raw` (постоянный, дублирует smoke `40-config-files.sh`).
 
-### Gap 4: Real init-system integration (~+5%) — РЕАЛИЗОВАНО (ждёт nightly soak)
+### Gap 4: Real init-system integration (~+5%) — ЗАКРЫТО (ждёт 7-day soak)
 
-**Что не покрыто:**
-- `detectInitSystem()` чтение `/proc/1/comm`
-- Реальные `exec.Command("systemctl", ...)` calls
-- Systemd-user vs system caller detection
-- OpenRC, runit, sysvinit callers
-- `sudo systemctl restart dnsmasq` через sudoers (rootless-режим)
+**Что закрыто (функционально, на живых PID 1):**
+- `detectInitSystem()` чтение `/proc/1/comm` → `systemd` / `openrc`
+- Реальные `exec.Command("systemctl"/"rc-service", …)` calls (root + sudo)
+- Systemd-user vs system caller detection (`os.Getuid`)
+- `sudo systemctl/rc-service restart dnsmasq` через sudoers (rootless-режим)
+- `RestartSelf()` через реальную init-систему
 
-**Решение:** L5 — nightly job на persistent test VM.
-1. Snap VM к чистому состоянию (Proxmox API или virsh)
-2. Установить intermasq-ci как systemd-unit
-3. Прогнать smoke.sh с `-init-system=systemd`
-4. Проверить что dnsmasq реально рестартует
-5. Повторить с systemd-user, openrc, runit (container per init)
-6. Отчёт
+**Решение (реализовано):** opt-in галочка `run_l5_vm_tests` в `build.yml` (НЕ
+отдельный nightly-файл/cron, без Packages). На 2 persistent ВМ (Arch/systemd,
+Alpine/openrc) поднимаются по 2 инстанса intermasq — root (`UseSudo=false`) и
+rootless `intermasq`-user+sudoers (`UseSudo=true`). `tests/l5/provision.sh`
+(идемпотентный: br-l5, изолированный dnsmasq, nft restrictive) + `vm-check.sh`
+(detect + реальный рестарт dnsmasq + RestartSelf по смене PID). runit/sysvinit —
+post-v1.0 (ниша).
 
-Время: 1-2 дня на bootstrap, дальше работает само.
+**Результат:** PASS=16/16 на каждой ВМ, validated end-to-end через реальный
+runner. См. `логи/l5-nightly-bootstrap.md`, настройки ВМ — `tests/l5/vm-setup.md`,
+ход теста — `tests/l5/test-flow.md`. 7 прогонов без красноты → тикнуть метрику.
 
 ### Fuzzing (~+2-3%) — ЗАКРЫТО (Hardening sweep, T1)
 
