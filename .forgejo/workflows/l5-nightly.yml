@@ -1,0 +1,139 @@
+name: L5 Real VM nightly
+
+# Отдельный workflow (НЕ в build.yml — требование задания, чтобы не удлинять
+# дефолтный пайплайн). Nightly + ручной запуск. Гоняет provision.sh + vm-check.sh
+# на двух persistent ВМ (systemd Arch + openrc Alpine) по SSH (Model A: всё внутри ВМ).
+#
+# Что проверяет (то, что Coverage sweep D fake-бинариями дать не мог):
+#   - detectInitSystem() на реальном PID 1 (systemd/init)
+#   - /api/reload → реальный рестарт dnsmasq через systemctl/rc-service (смена PID)
+#   - /api/restart-self → реальный self-restart intermasq (смена PID)
+#
+# Секреты (Forgejo → Settings → Secrets):
+#   L5_SSH_KEY           — приватный SSH-ключ (доступ к обеим ВМ как root)
+#   L5_SYSTEMD_HOST      — root@172.20.5.18
+#   L5_OPENRC_HOST       — root@172.20.5.19
+#   L5_INTERMASQ_SECRET  — INTERMASQ_SECRET для запуска сервера (≥32 байта)
+#   L5_BINARY_VERSION    — версия intermasq-ci в Forgejo Packages (sha-<short> или тег)
+#   UPLOAD_TOKEN         — токен alexrus для скачивания из Packages (уже есть для publish)
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # 03:00 UTC nightly
+  workflow_dispatch:
+    inputs:
+      binary_version:
+        description: "intermasq-ci version in Forgejo Packages (overrides L5_BINARY_VERSION)"
+        required: false
+        default: ""
+
+jobs:
+  l5-vm:
+    runs-on: docker
+    container:
+      image: fedora:44
+    strategy:
+      fail-fast: false
+      matrix:
+        init: [systemd, openrc]
+    env:
+      # Секреты тащим в env, хост выбираем bash-ем по matrix.init (динамический
+      # индекс в secrets-контексте не поддерживается — поэтому так).
+      L5_SYSTEMD_HOST: ${{ secrets.L5_SYSTEMD_HOST }}
+      L5_OPENRC_HOST: ${{ secrets.L5_OPENRC_HOST }}
+      L5_INTERMASQ_SECRET: ${{ secrets.L5_INTERMASQ_SECRET }}
+      UPLOAD_TOKEN: ${{ secrets.UPLOAD_TOKEN }}
+      BINVER: ${{ github.event.inputs.binary_version }}
+
+    steps:
+      - name: Install git + ssh client
+        run: dnf install -y --setopt=install_weak_deps=False git curl openssh-clients
+
+      - name: Trust Local CA (for git.yadr00.internal Packages)
+        run: |
+          curl -k https://172.20.0.1:9000/roots.pem -o /etc/pki/ca-trust/source/anchors/step-ca.crt
+          update-ca-trust
+
+      - name: Resolve VM host + binary version
+        run: |
+          if [ "${{ matrix.init }}" = "systemd" ]; then HOST="$L5_SYSTEMD_HOST"; else HOST="$L5_OPENRC_HOST"; fi
+          [ -n "$HOST" ] || { echo "::error::no host secret for ${{ matrix.init }}"; exit 1; }
+          echo "HOST=$HOST" >> $GITHUB_ENV
+          if [ -z "$BINVER" ]; then BINVER="${L5_BINARY_VERSION_DEF:-latest}"; fi
+          echo "BINVER=$BINVER" >> $GITHUB_ENV
+          echo "Target: $HOST (init=${{ matrix.init }}, binary=$BINVER)"
+        env:
+          L5_BINARY_VERSION_DEF: ${{ secrets.L5_BINARY_VERSION }}
+
+      - name: Configure SSH (key + known_hosts)
+        env:
+          L5_SSH_KEY: ${{ secrets.L5_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$L5_SSH_KEY" > ~/.ssh/l5_key && chmod 600 ~/.ssh/l5_key
+          # HOST is "user@ip"; split for the ssh config block.
+          # accept-new: first run fingerprints the host, subsequent runs verify.
+          HLS="${HOST#*@}"; HUSER="${HOST%@*}"
+          {
+            echo "Host l5vm"
+            echo "  HostName $HLS"
+            echo "  User $HUSER"
+            echo "  IdentityFile ~/.ssh/l5_key"
+            echo "  StrictHostKeyChecking accept-new"
+            echo "  UserKnownHostsFile ~/.ssh/known_hosts"
+          } > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+          ssh -o ConnectTimeout=10 l5vm 'echo SSH_OK; uname -a; cat /proc/1/comm'
+
+      - name: Download intermasq-ci from Forgejo Packages
+        run: |
+          # Если оператор не передал binary_version явно → берём самую свежую
+          # опубликованную (по created_at) через v1 Packages API. Секрет
+          # L5_BINARY_VERSION не нужен — версионинг авто.
+          if [ "$BINVER" = "latest" ]; then
+            VER=$(curl -fsSL --cacert /etc/pki/ca-trust/source/anchors/step-ca.crt \
+                    --user "alexrus:${UPLOAD_TOKEN}" \
+                    "https://git.yadr00.internal/api/v1/packages/AlexRus1234?type=generic&name=intermasq" \
+                  | jq -r 'sort_by(.created_at) | last | .version // empty')
+            [ -n "$VER" ] || { echo "::error::cannot resolve latest intermasq version (publish one via build.yml push_to_registry=true first)"; exit 1; }
+            echo "resolved latest = $VER"; BINVER="$VER"
+          fi
+          echo "BINVER=$BINVER" >> $GITHUB_ENV
+          curl -fS --cacert /etc/pki/ca-trust/source/anchors/step-ca.crt \
+               --user "alexrus:${UPLOAD_TOKEN}" \
+               -o intermasq-ci \
+               "https://git.yadr00.internal/api/packages/AlexRus1234/generic/intermasq/${BINVER}/intermasq-ci"
+          chmod +x intermasq-ci
+          ls -lh intermasq-ci
+
+      - name: Checkout (for tests/l5/* scripts)
+        uses: actions/checkout@v4
+
+      - name: Ship binary + scripts to VM
+        run: |
+          scp -o StrictHostKeyChecking=accept-new intermasq-ci l5vm:/usr/local/bin/intermasq-ci
+          scp -o StrictHostKeyChecking=accept-new tests/l5/provision.sh tests/l5/vm-check.sh l5vm:/tmp/
+
+      - name: Provision (idempotent setup of br-l5, dnsmasq, intermasq)
+        run: |
+          ssh l5vm "INTERMASQ_SECRET='$L5_INTERMASQ_SECRET' bash /tmp/provision.sh"
+
+      - name: vm-check (L5 assertions: detect + real restart dnsmasq + self-restart)
+        run: |
+          ssh l5vm "EXPECTED_INIT='${{ matrix.init }}' bash /tmp/vm-check.sh"
+
+      - name: (optional) smoke regression vs real init
+        # smoke делает rm -rf $CONF_DIR — безопасно, т.к. CONF_DIR указывает на
+        # /etc/intermasq/conf (отдельно от dnsmasq l5.conf). Ловит регрессии L3
+        # на реальной init-системе. informational — не валит nightly.
+        continue-on-error: true
+        run: |
+          ssh l5vm 'BASE=http://127.0.0.1:18081 CONF_DIR=/etc/intermasq/conf bash /tmp/smoke.sh' \
+            || echo "::warning::smoke had unexpected failures (informational; see log)"
+
+      - name: Collect logs
+        if: always()
+        run: |
+          scp -o StrictHostKeyChecking=accept-new l5vm:/var/log/intermasq.log "intermasq-${{ matrix.init }}.log" || true
+          echo "===== intermasq.log (${{ matrix.init }}) ====="
+          tail -n 40 "intermasq-${{ matrix.init }}.log" 2>/dev/null || true
