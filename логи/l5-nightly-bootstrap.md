@@ -17,8 +17,11 @@
   IP-forward). dnsmasq слушает ТОЛЬКО на `10.5.0.1:53` + DHCP на `br-l5`
   (`interface=br-l5`+`bind-interfaces`+`no-resolv`+`local=/l5.test/` → DNS не
   форвардится наружу). intermasq API на `127.0.0.1:18081`.
-- **Opt-in:** отдельный `.forgejo/workflows/l5-nightly.yml` (`schedule.cron` +
-  `workflow_dispatch`), НЕ в `build.yml` (требование задания).
+- **Opt-in:** галочка `run_l5_vm_tests` в основном `.forgejo/workflows/build.yml`
+  (как `run_e2e_tests`/`run_perf_tests`). **НЕ отдельный файл, НЕ cron, НЕ
+  автозапуск по push** — только ручной `workflow_dispatch` с галочкой. Бинарник
+  берётся из того же прогона (`./intermasq-ci`) — **не зависит от Forgejo
+  Packages / артефактов** (по требованию оператора).
 
 ## Что проверено на живых ВМ
 
@@ -64,21 +67,21 @@
 
 ## Артефакты в репо (этот этап)
 
-- `.forgejo/workflows/l5-nightly.yml` — nightly cron + workflow_dispatch,
-  matrix [systemd, openrc], SSH/SCP, вызов provision.sh + vm-check.sh.
+- `.forgejo/workflows/build.yml` — добавлена opt-in галочка `run_l5_vm_tests` +
+  шаг «L5 — Real VM»: ставит openssh, scp'ит **`./intermasq-ci` из того же
+  прогона** (без Packages) + `tests/l5/*` на обе ВМ, гоняет provision + vm-check.
 - `tests/l5/provision.sh` — idempotent-настройка обеих ВМ (br-l5, dnsmasq c
-  изоляцией, intermasq unit/openrc, INTERMASQ_SECRET, binary install).
+  изоляцией + nft restrictive, 2 инстанса intermasq root + rootless, sudoers).
 - `tests/l5/vm-check.sh` — assert detect (`[INIT] System:`) + реальный restart
-  dnsmasq (`ActiveEnterTimestamp`) + RestartSelf (`MainPID`).
+  dnsmasq (`ActiveEnterTimestamp`/PID) + RestartSelf (PID) — для обоих инстансов.
 - `tests/l5/intermasq.service` (systemd) / `tests/l5/intermasq.openrc` (Alpine).
-- `tests/l5/dnsmasq-l5.conf` — шаблон изолированного dnsmasq-конфига.
 - `tests/l5/README.md` — как поднять ВМ руками + соответствие секретов.
 
 ## Секреты Forgejo (для оператора)
 
 `L5_SSH_KEY`, `L5_SYSTEMD_HOST` (`root@172.20.5.18`),
-`L5_OPENRC_HOST` (`root@172.20.5.19`), `L5_INTERMASQ_SECRET`, и опубликованный
-`intermasq-ci` в Forgejo Packages (`L5_BINARY_VERSION`).
+`L5_OPENRC_HOST` (`root@172.20.5.19`), `L5_INTERMASQ_SECRET`.
+**Packages/`UPLOAD_TOKEN`/`L5_BINARY_VERSION` — НЕ нужны.**
 
 ## Держит nightly
 

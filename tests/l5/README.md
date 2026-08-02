@@ -1,4 +1,4 @@
-# L5 — Real VM nightly (Gap 4)
+# L5 — Real VM (Gap 4)
 
 Единственный функциональный слой, требующий **живых init-систем** (systemd /
 openrc) как PID 1. Контейнеры не годятся: `detectInitSystem()` читает
@@ -6,8 +6,12 @@ openrc) как PID 1. Контейнеры не годятся: `detectInitSyste
 Fake-бинари из Coverage sweep D дали statement-процент, но не реальную
 уверенность; L5 закрывает именно функциональную дыру.
 
-Подробности: `логи/l5-nightly-bootstrap.md`. Workflow:
-`.forgejo/workflows/l5-nightly.yml`.
+**Где живёт:** opt-in галочка `run_l5_vm_tests` в основном
+`.forgejo/workflows/build.yml` (рядом с `run_e2e_tests`/`run_perf_tests`).
+**НЕ отдельный файл, НЕ cron, НЕ автозапуск** — только ручной `workflow_dispatch`
+с поставленной галочкой. Бинарник берётся из того же прогона (`./intermasq-ci`,
+уже собран) — **никакой зависимости от Forgejo Packages/артефактов**.
+Подробности: `логи/l5-nightly-bootstrap.md`.
 
 ## Что проверяет `vm-check.sh` (2 инстанса на ВМ)
 
@@ -56,30 +60,30 @@ Fake-бинари из Coverage sweep D дали statement-процент, но 
 `/etc/dnsmasq.d/l5.conf` (dnsmasq interface config, protected) → внутри него
 `conf-dir=/etc/intermasq/conf/,*.conf` (host-конфиги, которыми управляет intermasq).
 
-## Ручной bootstrap ВМ (один раз, до первого nightly)
+## Ручной bootstrap ВМ (один раз, до первого прогона)
 
-`provision.sh` сделает почти всё, но базовый доступ и пакеты ставит оператор:
+`provision.sh` сделает почти всё, но базовый доступ ставит оператор:
 
 1. Поднять ВМ (Arch standard install / Alpine standard `setup-alpine`).
-2. `root` SSH-доступ; публичный ключ → `~/.ssh/authorized_keys`.
+2. `root` SSH-доступ; публичный ключ runner'а → `~/.ssh/authorized_keys`.
 3. На Arch: убедиться что `pacman -Sy` работает. На Alpine: `apk update`.
-4. Статичный IP в сети, видимой с runner'а.
-5. Опубликовать `intermasq-ci` в Forgejo Packages (прогнать `build.yml` с
-   `push_to_registry=true`) — nightly качает его оттуда.
+4. Статичный IP в сети, видимой с fedora:44 runner'а.
 
-`provision.sh` дальше сам: поставит dnsmasq/bind-tools, поднимет `br-l5`,
-настроит изолированный dnsmasq, intermasq unit/openrc, секрет, старт.
+Бинарник `intermasq-ci` кладётся runner'ом из того же прогона `build.yml`
+(никаких отдельных публикаций). `provision.sh` дальше сам: поставит
+dnsmasq/bind-tools/nftables, поднимет `br-l5`, изолированный dnsmasq,
+intermasq unit/openrc (2 инстанса), секрет, старт.
 
 ## Секреты Forgejo
 
 | Имя | Пример |
 |---|---|
-| `L5_SSH_KEY` | приватный ключ (ed25519/rsa) |
+| `L5_SSH_KEY` | приватный ключ (ed25519), парный к `authorized_keys` на ВМ |
 | `L5_SYSTEMD_HOST` | `root@172.20.5.18` |
 | `L5_OPENRC_HOST` | `root@172.20.5.19` |
 | `L5_INTERMASQ_SECRET` | `openssl rand -hex 32` (≥32 байта) |
-| `L5_BINARY_VERSION` | `sha-abcdef12` или `v1.0-pre1` |
-| `UPLOAD_TOKEN` | токен `alexrus` (уже есть для publish в `build.yml`) |
+
+(Packages/`UPLOAD_TOKEN`/`version_tag` — **не нужны**; L5 не зависит от артефактов.)
 
 ## Известные гоччи (найдены на bootstrap)
 

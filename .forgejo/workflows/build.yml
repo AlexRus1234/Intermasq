@@ -38,6 +38,11 @@ on:
         required: true
         default: false
         type: boolean
+      run_l5_vm_tests:
+        description: "L5 Real VM: provision + vm-check на persistent ВМ (Arch/systemd + Alpine/openrc, opt-in)?"
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   build-test:
@@ -507,6 +512,56 @@ jobs:
             echo "::error::playwright returned $PW_RC"
             exit 1
           fi
+
+      - name: L5 — Real VM (Gap 4, opt-in)
+        # Единственный слой, требующий живых init-систем (systemd/openrc) как PID 1 —
+        # контейнеры не годятся (detectInitSystem читает /proc/1/comm). Берёт
+        # уже собранный в этом прогоне ./intermasq-ci (НИКАКОЙ зависимости от
+        # Forgejo Packages/артефактов), scp'ит на 2 persistent ВМ и гоняет
+        # tests/l5/{provision,vm-check}.sh. Покрывает обе ветки SystemCaller:
+        # root (UseSudo=false) и rootless intermasq-пользователь (UseSudo=true).
+        if: success() && github.event.inputs.run_l5_vm_tests == 'true'
+        env:
+          L5_SSH_KEY: ${{ secrets.L5_SSH_KEY }}
+          L5_SYSTEMD_HOST: ${{ secrets.L5_SYSTEMD_HOST }}
+          L5_OPENRC_HOST: ${{ secrets.L5_OPENRC_HOST }}
+          L5_INTERMASQ_SECRET: ${{ secrets.L5_INTERMASQ_SECRET }}
+        run: |
+          set +e
+          dnf install -y --setopt=install_weak_deps=False openssh-clients >/dev/null
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$L5_SSH_KEY" > ~/.ssh/l5_key && chmod 600 ~/.ssh/l5_key
+          L5_TOTAL_RC=0
+          for INIT in systemd openrc; do
+            if [ "$INIT" = systemd ]; then HOST="$L5_SYSTEMD_HOST"; else HOST="$L5_OPENRC_HOST"; fi
+            if [ -z "$HOST" ]; then
+              echo "::error::no host secret for $INIT (set L5_SYSTEMD_HOST/L5_OPENRC_HOST)"; L5_TOTAL_RC=1; continue
+            fi
+            HLS="${HOST#*@}"; HUSER="${HOST%@*}"
+            {
+              echo "Host l5vm-$INIT"
+              echo "  HostName $HLS"
+              echo "  User $HUSER"
+              echo "  IdentityFile ~/.ssh/l5_key"
+              echo "  StrictHostKeyChecking accept-new"
+              echo "  UserKnownHostsFile ~/.ssh/known_hosts"
+            } >> ~/.ssh/config
+            echo "===== L5: $INIT ($HOST) ====="
+            scp -o StrictHostKeyChecking=accept-new ./intermasq-ci "l5vm-$INIT:/usr/local/bin/intermasq-ci" \
+              || { echo "::error::scp binary to $INIT failed"; L5_TOTAL_RC=1; continue; }
+            scp -o StrictHostKeyChecking=accept-new tests/l5/provision.sh tests/l5/vm-check.sh "l5vm-$INIT:/tmp/" \
+              || { echo "::error::scp scripts to $INIT failed"; L5_TOTAL_RC=1; continue; }
+            ssh -o ConnectTimeout=15 "l5vm-$INIT" "chmod +x /usr/local/bin/intermasq-ci && INTERMASQ_SECRET='$L5_INTERMASQ_SECRET' bash /tmp/provision.sh" \
+              || { echo "::error::provision.sh failed on $INIT"; L5_TOTAL_RC=1; continue; }
+            ssh "l5vm-$INIT" "EXPECTED_INIT=$INIT bash /tmp/vm-check.sh" \
+              || { echo "::error::vm-check.sh failed on $INIT"; L5_TOTAL_RC=1; continue; }
+            echo "===== L5: $INIT OK ====="
+          done
+          if [ "$L5_TOTAL_RC" -ne 0 ]; then
+            echo "::error::L5 had failures (see per-VM output above)"
+            exit 1
+          fi
+          echo "L5: both VMs PASS (root + rootless for systemd + openrc)"
 
       - name: Show binary info
         run: |

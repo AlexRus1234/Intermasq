@@ -15,7 +15,6 @@ CONF_RW=/var/lib/intermasq-rw/conf
 L5_CONF=/etc/dnsmasq.d/l5.conf
 LOG=/var/log/intermasq.log
 LOG_RW=/var/log/intermasq-rw.log
-NFT_CONF=/etc/nftables.conf
 log(){ printf '[provision] %s\n' "$*"; }
 
 detect_init() {
