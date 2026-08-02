@@ -230,6 +230,14 @@ func TestCleanupBlacklistOnce_EmptyMap(t *testing.T) {
 	}
 	blacklistMu.Unlock()
 
-	// Must not panic on an empty map.
+	// Must not panic on an empty map and must leave it empty (no spurious
+	// inserts / no mutation of unrelated state).
 	cleanupBlacklistOnce(time.Now())
+
+	blacklistMu.RLock()
+	n := len(blacklist)
+	blacklistMu.RUnlock()
+	if n != 0 {
+		t.Errorf("cleanupBlacklistOnce on empty map left %d entries", n)
+	}
 }

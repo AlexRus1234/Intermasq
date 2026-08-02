@@ -1,9 +1,9 @@
 # Intermasq — баг-репорт v1
 
 Полный список известных багов. Каждый баг имеет:
-- **ID** (A1-A13)
+- **ID** (A1-A15)
 - **severity** (CRITICAL / HIGH / MEDIUM / LOW / FEATURE)
-- **status** (OPEN / FIXED / WONTFIX)
+- **status** (OPEN / FIXED / WONTFIX / KNOWN-CONDITIONAL)
 - файлы для починки
 - regression-тест в `tests/smoke.sh` (если применимо)
 
@@ -28,17 +28,25 @@
 | A11 | LOW | security (handlers_*.go) | FIXED | smoke.sh: path traversal battery; L2 `TestGetFileHandlerRejectsUnsafePath` / `TestPutFileHandlerRejectsUnsafePath` |
 | A12 | HIGH | backend (main.go aliasDomainRegex) | FIXED | smoke.sh: `A12: Add TXT with underscore domain` |
 | A13 | HIGH | backend (dnsmasq.go writeFileRaw) | FIXED | smoke.sh: `PUT with invalid dnsmasq syntax → 400` (стал честным) |
+| A14 | HIGH | backend (backup.go restoreBackupZip) | FIXED | smoke.sh: `Restore valid ZIP → 200` (стал честным); L2 `TestRestoreBackupHandler_PassesConfFileToTest` (wiring argv) |
+| A15 | MEDIUM | backend (dnsmasq 2.80 dhcp-host tag-set strictness) | KNOWN-CONDITIONAL | smoke.sh: `Restore known version → 200` (tag A15, body-pattern `dnsmasq_test_failed`, KNOWN-fail только на dnsmasq 2.80) |
 
 **Итого:** 7 из 9 багов закрыты в Bugfix sweep (2026-07-28): A1, A2, A3, A4,
 A6, A8, A12 → FIXED. Ранее A5 + A13 уже закрыты (Блок A). A11 закрыт в
 Hardening sweep (2026-07-29) как defense-in-depth. A7 и A10 → WONTFIX
-(не баги: A7 — UI-layout, A10 — feature gap отдельным PR). **Все записи
-(A1–A8, A10–A13) теперь FIXED или WONTFIX.** Все smoke-tagged баги убраны из
-`tests/known-bugs.txt` → smoke.sh ожидаемо 0 Fail / 0 Known-fail.
-Regression-тесты добавлены в `dnsmasq_test.go`, `handlers_test.go`,
-`fuzz_test.go`; A1 покрыт Playwright-regression `hosts-sort.spec.ts`
-(усилен в Hardening sweep: assert порядка). Логи сессий:
-`логи/bugfix-sweep.md`, `логи/hardening-sweep.md`.
+(не баги: A7 — UI-layout, A10 — feature gap отдельным PR). **A14 закрыт в
+predrel-test-remediation-P1 (2026-08-02):** `restoreBackupZip` теперь
+тестирует каждый восстановленный файл через `dnsmasq --test
+--conf-file=<path>` (тот же паттерн, что A13). **A15 остаётся
+known-conditional** — срабатывает только на dnsmasq 2.80 (строже
+dhcp-host tag-set валидация в `--test`); на целевой 2.86/2.90 — пуст.
+**Все записи (A1–A8, A10–A15):** A1–A6, A8, A11–A14 → FIXED; A7, A10 →
+WONTFIX; A15 → KNOWN-CONDITIONAL (на dnsmasq 2.80). Smoke-tagged баги в
+`tests/known-bugs.txt`: только A15. Regression-тесты добавлены в
+`dnsmasq_test.go`, `handlers_test.go`, `fuzz_test.go`; A1 покрыт
+Playwright-regression `hosts-sort.spec.ts` (усилен в Hardening sweep:
+assert порядка). Логи сессий: `логи/bugfix-sweep.md`,
+`логи/hardening-sweep.md`, `логи/predrel-test-remediation-p1-exec.md`.
 
 ---
 
@@ -465,6 +473,114 @@ testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+path)
 файлов). Если в каталоге конфликты между файлами — `--test` поймает.
 
 **Regression test:** `tests/smoke.sh` — `A13: PUT with invalid dnsmasq syntax`.
+
+---
+
+## A14 — restoreBackupZip валидирует не тот конфиг (bare `dnsmasq --test`)
+
+> **Status: FIXED** (predrel-test-remediation-P1, 2026-08-02). `restoreBackupZip`
+> теперь вызывает `dnsmasq --test --conf-file=<path>` **для каждого**
+> восстановленного файла (тот же канонический паттерн, что A13-фикс в
+> `writeFileRaw`/`writeConfigWithTest`/`restoreHistoryVersion`). Бонус: в
+> сообщение об ошибке теперь виден файл-виновник (`dnsmasq_test_failed: ...
+> (file: <name>)`). Префикс `dnsmasq_test_failed:` сохранён →
+> `restoreBackupHandler` (`handlers_safety.go:167`) матчит как раньше. A14
+> удалён из `tests/known-bugs.txt`; smoke-чек `52-backup-restore.sh:18`
+> стал честным 200 (тег A14 снят). Regression wiring-тест:
+> `TestRestoreBackupHandler_PassesConfFileToTest` в `linux_test.go`
+> (проверяет, что dnsmasq позван с `--conf-file=` в argv). Лог:
+> `логи/predrel-test-remediation-p1-exec.md`.
+
+**Severity:** HIGH
+**Component:** `backup.go:73-133` (`restoreBackupZip`)
+
+**Симптом:** на dnsmasq ≤2.86 restore любого валидного ZIP через
+`POST /api/backup/restore` падает с 400 `dnsmasq_test_failed`, хотя
+восстановленные файлы корректны. На dnsmasq ≥2.89/2.90 restore работает
+(молчаливое предупреждение о missing default config не валит `--test`),
+что маскировало баг на CI/Fedora.
+
+**Корень:**
+```go
+testCmd := exec.Command(dnsmasqBin(), "--test")
+```
+
+Без аргументов dnsmasq тестирует свой **default config** (обычно
+`/etc/dnsmasq.conf` + `conf-dir=/etc/dnsmasq.d`, либо вообще ничего при
+запуске из CI-окружения). Восстановленные файлы в `*ConfigDir`
+(например `/tmp/conf/` в CI или `/etc/dnsmasq.d/...` в проде) **не
+включаются** в тест. На 2.80/2.86 отсутствие default config — exit 1
+→ `dnsmasq_test_failed` → rollback всех восстановленных файлов → 400.
+
+Аналогично A13 для `writeFileRaw`, но A13 был пофикшен в Блоке A
+(`7cd0e1d`, 2026-07-26), а `restoreBackupZip` остался с bare `--test` —
+на это явно указывал комментарий в `bugs.md:433-434` секции A13
+(`"намеренно оставлены — отдельная задача"`).
+
+**Фикс:**
+```go
+for _, name := range restoredFiles {
+    fullPath := filepath.Join(*ConfigDir, name)
+    testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+fullPath)
+    // ... on failure: counters.TestFailures.Add(1) + rollback всех restoredFiles
+    //     из .restore.bak; return "dnsmasq_test_failed: %s (file: %s)"
+}
+```
+
+Выбран per-file `--conf-file=` loop (вариант A), а не `--conf-dir=`,
+потому что: (1) идентичен каноническому A13-паттерну в `dnsmasq.go:77,
+97` и `history.go:245`; (2) `--conf-dir=<ConfigDir>` без glob-суффикса
+`,*.conf` зацепит `.restore.bak` файлы и даст spurious duplicate-directive
+ошибки; (3) per-file тест изолирует восстановленные файлы от уже
+лежащих в `ConfigDir` (валидный restore не должен падать из-за
+нерелевантного сломанного файла, который restore не трогал).
+
+**Regression test:** `tests/smoke.sh` — `Restore valid ZIP → 200`
+(теперь честный, без A14-tag); L2 wiring-тест
+`TestRestoreBackupHandler_PassesConfFileToTest` (проверяет argv через
+`fakeDnsmasqArgvInspect`).
+
+---
+
+## A15 — dnsmasq 2.80 отвергает restored static.conf на `--test`
+
+> **Status: KNOWN-CONDITIONAL** (compat-matrix этап 2, 2026-07-31).
+> Срабатывает **только** на dnsmasq 2.80: восстановленный `10-static.conf`
+> отвергается `dnsmasq --test --conf-file=<path>` с exit 1, тогда как
+> 2.86/2.90 его принимают. На целевой dnsmasq (≥2.86) бага нет.
+> smoke-чек `51-history-diff-restore.sh:37` помечен `A15` +
+> body-pattern `'dnsmasq_test_failed'` (после P1.2): pipeline остаётся
+> жёлтым только на 2.80, на 2.86/2.90 — зелёный. Фикс A14 (per-file
+> `--conf-file=`) **не влияет** на A15 — корень A15 контентный
+> (dhcp-host tag-set синтаксис), не форма вызова.
+
+**Severity:** MEDIUM
+**Component:** `dnsmasq 2.80` dhcp-host tag-set/identifier validation (в
+intermasq — сериализация `dhcp-host=` в `10-static.conf`, генерируемая
+`formatDhcpHostLine`/`dnsmasq.go`)
+
+**Симптом:** на dnsmasq 2.80 (compat-matrix): restore history-версии
+`10-static.conf` через `POST /api/history/restore` возвращает 500
+`restore_error: dnsmasq_test_failed: ...`, потому что `restoreHistoryVersion`
+(`history.go:245`, уже корректно вызывает `--conf-file=`) падает на
+`dnsmasq --test`. Тот же файл принимается 2.86 и 2.90 без ошибок.
+
+**Корень:** точная причина не триажена (нужен capture stderr с `-v`).
+Подозрение (`логи/quality-sweep.md:227`): dhcp-host tag-set синтаксис
+вида `set:iot,tag:guest` строже валидируется в 2.80; в более поздних
+релизах relaxed. На 2.80 лишний/неподдерживаемый tag-идентификатор →
+exit 1.
+
+**Фикс (пока не применён):** один из двух путов —
+1. ужесточить сериализацию static-host в intermasq до того, что 2.80
+   принимает (требует триажа точного rejection-condition);
+2. объявить dnsmasq ≥2.86 минимально поддерживаемой для history-restore
+   (и обновить `README` + compat-matrix).
+
+**Regression test:** `tests/smoke.sh` —
+`51-history-diff-restore.sh:37`: `check "Restore known version → 200"
+200 "$S" A15 'dnsmasq_test_failed'` — на 2.80 KNOWN-fail с
+body-pattern matчем; на 2.86/2.90 PASS.
 
 ---
 

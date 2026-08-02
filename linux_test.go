@@ -69,6 +69,46 @@ func fakeDnsmasq(t *testing.T, exitCode int) {
 	t.Cleanup(func() { dnsmasqBinPath = orig })
 }
 
+// fakeDnsmasqArgvInspect is like fakeDnsmasq but the script also writes its
+// own argv ($@) to a sibling log file before exiting. Used by wiring-tests
+// (A13/A14 regression guards) that need to assert dnsmasq was invoked with
+// `--conf-file=<path>` rather than bare `--test`. Returns the binary path
+// (for completeness) and the log path (to be passed to readArgvLog).
+//
+// Unlike fakeDnsmasq, this helper does NOT echo a marker to stderr on
+// exitCode!=0 — the focus here is argv capture, not error-body shape.
+// Callers wanting the marker body for `dnsmasq_test_failed` matching should
+// keep using fakeDnsmasq.
+func fakeDnsmasqArgvInspect(t *testing.T, exitCode int) (binPath, logPath string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-dnsmasq shell-script unsupported on Windows")
+	}
+	dir := t.TempDir()
+	binPath = filepath.Join(dir, "dnsmasq")
+	logPath = filepath.Join(dir, "argv.log")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + logPath + "\"\nexit " + itoa(exitCode) + "\n"
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake dnsmasq (argv-inspect): %v", err)
+	}
+	orig := dnsmasqBinPath
+	dnsmasqBinPath = binPath
+	t.Cleanup(func() { dnsmasqBinPath = orig })
+	return binPath, logPath
+}
+
+// readArgvLog reads the argv capture file produced by fakeDnsmasqArgvInspect.
+// Fatal-fails the test if the file is missing — wiring tests always expect a
+// capture (i.e. dnsmasq was actually invoked).
+func readArgvLog(t *testing.T, logPath string) string {
+	t.Helper()
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read argv log %s: %v", logPath, err)
+	}
+	return string(b)
+}
+
 // fakeBin writes a shell-script binary `name` (with `script` body, no
 // shebang) into a temp dir, installs it under the matching *BinPath package
 // var (bins.go:30-35) for the duration of the test, and registers cleanup to
@@ -709,5 +749,103 @@ func TestRestoreBackupHandler_DnsmasqTestFail_400(t *testing.T) {
 	got, _ := os.ReadFile(existing)
 	if !bytes.Contains(got, []byte("original")) {
 		t.Errorf("rollback failed: original content lost (got %q)", got)
+	}
+}
+
+// ===== A13/A14 wiring guards: dnsmasq must be invoked with --conf-file= =====
+//
+// predrel-test-remediation-P1 (логи/predrel-test-remediation-p1.md §P1.4):
+// the existing _DnsmasqTestFail_400 tests above use fakeDnsmasq(t, 1) whose
+// script body is `exit N` and IGNORES argv — so they pass identically whether
+// dnsmasq is invoked as `--test` (the A13/A14 bug) or `--test --conf-file=`
+// (the fix). These wiring tests use fakeDnsmasqArgvInspect to capture argv
+// and assert the fix is actually in place. A future regression that drops
+// `--conf-file=` (e.g. reverting dnsmasq.go:77/97 or backup.go's per-file
+// loop) will fail here with a clear message rather than slip through.
+
+// TestPutFileHandler_PassesConfFileToTest drives putFileHandler (which calls
+// writeFileRaw → dnsmasq.go:77) with a succeeding fake dnsmasq and asserts
+// the captured argv contains `--conf-file=`. Guards the A13-fix wiring for
+// the raw PUT path.
+func TestPutFileHandler_PassesConfFileToTest(t *testing.T) {
+	_, logPath := fakeDnsmasqArgvInspect(t, 0)
+	newTestDir(t)
+	name := "raw.conf"
+	body := `{"content":"domain=lan\n"}`
+	w, c := newJSONContext("PUT", "/api/files/"+name, body)
+	c.Params = gin.Params{{Key: "name", Value: name}}
+	putFileHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	argv := readArgvLog(t, logPath)
+	if !strings.Contains(argv, "--conf-file=") {
+		t.Errorf("dnsmasq invoked without --conf-file= (A13 regression): argv=%q", argv)
+	}
+}
+
+// TestUpdateConfigHandler_PassesConfFileToTest drives updateConfigHandler
+// (which calls writeConfigWithTest → dnsmasq.go:97) and asserts the captured
+// argv contains `--conf-file=`. Guards the A13-fix wiring for the directive
+// editor path.
+func TestUpdateConfigHandler_PassesConfFileToTest(t *testing.T) {
+	_, logPath := fakeDnsmasqArgvInspect(t, 0)
+	dir := newTestDir(t)
+	target := filepath.Join(dir, "conf.conf")
+	if err := os.WriteFile(target, []byte("# preserved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"file":"` + jsonPath(target) + `","directives":[{"key":"domain","value":"lan","active":true}]}`
+	w, c := newJSONContext("PUT", "/api/config", body)
+	updateConfigHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	argv := readArgvLog(t, logPath)
+	if !strings.Contains(argv, "--conf-file=") {
+		t.Errorf("dnsmasq invoked without --conf-file= (A13 regression): argv=%q", argv)
+	}
+}
+
+// TestRestoreBackupHandler_PassesConfFileToTest drives restoreBackupHandler
+// (which calls restoreBackupZip → backup.go) and asserts the captured argv
+// contains `--conf-file=`. Guards the A14-fix wiring (per-file --conf-file=
+// loop, predrel-test-remediation-P1, 2026-08-02). Before the A14 fix this
+// test would have failed because restoreBackupZip called bare `dnsmasq --test`.
+func TestRestoreBackupHandler_PassesConfFileToTest(t *testing.T) {
+	_, logPath := fakeDnsmasqArgvInspect(t, 0)
+	newTestDir(t)
+
+	zipBuf := &bytes.Buffer{}
+	zw := zip.NewWriter(zipBuf)
+	fw, err := zw.Create("alpha.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write([]byte("# restored\ndomain=lan\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	mpBuf := &bytes.Buffer{}
+	mw := multipartWriter(t, mpBuf, "backup.zip", zipBuf.Bytes())
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest("POST", "/api/backup/restore", mpBuf)
+	c.Request.Header.Set("Content-Type", mw.FormDataContentType())
+	c.Set("user", "admin")
+	restoreBackupHandler(c)
+
+	if rec.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	argv := readArgvLog(t, logPath)
+	if !strings.Contains(argv, "--conf-file=") {
+		t.Errorf("dnsmasq invoked without --conf-file= (A14 regression): argv=%q", argv)
 	}
 }

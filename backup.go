@@ -68,8 +68,9 @@ func createBackupZip() ([]byte, string, error) {
 
 // restoreBackupZip unpacks a ZIP into ConfigDir. For every .conf file in
 // the archive the existing on-disk file is preserved as <name>.restore.bak
-// before being overwritten. After all writes, dnsmasq --test runs; if it
-// fails, every changed file is rolled back from its .restore.bak.
+// before being overwritten. After all writes, dnsmasq --test --conf-file=<path>
+// runs for each restored file; on the first failure every changed file is
+// rolled back from its .restore.bak.
 func restoreBackupZip(zipData []byte) error {
 	reader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
@@ -116,17 +117,21 @@ func restoreBackupZip(zipData []byte) error {
 		return fmt.Errorf("no_valid_conf_files")
 	}
 
-	testCmd := exec.Command(dnsmasqBin(), "--test")
-	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
-		counters.TestFailures.Add(1)
-		for _, name := range restoredFiles {
-			fullPath := filepath.Join(*ConfigDir, name)
-			bakPath := fullPath + ".restore.bak"
-			if bakContent, err := os.ReadFile(bakPath); err == nil {
-				os.WriteFile(fullPath, bakContent, 0644)
+	for _, name := range restoredFiles {
+		fullPath := filepath.Join(*ConfigDir, name)
+		testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+fullPath)
+		testOut, testErr := testCmd.CombinedOutput()
+		if testErr != nil {
+			counters.TestFailures.Add(1)
+			for _, rb := range restoredFiles {
+				rbPath := filepath.Join(*ConfigDir, rb)
+				bakPath := rbPath + ".restore.bak"
+				if bakContent, err := os.ReadFile(bakPath); err == nil {
+					os.WriteFile(rbPath, bakContent, 0644)
+				}
 			}
+			return fmt.Errorf("dnsmasq_test_failed: %s (file: %s)", testOut, name)
 		}
-		return fmt.Errorf("dnsmasq_test_failed: %s", testOut)
 	}
 
 	return nil

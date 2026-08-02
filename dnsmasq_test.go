@@ -240,13 +240,6 @@ func TestSysVinitCaller(t *testing.T) {
 	}
 }
 
-func TestSystemdCallerRestartSelf(t *testing.T) {
-	caller := &SystemdSystemCaller{UseSudo: false}
-	_ = caller
-	callerUser := &SystemdUserCaller{}
-	_ = callerUser
-}
-
 func TestParseDhcpRangeClassic(t *testing.T) {
 	r := parseDhcpRange("192.168.1.50,192.168.1.150,255.255.255.0,12h", "/etc/dnsmasq.d/x.conf", 1)
 	if r.Start != "192.168.1.50" || r.End != "192.168.1.150" || r.Mask != "255.255.255.0" || r.LeaseTime != "12h" {
@@ -890,6 +883,14 @@ func TestSseBroadcastFullChannel(t *testing.T) {
 	sseRegister(cl)
 	defer sseUnregister(cl)
 	sseBroadcast("arp", "{}")
+	select {
+	case <-cl.ch:
+		t.Errorf("expected broadcast to be dropped on full/unbuffered channel, but a message was delivered")
+	default:
+	}
+	if len(cl.ch) != 0 {
+		t.Errorf("expected empty channel after broadcast to full/unbuffered channel, got len=%d", len(cl.ch))
+	}
 }
 
 func TestArpToJSON(t *testing.T) {

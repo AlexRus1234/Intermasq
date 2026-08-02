@@ -8,14 +8,13 @@ if require_jwt "backup restore" 4; then
     cp /tmp/smoke.body /tmp/smoke.backup.zip
 
     # Happy: upload the same ZIP back. All .conf files in the archive are
-    # restored. restoreBackupZip still runs bare `dnsmasq --test` (whole-
-    # config, NOT per-file --conf-file) — A14: this evaluates dnsmasq's
-    # *default* conf path, not the restored files. On dnsmasq ≥2.90 the
-    # missing default conf is a warning (passes); on ≤2.86 it is exit 1
-    # → 400 dnsmasq_test_failed. Tagged A14 so the compat-matrix pipeline
-    # stays yellow on 2.80/2.86 until the bug is fixed in backup.go:119.
+    # restored. restoreBackupZip runs `dnsmasq --test --conf-file=<path>`
+    # per restored file (A14 fixed in predrel-test-remediation-P1,
+    # 2026-08-02 — same canonical pattern as A13 in writeFileRaw/
+    # writeConfigWithTest/restoreHistoryVersion), validating exactly what
+    # the restore wrote. Returns 200 on any dnsmasq ≥2.86. A14-tag removed.
     S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -H "Authorization: Bearer $JWT" -F "file=@/tmp/smoke.backup.zip" "$BASE/api/backup/restore")
-    check "Restore valid ZIP → 200" 200 "$S" A14 || true
+    check "Restore valid ZIP → 200" 200 "$S" || true
 
     # Error: no file field.
     S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -X POST -H "Authorization: Bearer $JWT" "$BASE/api/backup/restore")

@@ -160,12 +160,30 @@ func TestIsExecutable(t *testing.T) {
 // run because main_test/setup ran resolveBins elsewhere; the empty-branch is
 // not practical to force — see T-D for the *BinPath assignment seam).
 func TestLazyAccessors_CallResolve(t *testing.T) {
-	// Accessing every accessor once. They either return "" (binary not
-	// installed on the test host) or a resolved path; both are acceptable —
-	// we only assert "does not panic" and "returns string".
-	for _, fn := range []func() string{
-		dnsmasqBin, sudoBin, systemctlBin, serviceBin, rcServiceBin, svBin,
-	} {
-		_ = fn()
+	// Each accessor must return a stable string (resolved path or "" if the
+	// binary is not installed on the host — both are valid). Two consecutive
+	// calls must agree (idempotent lazy init), and the returned value must
+	// match the underlying package var (cache consistency — accessor must
+	// not fabricate a value unrelated to the cached path).
+	accessors := []struct {
+		name string
+		fn   func() string
+		ptr  *string
+	}{
+		{"dnsmasqBin", dnsmasqBin, &dnsmasqBinPath},
+		{"sudoBin", sudoBin, &sudoBinPath},
+		{"systemctlBin", systemctlBin, &systemctlBinPath},
+		{"serviceBin", serviceBin, &serviceBinPath},
+		{"rcServiceBin", rcServiceBin, &rcServiceBinPath},
+		{"svBin", svBin, &svBinPath},
+	}
+	for _, a := range accessors {
+		got1, got2 := a.fn(), a.fn()
+		if got1 != got2 {
+			t.Errorf("%s: idempotency broken — first call %q, second call %q", a.name, got1, got2)
+		}
+		if got1 != *a.ptr {
+			t.Errorf("%s: returned %q but underlying var is %q (cache mismatch)", a.name, got1, *a.ptr)
+		}
 	}
 }

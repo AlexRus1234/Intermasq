@@ -12,11 +12,16 @@ fi
 
 section() { printf "\n${CYAN}=== %s ===${RESET}\n" "$1"; }
 
-# check(desc, expected_status, actual_status, [bug_id])
+# check(desc, expected_status, actual_status, [bug_id [body_pattern]])
 #
 # Without bug_id:                 pass if actual == expected, else FAIL (red).
 # With bug_id IN known-bugs.txt:  KNOWN-fail (yellow) if mismatch — pipeline
 #                                 stays green, but the bug is documented.
+# With bug_id IN known-bugs.txt AND body_pattern given AND mismatch:
+#                                 body must match body_pattern (grep -q).
+#                                 If the body does NOT match — hard FAIL (red):
+#                                 the error is unrelated to the known bug,
+#                                 likely a regression in a different code path.
 # With bug_id NOT in known-bugs.txt and mismatch:
 #                                 loud FAIL (red) prompting test update —
 #                                 the bug was fixed but the test still
@@ -25,13 +30,24 @@ section() { printf "\n${CYAN}=== %s ===${RESET}\n" "$1"; }
 #                                 known-bugs.txt because it's a new issue.
 # Returns 0 on pass, 1 on any kind of fail.
 check() {
-    local desc="$1" exp="$2" got="$3" bug="${4:-}"
+    local desc="$1" exp="$2" got="$3" bug="${4:-}" body_pat="${5:-}"
     if [ "$exp" = "$got" ]; then
         printf "  ${GREEN}✓${RESET} %s\n" "$desc"
         PASS=$((PASS + 1)); return 0
     fi
     if [ -n "$bug" ]; then
         if [ "${KNOWN_BUGS[$bug]:-}" = "1" ]; then
+            if [ -n "$body_pat" ]; then
+                local body
+                body=$(body)
+                if ! echo "$body" | grep -q "$body_pat"; then
+                    printf "  ${RED}✗ FAIL(%s)${RESET} %s (got %s, want %s)\n" "$bug" "$desc" "$got" "$exp"
+                    printf "      ${RED}Expected known-fail body pattern '%s', got:${RESET}\n" "$body_pat"
+                    printf "      %s\n" "$body"
+                    printf "      ${RED}Body does not match bug %s — likely unrelated regression, investigate.${RESET}\n" "$bug"
+                    FAIL=$((FAIL + 1)); return 1
+                fi
+            fi
             printf "  ${YELLOW}✗ KNOWN(%s)${RESET} %s (got %s, want %s)\n" "$bug" "$desc" "$got" "$exp"
             KNOWN_FAIL=$((KNOWN_FAIL + 1)); return 1
         else

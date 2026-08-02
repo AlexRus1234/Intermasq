@@ -15,17 +15,8 @@
 # Removing a fixed bug: delete the ID here. Update the corresponding
 # check in smoke.sh to expect the fixed behaviour. Pipeline goes green.
 
-# A14 — restoreBackupZip calls `dnsmasq --test` WITHOUT --conf-file=/
-# --conf-dir=, so it validates dnsmasq's default config path (typically
-# /etc/dnsmasq.conf) instead of the just-restored files. On dnsmasq ≥2.90
-# a missing default config is a warning (test passes); on ≤2.86 it is a
-# hard error → restore of any valid ZIP fails with 400 dnsmasq_test_failed.
-# Found by dnsmasq compat-matrix (этап 2) on 2026-07-31. Fix: pass
-# —conf-dir=*ConfigDir (or assemble a combined conf) in backup.go:119.
-A14  restoreBackupZip validates wrong config (bare `dnsmasq --test`)
-
 # A15 — dnsmasq 2.80 rejects a restored 10-static.conf at `dnsmasq --test
-# —conf-file=<path>` with exit 1, while 2.86/2.90 accept it. Exact
+# --conf-file=<path>` with exit 1, while 2.86/2.90 accept it. Exact
 # rejection reason not triaged (would need -v stderr capture); likely a
 # stricter dhcp-host tag-set/identifier validation in 2.80 that was
 # relaxed in later releases. Found by compat-matrix (этап 2). Fix path:
