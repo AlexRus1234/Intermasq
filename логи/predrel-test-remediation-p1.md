@@ -38,6 +38,6 @@
 ## Осталось (вне P1)
 
 - **A15** — KNOWN-CONDITIONAL на dnsmasq 2.80 (по решению оператора).
-- **P2** (`predrel-test-remediation-p2.md`) — 11 задач перед рефакторингом init/backup/metrics/audit/sse.
+- ~~**P2** (`predrel-test-remediation-p2.md`) — 11 задач перед рефакторингом init/backup/metrics/audit/sse.~~ → ✓ ЗАКРЫТО 2026-08-03 (см. `predrel-test-remediation-p2-exec.md`).
 - **P3** (`predrel-test-remediation-p3.md`) — 9 polish-задач до v1.0.
 - **Продуктовый security-аудит** — JWT alg-confusion, plugin trust, X-Forwarded-For, `hash, _ :=`.

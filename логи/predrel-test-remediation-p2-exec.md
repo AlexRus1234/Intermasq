@@ -109,7 +109,7 @@ CI `build.yml`.
 уже его имел — в отличие от сломанного примера в промте, где хендлер был
 пропущен).
 
-**P2.11 — `history-modal.spec.ts` + `HistoryModal.vue`.** На `<tr>`添加лен
+**P2.11 — `history-modal.spec.ts` + `HistoryModal.vue`.** На `<tr>` добавлен
 `:data-version="v.version"`. Spec выбирает строку с лексикографически
 минимальным `data-version` (= старейший snapshot = pre-GONE состояние
 `{KEEP}`) — order-independent независимо от newest-first рендера.
@@ -130,7 +130,8 @@ CI `build.yml`.
 4. **P2.8:** `auditHandler` read-путь уже тестируется (`handlers_test.go:1239`);
    реальный пробел — direct `writeAudit` + конкурентная запись + round-trip.
 5. **P2.9:** `parseLeasesContent` принимает мусор → безусловный format-чек
-   стрелял по garbage-seeds; заменён на gate по MAC-образному токену.
+   стрелял по garbage-seeds; первая попытка (gate по MAC-образному токену)
+   тоже оказалась неверной — см. §«Follow-up фиксы» (commit `a8998e0`).
 6. **P2.10:** пример фикса в промте пропускал `page.on('dialog', ...)`;
    реальный тест уже его имел.
 7. **P2.11:** версии — timestamps `^\d{8}-\d{6}(-\d+)?$`, не номера; порядок
@@ -163,8 +164,10 @@ CI (Fedora 44, оператор прогоняет отдельно):
   честно ловят пустоту; 26/27 зелёные при пропуске 23 (P2.2).
 - `cd tests/e2e && npx playwright test` — все specs PASS; без mock-плагина
   и/или ARP-fixture plugins-iframe/discovery-tab skip'аются (P2.4).
-- `go test -run '^$' -fuzz='^FuzzParseLeasesContent$' -fuzztime=30s .` — no
-  crash (опционально, по желанию оператора).
+- `go test -run '^$' -fuzz='^FuzzParseLeasesContent$' -fuzztime=30s .` —
+  на первой итерации нашёл краш P2.9 gate на входе `"0 : 0"`; после
+  замены на структурный инвариант (`a8998e0`) — no crash (72k execs за
+  20s). См. §«Follow-up фиксы».
 
 ## Изменённые файлы
 
@@ -195,7 +198,49 @@ CI (Fedora 44, оператор прогоняет отдельно):
  tests/suites/50-safety-backup-history.sh         |   7 ++-
  tests/suites/83-discovery.sh                     |  14 ++++++
  17 files changed, 172 insertions(+), 24 deletions(-)
-```
+ ```
+
+Дополнительно — два follow-up коммита после CI (см. §«Follow-up фиксы»):
+`a8998e0` (только `fuzz_test.go`, +49/−22) и `9f2a447` (`tests/lib/http.sh`
++ сьюты 25/34, +34/−10). Сводно P2 = 5 коммитов: `8a489f3`, `04ad007`,
+`c52c3b0` (docs), `a8998e0`, `9f2a447`.
+
+## Follow-up фиксы (после CI)
+
+Два коммита, сделанные после первой CI-итерации P2. Оба — test-infra,
+продуктовый код не тронут; products-баги/coverage-числа не изменились.
+
+**`a8998e0` — `fix(fuzz): FuzzParseLeasesContent — structural invariant, not
+format gate`.** Опциональный CI-шаг `run_fuzz_tests` (real `-fuzz 30s`)
+нашёл краш на входе `"0 : 0"`: `parseLeasesContent` → `Mac=":"`, мой
+P2.9 gate `ContainsAny(Mac, ":-")` пропустил его как «MAC-образный», а
+`normalizeMAC(":")` не сматчил `macRegex`. Корень глубже: парсер по
+дизайну принимает мусор и **не гарантирует** формат Ip/Mac — значит любой
+format-ассерт фузер рано или поздно побеждает nonsense-входом. Заменил
+format-инвариант на **структурный**: пере-разбиваю те же исходные строки
+теми же примитивами (`bufio.Scanner` + `strings.Fields`) и проверяю
+field-index mapping (`Mac==fields[1]`, `Ip==fields[2]`,
+`Hostname==fields[3]`) + entry count. Это всегда истинно (без форматных
+допущений), ловит целевую мутацию `Ip=fields[0]` с более понятным
+сообщением, и переживает произвольный мусор. Добавлен regression-seed
+`"0 : 0"` в `f.Add`. Верификация: 9 seeds PASS; `go test -fuzz
+-fuzztime=20s` — 72k execs / 0 крашей; мутация `fields[2]`→`fields[0]`
+ловится.
+
+**`9f2a447` — `fix(smoke): P2.1 CSV length-asserts used check (==) instead
+of >=`.** Smoke на CI упал на двух новых CSV-гардах из P2.1:
+`"Alias CSV export ... (got 7, want 2)"` и `"CSV export ... (got 10, want
+2)"`. Я использовал `check desc 2 "$EXPORT_LINES"`, а `check` — проверка
+на **равенство**, не `>=`; здоровый CSV с >minimum строк ронял smoke как
+`2 != 7`. JSON-эндпоинты (22/30/40/50) были корректны — там `check_length`
+с `>=`; ошибка только в двух CSV-сьютах (CSV не JSON, `jq` не подходит, и
+я ошибочно взял `check`). Добавил хелпер `check_lines(desc, min)` в
+`tests/lib/http.sh` (зеркально `check_length`, но через `wc -l` с тем же
+`>=`), перевёл на него 25/34. Изолированный bash-тест подтвердил
+`>=`-семантику. Комментарий `check_length` обновлён с предупреждением,
+что `check` — exact-equality и не годится для `>=`-гардов. **Урок:**
+smoke локально не гоняется (Windows), поэтому класс equality-vs-`>=`
+ловится только на CI.
 
 ## Что осталось (вне этой сессии)
 
