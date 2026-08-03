@@ -20,6 +20,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -203,5 +204,61 @@ func TestCheckMetricsAuth_NoAuth(t *testing.T) {
 	_, c := newMetricsContext("GET", "/metrics")
 	if checkMetricsAuth(c) {
 		t.Error("expected false with no auth material")
+	}
+}
+
+// TestMetricsHandler_AllMetricNames exercises the whole metricsHandler end
+// to end (P2.7). The existing tests cover the formatters and the auth gate
+// in isolation, but never the assembled exposition output — so renaming or
+// dropping any of the 9 canonical metric names would not be caught. The two
+// intermasq_domain_* labeled series are only emitted inside the dnsHealth
+// loop (metrics.go:80-87), so we seed one entry to guarantee they appear.
+func TestMetricsHandler_AllMetricNames(t *testing.T) {
+	orig := SecretKey
+	SecretKey = []byte("test-secret-key-32-bytes-long!!")
+	t.Cleanup(func() { SecretKey = orig })
+
+	// metricsHandler -> checkDnsmasqStatus -> sysCaller.IsActive. Without
+	// setupServer the package-level sysCaller is a nil interface and the
+	// handler nil-derefs. NoneCaller is side-effect-free and returns false
+	// for IsActive, which is all we need to exercise the output assembly.
+	origCaller := sysCaller
+	sysCaller = &NoneCaller{}
+	t.Cleanup(func() { sysCaller = origCaller })
+
+	dnsHealthMu.Lock()
+	dnsHealth["test.example.lan"] = dnsHealthEntry{Up: true, Latency: time.Millisecond}
+	dnsHealthMu.Unlock()
+	t.Cleanup(func() {
+		dnsHealthMu.Lock()
+		delete(dnsHealth, "test.example.lan")
+		dnsHealthMu.Unlock()
+	})
+
+	jwtStr := signTestJWT(t, SecretKey)
+	w, c := newMetricsContext("GET", "/metrics")
+	c.Request.Header.Set("Authorization", "Bearer "+jwtStr)
+
+	metricsHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200 from metricsHandler, got %d (body=%s)", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	required := []string{
+		"intermasq_hosts_total",
+		"intermasq_leases_active",
+		"intermasq_arp_online_total",
+		"intermasq_dnsmasq_active",
+		"intermasq_reloads_total",
+		"intermasq_dnsmasq_test_failures_total",
+		"intermasq_uptime_seconds",
+		"intermasq_domain_up",
+		"intermasq_domain_resolve_seconds",
+	}
+	for _, name := range required {
+		if !strings.Contains(body, name) {
+			t.Errorf("metricsHandler: missing metric %q in body\n--- body ---\n%s", name, body)
+		}
 	}
 }

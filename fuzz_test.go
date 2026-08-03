@@ -32,6 +32,7 @@
 package main
 
 import (
+	"net"
 	"strings"
 	"testing"
 )
@@ -179,11 +180,27 @@ func FuzzParseLeasesContent(f *testing.F) {
 	f.Fuzz(func(t *testing.T, content string) {
 		leases := parseLeasesContent(content)
 		for _, l := range leases {
-			if l.Ip == "" {
-				t.Errorf("lease with empty Ip: %+v", l)
+			// The previous empty-string checks (l.Ip == "", l.Mac == "")
+			// were unreachable: parseLeasesContent sets Ip=fields[2] /
+			// Mac=fields[1] from strings.Fields, which never yields empty
+			// tokens. But the parser also makes NO format guarantee — it
+			// returns an entry for any line with >= 3 whitespace-separated
+			// tokens, including pure-garbage seeds ("a b c"). An
+			// unconditional IP/MAC format check would false-fire on those,
+			// so gate on the Mac token being MAC-shaped (contains ':' or
+			// '-'). When it is, the line plausibly represents a real lease
+			// and both fields must have the documented format. This catches
+			// field-mapping regressions (e.g. Ip=fields[0] instead of
+			// fields[2]) on realistic inputs while preserving panic coverage
+			// on intentional garbage.
+			if !strings.ContainsAny(l.Mac, ":-") {
+				continue
 			}
-			if l.Mac == "" {
-				t.Errorf("lease with empty Mac: %+v", l)
+			if m := normalizeMAC(l.Mac); !macRegex.MatchString(m) {
+				t.Errorf("FuzzParseLeasesContent: MAC-shaped token %q (normalized %q) did not match macRegex (input=%q)", l.Mac, m, content)
+			}
+			if net.ParseIP(l.Ip) == nil {
+				t.Errorf("FuzzParseLeasesContent: lease IP %q not a valid IP alongside MAC-shaped token (input=%q)", l.Ip, content)
 			}
 		}
 	})

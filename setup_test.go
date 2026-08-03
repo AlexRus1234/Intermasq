@@ -42,7 +42,10 @@ import (
 // cleanup. It also neutralizes the long-lived background goroutines
 // (SSE broadcaster + DNS-health checker) that setupServer would otherwise
 // spawn: those read the same flag-owned paths the cleanup restores, which
-// is a data race under `-race`. Returns the sandbox root.
+// is a data race under `-race`. Finally it snapshots sysCaller, which
+// setupServer mutates via initSystemCaller — without this restore any test
+// that runs setupServer leaks a resolved caller into the next. Returns the
+// sandbox root.
 func withSandboxFlags(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
@@ -55,6 +58,7 @@ func withSandboxFlags(t *testing.T) string {
 		InitSystem, SystemdScope                                          *string
 		PluginsDir, SocketsDir                                            string
 		loadedPlugins                                                     []PluginManifest
+		sysCaller                                                         SystemCaller
 	}{
 		DBPath:        DBPath,
 		TemplatesPath: TemplatesPath,
@@ -67,6 +71,7 @@ func withSandboxFlags(t *testing.T) string {
 		PluginsDir:    PluginsDir,
 		SocketsDir:    SocketsDir,
 		loadedPlugins: loadedPlugins,
+		sysCaller:     sysCaller,
 	}
 	*DBPath = filepath.Join(tmp, "users.json")
 	*TemplatesPath = filepath.Join(tmp, "templates.json")
@@ -93,6 +98,7 @@ func withSandboxFlags(t *testing.T) string {
 		PluginsDir = orig.PluginsDir
 		SocketsDir = orig.SocketsDir
 		loadedPlugins = orig.loadedPlugins
+		sysCaller = orig.sysCaller
 	})
 	return tmp
 }
@@ -213,26 +219,20 @@ func TestSetupServer_LegacySystemdScopeWarning(t *testing.T) {
 }
 
 func TestSetupServer_HistoryDirFail(t *testing.T) {
-	// Neutralize the long-lived background goroutines for the same reason
-	// as withSandboxFlags (see its comment).
-	origSSE := startSSEBroadcasterFn
-	origDNS := startDNSHealthCheckerFn
-	startSSEBroadcasterFn = func() {}
-	startDNSHealthCheckerFn = func() {}
-	t.Cleanup(func() {
-		startSSEBroadcasterFn = origSSE
-		startDNSHealthCheckerFn = origDNS
-	})
+	// Sandbox all paths setupServer touches (DBPath, TemplatesPath, etc.)
+	// and neutralize the long-lived goroutines. Without this, loadTemplates
+	// (templates.go:37,41) does os.Exit(1) on a malformed templates file
+	// lying around on the host at the default /etc/intermasq path, killing
+	// the whole test binary.
+	withSandboxFlags(t)
 	// Make ensureHistoryDir fail by pointing *HistoryDir at a path whose
-	// parent is a regular file.
+	// parent is a regular file (overrides the sandbox path on top).
 	tmp := t.TempDir()
 	parent := filepath.Join(tmp, "blocker")
 	if err := os.WriteFile(parent, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	orig := *HistoryDir
 	*HistoryDir = filepath.Join(parent, "history")
-	t.Cleanup(func() { *HistoryDir = orig })
 
 	gin.SetMode(gin.ReleaseMode)
 	// Note: setupServer currently logs the ensureHistoryDir error but does
@@ -244,5 +244,28 @@ func TestSetupServer_HistoryDirFail(t *testing.T) {
 	}
 	if r == nil {
 		t.Fatal("expected non-nil engine despite history dir failure")
+	}
+}
+
+// TestWithSandboxFlags_RestoresSysCaller pins P2.5: withSandboxFlags
+// snapshots sysCaller at entry and restores it on cleanup, so any test that
+// runs setupServer (which mutates sysCaller via initSystemCaller) cannot
+// leak its resolved caller into the next test. Uses SystemdSystemCaller as a
+// non-zero-size sentinel so pointer identity is reliable (zero-size struct
+// pointers may alias per the Go spec).
+func TestWithSandboxFlags_RestoresSysCaller(t *testing.T) {
+	savedCaller := sysCaller
+	sentinel := &SystemdSystemCaller{UseSudo: true}
+	sysCaller = sentinel
+	t.Cleanup(func() { sysCaller = savedCaller })
+
+	t.Run("sandbox_scope", func(t *testing.T) {
+		withSandboxFlags(t)
+		// Simulate setupServer -> initSystemCaller mutating the global.
+		sysCaller = &NoneCaller{}
+	})
+
+	if sysCaller != sentinel {
+		t.Errorf("withSandboxFlags did not restore sysCaller on cleanup: got %#v, want sentinel %p", sysCaller, sentinel)
 	}
 }
