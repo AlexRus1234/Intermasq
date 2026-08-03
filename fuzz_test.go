@@ -32,7 +32,7 @@
 package main
 
 import (
-	"net"
+	"bufio"
 	"strings"
 	"testing"
 )
@@ -160,8 +160,9 @@ func FuzzParseAliasLine(f *testing.F) {
 }
 
 // FuzzParseLeasesContent guarantees parseLeasesContent never panics on
-// arbitrary input and that every returned lease has non-empty Ip and Mac
-// (the len(fields)>=3 contract).
+// arbitrary input and that the field-index mapping (fields[1]→Mac,
+// fields[2]→Ip, fields[3]→Hostname) plus entry count hold for every line
+// with >= 3 whitespace-separated fields.
 func FuzzParseLeasesContent(f *testing.F) {
 	seeds := []string{
 		"",
@@ -172,6 +173,11 @@ func FuzzParseLeasesContent(f *testing.F) {
 		"a b\n",
 		"a b c\n",
 		"t mac ip host clientid extra fields here\n",
+		// Regression seed: a 3-token line whose Mac token is a bare ":"
+		// (contains a MAC separator but is not a MAC). Pins that the parser
+		// accepts this as a valid (if nonsensical) entry — an over-eager
+		// format assertion on Mac would false-fire here.
+		"0 : 0\n",
 		strings.Repeat("0 aa:bb:cc:dd:ee:ff 10.0.0.1 host\n", 300),
 	}
 	for _, s := range seeds {
@@ -179,29 +185,50 @@ func FuzzParseLeasesContent(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, content string) {
 		leases := parseLeasesContent(content)
-		for _, l := range leases {
-			// The previous empty-string checks (l.Ip == "", l.Mac == "")
-			// were unreachable: parseLeasesContent sets Ip=fields[2] /
-			// Mac=fields[1] from strings.Fields, which never yields empty
-			// tokens. But the parser also makes NO format guarantee — it
-			// returns an entry for any line with >= 3 whitespace-separated
-			// tokens, including pure-garbage seeds ("a b c"). An
-			// unconditional IP/MAC format check would false-fire on those,
-			// so gate on the Mac token being MAC-shaped (contains ':' or
-			// '-'). When it is, the line plausibly represents a real lease
-			// and both fields must have the documented format. This catches
-			// field-mapping regressions (e.g. Ip=fields[0] instead of
-			// fields[2]) on realistic inputs while preserving panic coverage
-			// on intentional garbage.
-			if !strings.ContainsAny(l.Mac, ":-") {
+		// The parser makes no format guarantee — it returns one entry per
+		// line with >= 3 whitespace-separated tokens, assigning fields[1]→Mac,
+		// fields[2]→Ip, fields[3]→Hostname. The original empty-string checks
+		// (l.Ip == "", l.Mac == "") were unreachable (strings.Fields yields
+		// no empty tokens), and an unconditional IP/MAC format check
+		// false-fires on the documented garbage inputs the parser accepts
+		// (e.g. "0 : 0" — Mac=":" is separator-shaped but not a MAC). The
+		// real, always-true contract is the field-index mapping: re-split
+		// the same source lines the parser consumed and verify each entry's
+		// fields match the expected indices and count. This catches
+		// field-swap regressions (e.g. Ip=fields[0]) and entry-count drift
+		// with no format assumption that garbage inputs would violate.
+		// Both the parser and this check use bufio.Scanner with the default
+		// buffer, so over-long lines truncate identically and stay
+		// consistent.
+		expected := 0
+		sc := bufio.NewScanner(strings.NewReader(content))
+		for sc.Scan() {
+			fields := strings.Fields(sc.Text())
+			if len(fields) < 3 {
 				continue
 			}
-			if m := normalizeMAC(l.Mac); !macRegex.MatchString(m) {
-				t.Errorf("FuzzParseLeasesContent: MAC-shaped token %q (normalized %q) did not match macRegex (input=%q)", l.Mac, m, content)
+			if expected >= len(leases) {
+				t.Errorf("FuzzParseLeasesContent: parser returned fewer entries than parseable lines: missing entry for line %d %q (input=%q)", expected, sc.Text(), content)
+				return
 			}
-			if net.ParseIP(l.Ip) == nil {
-				t.Errorf("FuzzParseLeasesContent: lease IP %q not a valid IP alongside MAC-shaped token (input=%q)", l.Ip, content)
+			l := leases[expected]
+			if l.Mac != fields[1] {
+				t.Errorf("FuzzParseLeasesContent: lease[%d].Mac = %q, want fields[1]=%q (line=%q, input=%q)", expected, l.Mac, fields[1], sc.Text(), content)
 			}
+			if l.Ip != fields[2] {
+				t.Errorf("FuzzParseLeasesContent: lease[%d].Ip = %q, want fields[2]=%q (line=%q, input=%q)", expected, l.Ip, fields[2], sc.Text(), content)
+			}
+			wantHost := ""
+			if len(fields) > 3 {
+				wantHost = fields[3]
+			}
+			if l.Hostname != wantHost {
+				t.Errorf("FuzzParseLeasesContent: lease[%d].Hostname = %q, want %q (line=%q, input=%q)", expected, l.Hostname, wantHost, sc.Text(), content)
+			}
+			expected++
+		}
+		if expected != len(leases) {
+			t.Errorf("FuzzParseLeasesContent: entry-count mismatch: %d parseable lines, parser returned %d entries (input=%q)", expected, len(leases), content)
 		}
 	})
 }
