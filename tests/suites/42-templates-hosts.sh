@@ -30,7 +30,9 @@ if require_jwt "host templates + ranges" 7; then
     check "Delete missing template → 404" 404 "$S" || true
 
     # Ranges list — depends on dhcp-range directives present in config files.
-    # In CI it may be empty; we only assert 200.
+    # P2.1: known empty in CI (no dhcp-range written by any suite), so a
+    # length-assert would be meaningless ([] is the correct shape here);
+    # only the 200 + JSON-array shape is asserted by the check above.
     S=$(GET "$JWT" "/api/templates/ranges")
     check "GET /api/templates/ranges → 200" 200 "$S" || true
 fi

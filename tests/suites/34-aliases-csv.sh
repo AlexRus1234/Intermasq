@@ -5,8 +5,10 @@ if require_jwt "DNS aliases — CSV import/export" 4; then
     # Export current aliases — should return 200 + at least the header line.
     S=$(GET "$JWT" "/api/aliases/csv")
     check "Alias CSV export → 200" 200 "$S" || true
+    # P2.1: CSV is plain text — guard with wc -l. Suite 30 wrote 4 aliases,
+    # so header + >=1 data row (>=2 lines) is the robust non-empty guard.
     EXPORT_LINES=$(body | wc -l)
-    echo "  alias csv export lines: $EXPORT_LINES"
+    check "Alias CSV export has header + >=1 data row" 2 "$EXPORT_LINES" || true
 
     # Import a hand-crafted CSV with fresh domains into a fresh file
     # (avoids duplicate conflicts with existing aliases).

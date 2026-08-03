@@ -9,6 +9,9 @@ if require_jwt "static hosts — delete & list" 3; then
 
     S=$(GET "$JWT" "/api/hosts")
     check "GET /api/hosts" 200 "$S" || true
-    HOST_COUNT=$(body | jq 'length' 2>/dev/null || echo "?")
-    echo "  current host count: $HOST_COUNT"
+    # P2.1: length-assert — getHostsHandler returning [] with 200 (e.g. a
+    # read/parse regression) must fail here. By this point suites 20+21 have
+    # left >=3 hosts (ee:03/04/05; ee:01 just deleted above). >=1 is the
+    # robust non-empty guard.
+    check_length "GET /api/hosts body non-empty" 1
 fi

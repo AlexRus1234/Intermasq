@@ -33,8 +33,22 @@ test('history modal: list version, diff, restore', async ({ page }) => {
   await expect(modal).toBeVisible({ timeout: 5000 })
 
   // A version row must be present.
-  const versionRow = modal.locator('tbody tr').first()
-  await expect(versionRow).toBeVisible({ timeout: 10000 })
+  // P2.11: pin the row by its data-version identity, not by DOM position.
+  // The history list is newest-first (history.go:208-210); `.first()` would
+  // silently pick the wrong version if that order ever flips or if the
+  // version set grows. We want the OLDEST snapshot — the one taken before
+  // GONE was added, whose content is {KEEP} only — so restoring it makes
+  // GONE disappear. Version stamps are YYYYMMDD-HHMMSS(-NN)?, so
+  // lexicographic string-min == oldest, independent of render order.
+  const versionRows = modal.locator('tbody tr[data-version]')
+  await expect(versionRows.first()).toBeVisible({ timeout: 10000 })
+  const versions = await versionRows.evaluateAll((rows) =>
+    rows.map((r) => r.getAttribute('data-version') || '').filter(Boolean)
+  )
+  expect(versions.length, 'at least one history version present').toBeGreaterThan(0)
+  const oldest = versions.reduce((a, b) => (a < b ? a : b))
+  const versionRow = modal.locator(`tbody tr[data-version="${oldest}"]`)
+  await expect(versionRow).toBeVisible()
 
   // Diff vs current (≠ button) → pre.history-diff populated.
   await versionRow.locator('button.btn-outline-primary').click()

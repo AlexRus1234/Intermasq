@@ -24,7 +24,7 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="v in store.history" :key="v.version">
+                  <tr v-for="v in store.history" :key="v.version" :data-version="v.version">
                     <td><code>{{ v.version }}</code></td>
                     <td class="text-muted">{{ v.size }} {{ $t('history.bytes') }}</td>
                     <td class="text-end">

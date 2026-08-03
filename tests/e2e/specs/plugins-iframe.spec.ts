@@ -18,9 +18,23 @@ test('plugins: hello plugin opens in an iframe overlay', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('.dropdown-toggle')).toBeVisible({ timeout: 15000 })
 
-  // Open the user menu and pick the 🧩 Hello Plugin entry.
+  // P2.4: open the user menu and count 🧩 entries. App.vue renders one
+  // dropdown item per loaded plugin, so zero 🧩 items means no plugin is
+  // installed (local run, or a CI matrix without the Gap 6 mock-plugin
+  // install step). Skip cleanly instead of locator-timeout'ing on the
+  // missing item. store.plugins loads on app mount; if the dropdown beat
+  // the fetch, re-check after a short wait before deciding.
   await page.locator('.dropdown-toggle').click()
-  await page.locator('.dropdown-item', { hasText: '🧩' }).click()
+  const pluginItems = page.locator('.dropdown-item', { hasText: '🧩' })
+  let count = await pluginItems.count()
+  if (count === 0) {
+    await page.waitForTimeout(1500)
+    count = await pluginItems.count()
+  }
+  test.skip(count === 0, 'no plugins loaded — requires CI mock plugin (Gap 6)')
+
+  // Open the plugin overlay.
+  await pluginItems.first().click()
 
   // Overlay + iframe render.
   const overlay = page.locator('.plugin-overlay')

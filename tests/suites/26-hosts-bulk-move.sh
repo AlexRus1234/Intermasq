@@ -6,7 +6,18 @@
 if require_jwt "static hosts — bulk-move" 7; then
     MOVED_FILE="$CONF_DIR/15-moved.conf"
 
-    # Happy: move ee:10 (added by 23-hosts-csv.sh) into a new target file.
+    # P2.2 self-seed: recreate ee:10 in $FILE so this suite no longer
+    # depends on 23-hosts-csv.sh having run. The bulk-move below reads ee:10
+    # from $FILE as its source, so the seed must land in $FILE (not a
+    # separate file). 200 (created) and 409 (already present from 23) are
+    # both acceptable; any other status is surfaced as a real failure.
+    S=$(POST "$JWT" "/api/hosts" "{\"mac\":\"aa:bb:cc:dd:ee:10\",\"ip\":\"10.0.0.20\",\"hostname\":\"csv1\",\"file\":\"$FILE\"}")
+    case "$S" in
+        200|409) ;;
+        *) check "self-seed ee:10 (expected 200|409)" 200 "$S" || true ;;
+    esac
+
+    # Happy: move ee:10 into a new target file.
     S=$(POST "$JWT" "/api/hosts/bulk-move" "{\"target\":\"$MOVED_FILE\",\"hosts\":[{\"mac\":\"aa:bb:cc:dd:ee:10\",\"file\":\"$FILE\"}]}")
     check "Bulk-move 1 host → 200" 200 "$S" || true
     MOVED_COUNT=$(body | jval .moved)

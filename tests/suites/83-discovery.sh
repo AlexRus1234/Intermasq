@@ -4,6 +4,9 @@
 
 if require_jwt "discovery endpoints" 5; then
     # /api/leases — likely empty in CI (no /tmp/leases file created).
+    # P2.1: known empty in CI (no real dnsmasq writing leases), so only the
+    # 200 + JSON-array shape is asserted; a length-assert would be
+    # meaningless here.
     S=$(GET "$JWT" "/api/leases")
     check "GET /api/leases → 200" 200 "$S" || true
     LEASE_COUNT=$(body | jq 'length' 2>/dev/null || echo "?")
@@ -23,14 +26,25 @@ if require_jwt "discovery endpoints" 5; then
     fi
 
     # /api/new-devices — macs in ARP not in static hosts or active leases.
+    # P2.1: env-dependent — requires the CI arp fixture
+    # (-arp-file=tests/fixtures/arp-sample.txt). With it, >=1 new device is
+    # expected; without it (local run) the list is correctly empty, so we
+    # only assert 200 + shape and keep the count informational.
     S=$(GET "$JWT" "/api/new-devices")
     check "GET /api/new-devices → 200" 200 "$S" || true
     DEV_COUNT=$(body | jq 'length' 2>/dev/null || echo "?")
     echo "  new devices: $DEV_COUNT"
 
     # /api/hosts/next-ip — returns a free IP from the given CIDR.
+    # P2.1: deterministic given the CIDR — assert the ip field is non-empty
+    # (catches a regression returning {} or {"ip":""} with 200).
     S=$(GET "$JWT" "/api/hosts/next-ip?range=10.99.0.0/24")
     check "GET /api/hosts/next-ip → 200" 200 "$S" || true
     NEXT_IP=$(body | jval .ip)
     echo "  next free ip: $NEXT_IP"
+    if [ -n "$NEXT_IP" ] && [ "$NEXT_IP" != "null" ]; then
+        check "next-ip returns non-empty ip" 1 1 || true
+    else
+        check "next-ip returns non-empty ip" 1 0 || true
+    fi
 fi

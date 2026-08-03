@@ -14,8 +14,17 @@ test('reload via Apply returns 200', async ({ page }) => {
   // applyConfig() alerts on both success and error; accept unconditionally.
   page.on('dialog', (d) => d.accept())
 
+  // P2.3: do NOT filter waitForResponse on status === 200 — if applyConfig
+  // returns 400 (e.g. dnsmasq --test failed), the predicate never matches,
+  // waitForResponse hangs for the full 30s test timeout and then fails with
+  // an opaque message. Match any /api/reload response with an explicit
+  // shorter timeout, then assert status below so a 400 surfaces the real
+  // status code quickly and readably.
   const [resp] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/api/reload') && r.status() === 200),
+    page.waitForResponse(
+      (r) => r.url().includes('/api/reload'),
+      { timeout: 15000 },
+    ),
     page.locator('.btn-warning', { hasText: '🔄' }).click(),
   ])
   expect(resp.status()).toBe(200)

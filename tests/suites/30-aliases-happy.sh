@@ -20,4 +20,11 @@ if require_jwt "DNS aliases — happy path" 6; then
 
     S=$(POST "$JWT" "/api/aliases" "{\"type\":\"A\",\"domain\":\"bad.local\",\"target\":\"not-an-ip\",\"file\":\"$ALIAS_FILE\"}")
     check "A with non-IP target → 400" 400 "$S" || true
+
+    # P2.1: GET /api/aliases after the adds above — list must reflect the
+    # written entries, not silently return [] with 200. Four aliases (A,
+    # CNAME, PTR, TXT) were added; >=1 is the robust non-empty guard.
+    S=$(GET "$JWT" "/api/aliases")
+    check "GET /api/aliases → 200" 200 "$S" || true
+    check_length "GET /api/aliases body non-empty" 1
 fi

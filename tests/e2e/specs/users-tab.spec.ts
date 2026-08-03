@@ -42,14 +42,25 @@ test('users: deleting self is rejected', async ({ page }) => {
   const adminRow = page.locator('tbody tr', { hasText: 'admin' })
   await expect(adminRow).toBeVisible({ timeout: 10000 })
 
-  // deleteUser() uses confirm(); on rejection it ALSO pops alert(msg)
-  // (api/system.js). We must accept BOTH dialogs and wait for the error
-  // alert — otherwise the alert fires after the test resolves and Playwright
-  // throws "dialog.accept: page has been closed" during teardown.
-  let dialogs = 0
-  page.on('dialog', (d) => { dialogs++; d.accept() })
-  await adminRow.locator('button.btn-outline-danger').click()
-  await expect.poll(() => dialogs, { timeout: 10000 }).toBeGreaterThanOrEqual(2)
+  // P2.10: pin the actual backend rejection, not a dialog-count side
+  // effect. The previous assertion (>=2 dialogs accepted) would still pass
+  // if deleteUser() were mutated to a no-op that just popped a confirm()
+  // without hitting the API. Accept every dialog (the confirm() guard plus
+  // the cannot-delete-self alert on the error path) so the click completes,
+  // and assert the DELETE response is 400 + cannot_delete_self — the
+  // canonical contract from handlers_users.go:68.
+  page.on('dialog', (d) => d.accept())
+
+  const [resp] = await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes('/api/users/admin') && r.request().method() === 'DELETE',
+      { timeout: 10000 },
+    ),
+    adminRow.locator('button.btn-outline-danger').click(),
+  ])
+  expect(resp.status()).toBe(400)
+  const respBody = await resp.json()
+  expect(respBody.error).toContain('cannot_delete_self')
 
   // Rejected (cannot_delete_self): the admin row stays in the list.
   await expect(adminRow).toBeVisible({ timeout: 10000 })

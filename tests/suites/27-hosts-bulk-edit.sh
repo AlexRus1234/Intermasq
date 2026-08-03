@@ -8,6 +8,18 @@
 # unknown host.
 
 if require_jwt "static hosts — bulk-edit" 5; then
+    # P2.2 self-seed: recreate ee:11 (csv2 / 10.0.0.21) in $FILE so this
+    # suite no longer depends on 23-hosts-csv.sh having run. The IP must
+    # keep the 10.0.0 prefix (the transform below rewrites that prefix) and
+    # the hostname must be non-empty ("csv2") because bulkEditHandler
+    # validates it via validHostname() even when not transforming it. 200
+    # (created) and 409 (already present from 23) are both acceptable.
+    S=$(POST "$JWT" "/api/hosts" "{\"mac\":\"aa:bb:cc:dd:ee:11\",\"ip\":\"10.0.0.21\",\"hostname\":\"csv2\",\"file\":\"$FILE\"}")
+    case "$S" in
+        200|409) ;;
+        *) check "self-seed ee:11 (expected 200|409)" 200 "$S" || true ;;
+    esac
+
     # Happy: transform ee:11 (csv2, hostname="csv2", IP=10.0.0.21)
     # → 10.0.1.21 via prefix replace.
     S=$(POST "$JWT" "/api/hosts/bulk-edit" "{\"hosts\":[{\"mac\":\"aa:bb:cc:dd:ee:11\",\"file\":\"$FILE\"}],\"ip_transform\":{\"old_prefix\":\"10.0.0\",\"new_prefix\":\"10.0.1\"}}")

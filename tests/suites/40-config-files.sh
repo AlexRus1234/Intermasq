@@ -18,8 +18,10 @@ if require_jwt "config files" 10; then
 
     S=$(GET "$JWT" "/api/config")
     check "GET /api/config snapshot" 200 "$S" || true
-    FILE_COUNT=$(body | jq '.files | length' 2>/dev/null || echo "?")
-    echo "  config files in snapshot: $FILE_COUNT"
+    # P2.1: length-assert on the nested files array (not top-level length,
+    # which would just count keys). 30-test.conf and 40-dhcp.conf were
+    # created above; 30-test.conf is deleted below but only after this GET.
+    check_length "GET /api/config has >=1 file" 1 '.files | length'
 
     S=$(GET "$JWT" "/api/files/30-test.conf")
     check "GET raw file" 200 "$S" || true
