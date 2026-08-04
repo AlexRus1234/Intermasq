@@ -25,17 +25,17 @@
           <hr>
           <h6>{{ $t('templates.new', 'New template') }}</h6>
           <div class="row g-2 mt-1">
-            <div class="col-md-6"><input v-model="form.name" :placeholder="$t('templates.namePlaceholder', 'Name')" class="form-control"></div>
+            <div class="col-md-6"><input v-model="form.name" data-testid="tpl-name" :placeholder="$t('templates.namePlaceholder', 'Name')" class="form-control"></div>
             <div class="col-md-6">
               <select v-if="store.dhcpRanges.length > 0" v-model="form.ip_range" class="form-select">
                 <option value="">— {{ $t('templates.manualRange', 'manual CIDR') }} —</option>
                 <option v-for="r in store.dhcpRanges" :key="r" :value="r">{{ r }}</option>
               </select>
-              <input v-else v-model="form.ip_range" placeholder="10.0.0.0/24" class="form-control">
+              <input v-else v-model="form.ip_range" data-testid="tpl-ip-range" placeholder="10.0.0.0/24" class="form-control">
               <input v-if="store.dhcpRanges.length > 0 && form.ip_range && !store.dhcpRanges.includes(form.ip_range)" v-model="form.ip_range" placeholder="10.0.0.0/24" class="form-control form-control-sm mt-1">
             </div>
-            <div class="col-md-6"><input v-model="form.hostname_pattern" placeholder="device-{NNN}" class="form-control"></div>
-            <div class="col-md-6"><input v-model="form.target_file" :placeholder="$t('templates.filePlaceholder', '/etc/dnsmasq.d/hosts.conf')" class="form-control"></div>
+            <div class="col-md-6"><input v-model="form.hostname_pattern" data-testid="tpl-hostname-pattern" placeholder="device-{NNN}" class="form-control"></div>
+            <div class="col-md-6"><input v-model="form.target_file" data-testid="tpl-target-file" :placeholder="$t('templates.filePlaceholder', '/etc/dnsmasq.d/hosts.conf')" class="form-control"></div>
           </div>
         </div>
         <div class="modal-footer">

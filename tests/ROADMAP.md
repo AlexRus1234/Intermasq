@@ -122,6 +122,15 @@ runner; **post-reboot stable** (обе ВМ пережили рестарт — 
 (`system.go`/`bins.go`/`main.go`). См. `логи/l5-nightly-bootstrap.md`,
 настройки ВМ — `tests/l5/vm-setup.md`, ход теста — `tests/l5/test-flow.md`.
 
+> **Note on `system_callers_test.go`:** unit-тесты с fake-бинарниками на PATH
+> дают statement-coverage для `SystemCaller` (sudoDispatch, argv-construction,
+> output-parsing), но **НЕ** дают функциональной уверенности в реальных
+> `systemctl`/`rc-service`/`sv`/`service` семантиках — это vanity-покрытие
+> (см. шапку `system_callers_test.go`: «цифра coverage растёт, доверие — нет»).
+> Для реальной проверки init-перезагрузки — **только L5 real-VM** (Gap 4,
+> opt-in `run_l5_vm_tests`). **При рефакторинге `system.go` полагаться
+> ТОЛЬКО на L5**, не на `system_callers_test.go`.
+
 ### Fuzzing (~+2-3%) — ЗАКРЫТО (Hardening sweep, T1)
 
 **Реализовано:** `fuzz_test.go` — 4 native `FuzzXxx` (`FuzzParseDhcpHostLine`,

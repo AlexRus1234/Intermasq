@@ -2,11 +2,13 @@
 // template, confirm it appears in the list, then delete it.
 //
 // A7 is classified cosmetic in tests/bugreport/bugs.md (not a bug), so this is a UI smoke,
-// not a regression. Selectors: the ⚙️ entry button lives in the HostForm
-// card; hostname_pattern has a hardcoded placeholder "device-{NNN}" (stable
-// anchor), the rest of the create-form inputs are addressed positionally
-// within .modal-content (ip_range stays a plain <input> because the e2e
-// conf-dir has no dhcp-range directive → store.dhcpRanges is empty).
+// not a regression. P3.7: form inputs are addressed by data-testid (set in
+// TemplatesModal.vue) instead of positional .nth() — the create form has 4
+// inputs whose DOM order depends on store.dhcpRanges (ip_range renders as a
+// <select> when dhcpRanges is non-empty), so positional indexes would silently
+// drift and fill the wrong field. data-testid is order- and locale-independent
+// (name/target_file placeholders are i18n-translated, so placeholder matchers
+// would break under the RU locale).
 
 import { test, expect } from '@playwright/test'
 import { CONF_DIR } from '../lib/api'
@@ -23,11 +25,11 @@ test('templates modal: create then delete a template', async ({ page }) => {
   await expect(modal).toBeVisible({ timeout: 5000 })
 
   // Create form: name, ip_range, hostname_pattern, target_file (all required
-  // for canSubmit). hostname_pattern has a hardcoded placeholder.
-  await modal.locator('input.form-control').nth(0).fill(NAME)
-  await modal.locator('input.form-control').nth(1).fill('10.99.99.0/24')
-  await modal.locator('input[placeholder="device-{NNN}"]').fill('e2e-{NNN}')
-  await modal.locator('input.form-control').nth(3).fill(`${CONF_DIR}/e2e-tpl.conf`)
+  // for canSubmit). Anchored on data-testid, not DOM position.
+  await modal.locator('[data-testid="tpl-name"]').fill(NAME)
+  await modal.locator('[data-testid="tpl-ip-range"]').fill('10.99.99.0/24')
+  await modal.locator('[data-testid="tpl-hostname-pattern"]').fill('e2e-{NNN}')
+  await modal.locator('[data-testid="tpl-target-file"]').fill(`${CONF_DIR}/e2e-tpl.conf`)
   await modal.locator('.btn-success').click()
 
   // Template shows up in the list.

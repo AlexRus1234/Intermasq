@@ -86,6 +86,24 @@ func TestParseArpContentUppercaseMac(t *testing.T) {
 	}
 }
 
+// TestIsSafePath pins the A11 defense-in-depth layer (isSafePath,
+// dnsmasq.go:51) DIRECTLY, independently of the handler-level substring
+// filter (handlers_config.go:199/223).
+//
+// Every external HTTP traversal vector today carries "/" or "\", so the
+// substring filter in getFileHandler/putFileHandler rejects it BEFORE
+// isSafePath-after-Join ever fires (see TestGetFileHandlerRejectsUnsafePath /
+// TestPutFileHandlerRejectsUnsafePath for that layer). There is no external
+// HTTP vector that bypasses the substring filter but is caught by isSafePath
+// by design — isSafePath exists precisely as the second gate in case the
+// substring filter is ever weakened (e.g. to allow "/" in names) or a new
+// call site forgets it. This test pins that second gate on its own.
+//
+// The "/etc/dnsmasq.d_evil/host.conf" case is the discriminating one: it
+// catches a regression that drops the path-separator from the HasPrefix
+// check (strings.HasPrefix(cleanPath, cleanDir+sep) → ...HasPrefix(_, cleanDir)),
+// which would let a sibling directory whose name shares a prefix with ConfigDir
+// pass as "inside". Mutate isSafePath that way and this case fails.
 func TestIsSafePath(t *testing.T) {
 	*ConfigDir = "/etc/dnsmasq.d"
 	tests := []struct {

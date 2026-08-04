@@ -26,7 +26,7 @@ if require_jwt "static hosts — happy path" 12; then
     # Verify file content AFTER all 4 successful adds (ee:01, ee:03, ee:04, ee:05).
     # ee:02 was rejected as duplicate-IP so doesn't count.
     if [ -f "$FILE" ]; then
-        LINES=$(grep -c "^dhcp-host=" "$FILE" || echo 0)
+        LINES=$(grep -c "^dhcp-host=" "$FILE" || true)
         check "File has 4 dhcp-host lines (ee:01,ee:03,ee:04,ee:05)" 4 "$LINES" || true
     else
         check "File created" 4 0 || true

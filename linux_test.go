@@ -109,6 +109,53 @@ func readArgvLog(t *testing.T, logPath string) string {
 	return string(b)
 }
 
+// fakeDnsmasqStrict installs a fake `dnsmasq` that ACTUALLY inspects the
+// config file named by --conf-file=<path> and exits 1 if it contains the
+// marker `# INVALID` (exit 0 otherwise). This lets a test assert that
+// writeConfigWithTest/writeFileRaw genuinely ran `dnsmasq --test` against the
+// just-written content AND that a content rejection surfaces as
+// `dnsmasq_test_failed` — something the plain fakeDnsmasq (which is
+// `#!/bin/sh\nexit 0` and accepts any garbage) cannot do.
+//
+// Mirrors fakeDnsmasq wiring: points the package var `dnsmasqBinPath` at the
+// script, registers cleanup, skips on Windows (shebang not honoured by
+// os/exec there).
+func fakeDnsmasqStrict(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-dnsmasq shell-script unsupported on Windows")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "dnsmasq")
+	// Parse --conf-file=<path> out of argv, read that file, reject on the
+	// `# INVALID` marker. `grep -q` + `exit 1` mirrors a real `dnsmasq --test`
+	// content rejection closely enough for the success/failure wiring under
+	// test. Writes nothing to stdout/stderr on success; on rejection prints a
+	// short message so CombinedOutput captures a non-empty body (matching the
+	// real dnsmasq --test failure shape that becomes `dnsmasq_test_failed: ...`).
+	script := `#!/bin/sh
+conf=""
+for arg in "$@"; do
+    case "$arg" in
+        --conf-file=*) conf="${arg#--conf-file=}" ;;
+    esac
+done
+if [ -n "$conf" ] && [ -f "$conf" ]; then
+    if grep -q '# INVALID' "$conf"; then
+        echo "fake dnsmasq: invalid config"
+        exit 1
+    fi
+fi
+exit 0
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write strict fake dnsmasq: %v", err)
+	}
+	orig := dnsmasqBinPath
+	dnsmasqBinPath = bin
+	t.Cleanup(func() { dnsmasqBinPath = orig })
+}
+
 // fakeBin writes a shell-script binary `name` (with `script` body, no
 // shebang) into a temp dir, installs it under the matching *BinPath package
 // var (bins.go:30-35) for the duration of the test, and registers cleanup to
@@ -252,6 +299,46 @@ func TestWriteConfigWithTest_TestFailRollback(t *testing.T) {
 	got, _ := os.ReadFile(path)
 	if !bytes.Equal(got, orig) {
 		t.Errorf("rollback failed: file content changed (got %q, want %q)", got, orig)
+	}
+}
+
+// TestWriteConfigWithTest_StrictFakeRejectsInvalid exercises the full
+// writeConfigWithTest wiring WITH content validation. The plain fakeDnsmasq
+// (`exit 0`) accepts any garbage, so TestWriteConfigWithTest_TestFailRollback
+// above only proves the rollback plumbing fires when dnsmasq exits non-zero —
+// it cannot prove dnsmasq was pointed at the just-written file. fakeDnsmasqStrict
+// actually reads --conf-file=<path> and rejects the `# INVALID` marker, so a
+// pass here means: the content was written, dnsmasq was invoked on THAT file,
+// and the rejection correctly surfaced as `dnsmasq_test_failed` with rollback.
+// The accept case proves the strict fake does not over-reject valid content.
+func TestWriteConfigWithTest_StrictFakeRejectsInvalid(t *testing.T) {
+	fakeDnsmasqStrict(t)
+	dir := newTestDir(t)
+	path := filepath.Join(dir, "strict.conf")
+
+	// Valid content (no marker) → accepted, file updated.
+	valid := []byte("# valid\ndomain=lan\n")
+	if err := writeConfigWithTest(path, valid); err != nil {
+		t.Fatalf("valid content rejected: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if !bytes.Contains(got, []byte("domain=lan")) {
+		t.Errorf("valid content not written: %q", got)
+	}
+
+	// Invalid content (marker present) → dnsmasq_test_failed + rollback to valid.
+	orig := valid
+	invalid := []byte("# INVALID\ndhcp-host=not-checked\n")
+	err := writeConfigWithTest(path, invalid)
+	if err == nil {
+		t.Fatal("expected dnsmasq_test_failed for # INVALID marker, got nil")
+	}
+	if !strings.HasPrefix(err.Error(), "dnsmasq_test_failed") {
+		t.Fatalf("expected dnsmasq_test_failed prefix, got: %v", err)
+	}
+	got, _ = os.ReadFile(path)
+	if !bytes.Equal(got, orig) {
+		t.Errorf("rollback failed: file changed after rejection (got %q, want %q)", got, orig)
 	}
 }
 
