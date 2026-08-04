@@ -23,7 +23,7 @@
 | A5 | HIGH | frontend (BulkEditModal.vue) | FIXED | был Playwright `test.fail` (Блок A), `.fail` снят |
 | A6 | MEDIUM | backend (handlers_hosts.go) | FIXED | smoke.sh: `Bulk JSON response has count field` |
 | A7 | MEDIUM | frontend (TemplatesModal.vue) | WONTFIX | не баг (UI-layout), проверен вручную |
-| A8 | MEDIUM | backend (metrics.go) | FIXED | smoke.sh: `A8: 401 has body` |
+| A8 | MEDIUM | backend (metrics.go) | FIXED | smoke `80-metrics.sh`: `A8: 401 body non-empty AND contains auth_required` (honest regression, P3.3) |
 | A10 | LOW | backend (arp_leases.go) | WONTFIX | feature gap → отдельный PR |
 | A11 | LOW | security (handlers_*.go) | FIXED | smoke.sh: path traversal battery; L2 `TestGetFileHandlerRejectsUnsafePath` / `TestPutFileHandlerRejectsUnsafePath` |
 | A12 | HIGH | backend (main.go aliasDomainRegex) | FIXED | smoke.sh: `A12: Add TXT with underscore domain` |
@@ -306,7 +306,10 @@ c.JSON(200, gin.H{"status": "ok", "count": len(req.Hosts)})
 > вызывает `c.AbortWithStatusJSON(401, gin.H{"error": "auth_required"})` вместо
 > bare `AbortWithStatus(401)`. Regression: augmented `TestMetricsHandler_NoAuth_401`
 > в `handlers_test.go` (assert non-empty body + "auth_required"); smoke `A8: 401
-> has body` зелёный.
+> body non-empty AND contains auth_required` зелёный (predrel-test-remediation-P3,
+> 2026-08-04: smoke-чек стал honest regression — ранее его описание «has body
+> (currently empty)» было инвертировано относительно PASS-ветки, а тег A8 +
+> `|| true` маскировали регрессию; теперь тег снят, A8 нет в known-bugs.txt).
 
 **Severity:** MEDIUM (UX)
 **Component:** `metrics.go:60`
@@ -328,7 +331,9 @@ c.AbortWithStatusJSON(401, gin.H{"error": "auth_required"})
 
 Поможет и Prometheus-у давать более понятный `last_error` в UI.
 
-**Regression test:** `tests/smoke.sh` — `A8: 401 has body`.
+**Regression test:** `tests/suites/80-metrics.sh` — `A8: 401 body non-empty AND
+contains auth_required` (body >2 bytes AND `grep -q 'auth_required'`); +
+`TestMetricsHandler_NoAuth_401` в `handlers_test.go`.
 
 ---
 
@@ -372,9 +377,11 @@ OUI-vendor работает только для зарегистрированн
 > любого достижимого через URL traversal-входа, а `isSafePath`-после-Join —
 > страховочный слой на случай будущего ослабления фильтра или нового call
 > site'а. Теперь оба хендлера повторяют единый chokepoint-паттерн остальных
-> 22 call site'ов. Regression: `TestGetFileHandlerRejectsUnsafePath`
-> (`dnsmasq_test.go`), `TestPutFileHandlerRejectsUnsafePath`
-> (`handlers_test.go`). A11 удалён из `tests/known-bugs.txt`. Лог:
+> 22 call site'ов. Regression: `TestIsSafePath` (прямой тест DiD-слоя в
+> `dnsmasq_test.go`, включая prefix-collision case `_evil`, который ловит
+> удаление path-сепаратора из `HasPrefix`), + `TestGetFileHandlerRejectsUnsafePath`
+> / `TestPutFileHandlerRejectsUnsafePath` (handler-level substring layer).
+> A11 удалён из `tests/known-bugs.txt`. Лог:
 > `логи/hardening-sweep.md`.
 
 **Severity:** LOW (большинство векторов закрыто)

@@ -16,6 +16,7 @@
 #   - audit log presence
 #   - /metrics auth (4 methods) + A8 body-on-401 regression
 #   - path traversal battery (A11)
+#   - apply-template / leases-to-static / restart-self / reload / SSE events (P3.8)
 #
 # Failing tests are BY DESIGN for known bugs — see tests/known-bugs.txt
 # and tests/bugreport/bugs.md. A green run = bug fixes landed.
