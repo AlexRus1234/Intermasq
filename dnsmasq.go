@@ -40,6 +40,7 @@ import (
 	"regexp"
 	"strings"
 
+	"intermask/internal/bins"
 	"intermask/internal/stats"
 	"intermask/internal/validate"
 )
@@ -77,7 +78,7 @@ func writeFileRaw(path string, content []byte) error {
 	if err := os.WriteFile(path, content, 0644); err != nil {
 		return err
 	}
-	testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+path)
+	testCmd := exec.Command(bins.Dnsmasq(), "--test", "--conf-file="+path)
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
 		stats.Counters.TestFailures.Add(1)
 		_ = rollbackFile(path)
@@ -97,7 +98,7 @@ func writeConfigWithTest(path string, content []byte) error {
 	if err := os.WriteFile(path, content, 0644); err != nil {
 		return err
 	}
-	testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+path)
+	testCmd := exec.Command(bins.Dnsmasq(), "--test", "--conf-file="+path)
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
 		stats.Counters.TestFailures.Add(1)
 		_ = rollbackFile(path)

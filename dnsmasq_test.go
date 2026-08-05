@@ -32,6 +32,8 @@ import (
 	"testing"
 	"time"
 
+	"intermask/internal/bins"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -1838,7 +1840,7 @@ func TestConfigTemplatesAllStartWithManagedHeader(t *testing.T) {
 // `dnsmasq --test`, чтобы последующий PUT /api/config не падал на первой
 // операции. Если dnsmasq не установлен — тест пропускается (CI без dnsmasq).
 func TestConfigTemplatesValidForDnsmasqSyntax(t *testing.T) {
-	if dnsmasqBin() == "" {
+	if bins.Dnsmasq() == "" {
 		t.Skip("dnsmasq binary not installed — skipping syntax validation")
 	}
 	for id, content := range configTemplates {
@@ -1847,7 +1849,7 @@ func TestConfigTemplatesValidForDnsmasqSyntax(t *testing.T) {
 			if err := os.WriteFile(tmp, []byte(content), 0644); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+tmp)
+			cmd := exec.Command(bins.Dnsmasq(), "--test", "--conf-file="+tmp)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Errorf("template %q failed dnsmasq --test:\n%s\noutput:\n%s", id, err, out)
 			}

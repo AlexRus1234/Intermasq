@@ -38,6 +38,8 @@ import (
 	"sync"
 	"testing"
 
+	"intermask/internal/bins"
+
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -925,7 +927,7 @@ func TestRestoreBackupZip_EmptyArchive(t *testing.T) {
 // .conf files restores correctly on Linux CI (dnsmasq --test passes).
 // On non-Linux the dnsmasq binary is unavailable so the test skips.
 func TestRestoreBackupZip_ValidArchive(t *testing.T) {
-	if dnsmasqBin() == "" {
+	if bins.Dnsmasq() == "" {
 		t.Skip("dnsmasq binary not found, skipping restore test")
 	}
 

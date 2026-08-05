@@ -21,7 +21,7 @@ package main
 // procOneCommPath at a temp file with a candidate init name, then asserting
 // the returned string. The fallback-branch cases (where /proc/1/comm is
 // unreadable) are exercised by pointing at a non-existent path and relying
-// on the installed-bin accessors — those depend on rcServiceBin()/svBin()/…,
+// on the installed-bin accessors — those depend on bins.RcService()/bins.Sv()/…,
 // which resolve via $PATH, so we only assert the result is one of the known
 // init names or "none".
 
@@ -30,6 +30,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"intermask/internal/bins"
 )
 
 // withCommPath swaps procOneCommPath for the test and restores it on cleanup.
@@ -42,9 +44,9 @@ func withCommPath(t *testing.T, path string) {
 
 func TestDetectInitSystem_Systemd(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		// rcServiceBin() in the init-read-fail branch calls resolveBins()
+		// bins.RcService() in the init-read-fail branch calls bins.Resolve()
 		// which on Windows may return "" — that's fine, but the systemd
-		// success branch doesn't touch rcServiceBin(), so this case is
+		// success branch doesn't touch bins.RcService(), so this case is
 		// actually portable. Kept gated only for consistency with the suite.
 	}
 	tmp := t.TempDir()
@@ -72,13 +74,13 @@ func TestDetectInitSystem_Runit(t *testing.T) {
 
 func TestDetectInitSystem_InitOpenRC(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("rcServiceBin() lookup behaviour is Linux-specific")
+		t.Skip("bins.RcService() lookup behaviour is Linux-specific")
 	}
 	// Need rc-service on $PATH for the openrc branch. The CI Fedora image
 	// doesn't ship openrc, so this is unpredictable — we only run it on
-	// hosts where rcServiceBin() != "". If not, skip rather than assert a
+	// hosts where bins.RcService() != "". If not, skip rather than assert a
 	// false negative.
-	if rcServiceBin() == "" {
+	if bins.RcService() == "" {
 		t.Skip("rc-service not installed; openrc detection branch not exercisable")
 	}
 	tmp := t.TempDir()
@@ -94,15 +96,13 @@ func TestDetectInitSystem_InitOpenRC(t *testing.T) {
 
 func TestDetectInitSystem_InitSysVinit(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("serviceBin() lookup behaviour is Linux-specific")
+		t.Skip("bins.Service() lookup behaviour is Linux-specific")
 	}
 	// sysvinit branch fires when comm=="init" and rc-service is NOT found.
 	// Force rcServiceBinPath to empty so the openrc branch is skipped.
-	origRC := rcServiceBinPath
-	rcServiceBinPath = ""
-	t.Cleanup(func() { rcServiceBinPath = origRC })
+	bins.SetPathForTest(t, "rc-service", "")
 	// Need `service` on $PATH for the sysvinit branch. Skip if unavailable.
-	if serviceBin() == "" {
+	if bins.Service() == "" {
 		t.Skip("sysvinit `service` binary not installed")
 	}
 	tmp := t.TempDir()

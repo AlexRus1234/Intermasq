@@ -32,6 +32,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"intermask/internal/bins"
 	"intermask/internal/stats"
 )
 
@@ -121,7 +122,7 @@ func restoreBackupZip(zipData []byte) error {
 
 	for _, name := range restoredFiles {
 		fullPath := filepath.Join(*ConfigDir, name)
-		testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+fullPath)
+		testCmd := exec.Command(bins.Dnsmasq(), "--test", "--conf-file="+fullPath)
 		testOut, testErr := testCmd.CombinedOutput()
 		if testErr != nil {
 			stats.Counters.TestFailures.Add(1)

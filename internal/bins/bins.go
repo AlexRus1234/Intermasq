@@ -14,17 +14,34 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-package main
+package bins
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"sync"
+	"testing"
+)
+
+// Binary path overrides. Empty value means: resolve via $PATH, then fall
+// back to well-known absolute paths. Needed for distros (Alpine, older
+// Debian) where these binaries live under /bin or /sbin rather than /usr/bin
+// /usr/sbin. Registered on the default flag set at package init (before
+// main runs flag.Parse), so the flags keep their original -dnsmasq-bin /
+// -sudo-bin / ... names and defaults.
+var (
+	DnsmasqBin   = flag.String("dnsmasq-bin", "", "Path to dnsmasq binary (auto-resolved via $PATH if empty)")
+	SudoBin      = flag.String("sudo-bin", "", "Path to sudo binary (auto-resolved if empty)")
+	SystemctlBin = flag.String("systemctl-bin", "", "Path to systemctl binary (auto-resolved if empty)")
+	ServiceBin   = flag.String("service-bin", "", "Path to sysvinit service binary (auto-resolved if empty)")
+	RcServiceBin = flag.String("rc-service-bin", "", "Path to OpenRC rc-service binary (auto-resolved if empty)")
+	SvBin        = flag.String("sv-bin", "", "Path to runit sv binary (auto-resolved if empty)")
 )
 
 // Resolved absolute paths of external binaries. They are populated by
-// resolveBins() (called from main after flag.Parse) with a lazy fallback so
+// Resolve() (called from main after flag.Parse) with a lazy fallback so
 // tests that bypass main() still get sensible defaults via $PATH lookup.
 var (
 	dnsmasqBinPath   string
@@ -72,10 +89,10 @@ func isExecutable(path string) bool {
 	return !info.IsDir() && info.Mode()&0o111 != 0
 }
 
-// resolveBins populates the *BinPath package vars. Idempotent and safe to
-// call multiple times (tests may invoke after stubbing flags). The first
-// caller wins: subsequent calls are no-ops so tests don't fight main().
-func resolveBins() {
+// Resolve populates the *BinPath package vars. Idempotent and safe to call
+// multiple times (tests may invoke after stubbing flags). The first caller
+// wins: subsequent calls are no-ops so tests don't fight main().
+func Resolve() {
 	binsOnce.Do(func() {
 		dnsmasqBinPath = resolveBin(*DnsmasqBin, []string{"dnsmasq"}, []string{"/usr/sbin/dnsmasq", "/usr/bin/dnsmasq", "/bin/dnsmasq", "/sbin/dnsmasq"})
 		sudoBinPath = resolveBin(*SudoBin, []string{"sudo"}, []string{"/usr/bin/sudo", "/bin/sudo"})
@@ -90,41 +107,81 @@ func resolveBins() {
 	})
 }
 
-// dnsmasqBin returns the resolved dnsmasq path, resolving lazily if main()
+// Dnsmasq returns the resolved dnsmasq path, resolving lazily if Resolve()
 // has not run yet (e.g. in unit tests).
-func dnsmasqBin() string {
+func Dnsmasq() string {
 	if dnsmasqBinPath == "" {
-		resolveBins()
+		Resolve()
 	}
 	return dnsmasqBinPath
 }
-func sudoBin() string {
+
+func Sudo() string {
 	if sudoBinPath == "" {
-		resolveBins()
+		Resolve()
 	}
 	return sudoBinPath
 }
-func systemctlBin() string {
+
+func Systemctl() string {
 	if systemctlBinPath == "" {
-		resolveBins()
+		Resolve()
 	}
 	return systemctlBinPath
 }
-func serviceBin() string {
+
+func Service() string {
 	if serviceBinPath == "" {
-		resolveBins()
+		Resolve()
 	}
 	return serviceBinPath
 }
-func rcServiceBin() string {
+
+func RcService() string {
 	if rcServiceBinPath == "" {
-		resolveBins()
+		Resolve()
 	}
 	return rcServiceBinPath
 }
-func svBin() string {
+
+func Sv() string {
 	if svBinPath == "" {
-		resolveBins()
+		Resolve()
 	}
 	return svBinPath
+}
+
+// SetPathForTest substitutes the *BinPath var matching name with p for the
+// duration of the test. The previous value is restored and binsOnce is reset
+// via t.Cleanup, so a subsequent lazy accessor call may trigger a fresh
+// Resolve() (otherwise the sync.Once would be permanently primed). Recognised
+// names: "dnsmasq", "sudo", "systemctl", "service", "rc-service", "sv".
+//
+// Exported for cross-package tests during modularization (fake-bin tests in
+// package main); the in-package white-box tests reset binsOnce directly.
+func SetPathForTest(t *testing.T, name string, p string) {
+	var ptr *string
+	switch name {
+	case "dnsmasq":
+		ptr = &dnsmasqBinPath
+	case "sudo":
+		ptr = &sudoBinPath
+	case "systemctl":
+		ptr = &systemctlBinPath
+	case "service":
+		ptr = &serviceBinPath
+	case "rc-service":
+		ptr = &rcServiceBinPath
+	case "sv":
+		ptr = &svBinPath
+	default:
+		t.Fatalf("SetPathForTest: unknown binary name %q", name)
+		return
+	}
+	orig := *ptr
+	*ptr = p
+	t.Cleanup(func() {
+		*ptr = orig
+		binsOnce = sync.Once{}
+	})
 }

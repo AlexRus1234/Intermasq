@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"intermask/internal/bins"
 	"intermask/internal/stats"
 )
 
@@ -244,7 +245,7 @@ func restoreHistoryVersion(filePath, version string) error {
 	if err := os.WriteFile(filePath, content, 0644); err != nil {
 		return err
 	}
-	testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+filePath)
+	testCmd := exec.Command(bins.Dnsmasq(), "--test", "--conf-file="+filePath)
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
 		stats.Counters.TestFailures.Add(1)
 		if prev != nil {

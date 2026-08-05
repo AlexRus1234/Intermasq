@@ -36,6 +36,7 @@ import (
 	"github.com/swaggo/files"
 	"github.com/swaggo/gin-swagger"
 	_ "intermask/docs"
+	"intermask/internal/bins"
 )
 
 //go:embed frontend/dist/*
@@ -51,16 +52,10 @@ var (
 	SystemdScope = flag.String("systemd-scope", "", "Legacy flag: auto, system, user, none (overrides -init-system if set)")
 	CiMode       = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
 
-	// Binary path overrides. Empty value means: resolve via $PATH, then
-	// fall back to well-known absolute paths. Needed for distros (Alpine,
-	// older Debian) where these binaries live under /bin or /sbin rather
-	// than /usr/bin /usr/sbin.
-	DnsmasqBin    = flag.String("dnsmasq-bin", "", "Path to dnsmasq binary (auto-resolved via $PATH if empty)")
-	SudoBin       = flag.String("sudo-bin", "", "Path to sudo binary (auto-resolved if empty)")
-	SystemctlBin  = flag.String("systemctl-bin", "", "Path to systemctl binary (auto-resolved if empty)")
-	ServiceBin    = flag.String("service-bin", "", "Path to sysvinit service binary (auto-resolved if empty)")
-	RcServiceBin  = flag.String("rc-service-bin", "", "Path to OpenRC rc-service binary (auto-resolved if empty)")
-	SvBin         = flag.String("sv-bin", "", "Path to runit sv binary (auto-resolved if empty)")
+	// Binary path overrides live in internal/bins (registered on the
+	// default flag set at package init): -dnsmasq-bin / -sudo-bin /
+	// -systemctl-bin / -service-bin / -rc-service-bin / -sv-bin. Empty value
+	// means: resolve via $PATH, then fall back to well-known absolute paths.
 	AuditLogPath  = flag.String("audit-log", "/etc/intermasq/audit.log", "Path to audit log file")
 	TemplatesPath = flag.String("templates", "/etc/intermasq/templates.json", "Path to templates file")
 	HistoryDir    = flag.String("history-dir", "/etc/intermasq/history", "Directory for versioned config history")
@@ -197,7 +192,7 @@ func main() {
 // keeps only the Run() + os.Exit plumbing, which is intentionally left
 // uncovered (see логи/Coverage_sweep.md §6).
 func setupServer() (*gin.Engine, error) {
-	resolveBins()
+	bins.Resolve()
 	loadUsers()
 	loadTemplates()
 	if err := ensureHistoryDir(); err != nil {

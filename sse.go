@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"intermask/internal/bins"
 	"intermask/internal/stats"
 )
 
@@ -118,7 +119,7 @@ func checkDnsmasqStatus() bool {
 // restart so the running dnsmasq keeps working off the previous (valid)
 // config. Reload and test-failure counters are bumped for /metrics.
 func reloadDnsmasq() error {
-	testCmd := exec.Command(dnsmasqBin(), "--test")
+	testCmd := exec.Command(bins.Dnsmasq(), "--test")
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
 		stats.Counters.TestFailures.Add(1)
 		return fmt.Errorf("%s", testOut)

@@ -18,12 +18,13 @@ package main
 
 // Coverage sweep block B (логи/Coverage_sweep.md §2.B): Linux-gated tests
 // that exercise dnsmasq-dependent success paths by injecting a fake
-// `dnsmasq` shell-script via the writable package var `dnsmasqBinPath`
-// (see bins.go:30). On Windows the shebang script is not executable by
-// `os/exec`, so every test here skips on runtime.GOOS == "windows".
+// `dnsmasq` shell-script via bins.SetPathForTest (internal/bins). On Windows
+// the shebang script is not executable by `os/exec`, so every test here
+// skips on runtime.GOOS == "windows".
 //
-// Not safe to run in t.Parallel(): we mutate the global `dnsmasqBinPath` and
-// `sysCaller` package vars. Tests save/restore via t.Cleanup.
+// Not safe to run in t.Parallel(): we mutate the global bin-path state (via
+// bins.SetPathForTest) and the `sysCaller` package var. Tests save/restore
+// via t.Cleanup.
 
 import (
 	"archive/zip"
@@ -37,13 +38,16 @@ import (
 	"strings"
 	"testing"
 
+	"intermask/internal/bins"
+
 	"github.com/gin-gonic/gin"
 )
 
 // fakeDnsmasq writes a shell-script "dnsmasq" that exits with `exitCode`
-// into a temp dir, points the package var `dnsmasqBinPath` at it, and
-// registers cleanup to restore the previous value. The script honours the
-// shebang convention; on non-Linux hosts callers must t.Skip() beforehand.
+// into a temp dir, points the cached dnsmasq path (internal/bins, via
+// setBinPath/bins.SetPathForTest) at it, and registers cleanup to restore
+// the previous value. The script honours the shebang convention; on
+// non-Linux hosts callers must t.Skip() beforehand.
 //
 // If exitCode is 0, the script behaves like the real dnsmasq's `--test`
 // success path. If exitCode != 0, the script prints a marker to stderr+stdout
@@ -64,9 +68,7 @@ func fakeDnsmasq(t *testing.T, exitCode int) {
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake dnsmasq: %v", err)
 	}
-	orig := dnsmasqBinPath
-	dnsmasqBinPath = bin
-	t.Cleanup(func() { dnsmasqBinPath = orig })
+	setBinPath(t, "dnsmasq", bin)
 }
 
 // fakeDnsmasqArgvInspect is like fakeDnsmasq but the script also writes its
@@ -91,9 +93,7 @@ func fakeDnsmasqArgvInspect(t *testing.T, exitCode int) (binPath, logPath string
 	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake dnsmasq (argv-inspect): %v", err)
 	}
-	orig := dnsmasqBinPath
-	dnsmasqBinPath = binPath
-	t.Cleanup(func() { dnsmasqBinPath = orig })
+	setBinPath(t, "dnsmasq", binPath)
 	return binPath, logPath
 }
 
@@ -117,9 +117,9 @@ func readArgvLog(t *testing.T, logPath string) string {
 // `dnsmasq_test_failed` — something the plain fakeDnsmasq (which is
 // `#!/bin/sh\nexit 0` and accepts any garbage) cannot do.
 //
-// Mirrors fakeDnsmasq wiring: points the package var `dnsmasqBinPath` at the
-// script, registers cleanup, skips on Windows (shebang not honoured by
-// os/exec there).
+// Mirrors fakeDnsmasq wiring: points the cached dnsmasq path (internal/bins,
+// via setBinPath/bins.SetPathForTest) at the script, registers cleanup,
+// skips on Windows (shebang not honoured by os/exec there).
 func fakeDnsmasqStrict(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -151,22 +151,20 @@ exit 0
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatalf("write strict fake dnsmasq: %v", err)
 	}
-	orig := dnsmasqBinPath
-	dnsmasqBinPath = bin
-	t.Cleanup(func() { dnsmasqBinPath = orig })
+	setBinPath(t, "dnsmasq", bin)
 }
 
 // fakeBin writes a shell-script binary `name` (with `script` body, no
-// shebang) into a temp dir, installs it under the matching *BinPath package
-// var (bins.go:30-35) for the duration of the test, and registers cleanup to
-// restore the previous value. Recognised names: "dnsmasq", "sudo",
-// "systemctl", "service", "rc-service", "sv". Windows is skipped because the
-// shebang trick is not honoured by os/exec there.
+// shebang) into a temp dir, installs it under the matching bin-path var in
+// internal/bins for the duration of the test (via bins.SetPathForTest), and
+// registers cleanup to restore the previous value. Recognised names:
+// "dnsmasq", "sudo", "systemctl", "service", "rc-service", "sv". Windows is
+// skipped because the shebang trick is not honoured by os/exec there.
 //
 // This is the seam used by coverage sweep block D (§3.T-D): all SystemCaller
-// methods call sudoBin()/systemctlBin()/... which read these package vars —
-// so pointing them at fake scripts exercises the exec-wiring without a real
-// init system. See логи/Coverage_sweep.md §2.D ("vanity-покрытие").
+// methods call bins.Sudo()/bins.Systemctl()/... which read these cached
+// paths — so pointing them at fake scripts exercises the exec-wiring without
+// a real init system. See логи/Coverage_sweep.md §2.D ("vanity-покрытие").
 func fakeBin(t *testing.T, name, script string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -181,40 +179,14 @@ func fakeBin(t *testing.T, name, script string) {
 	setBinPath(t, name, bin)
 }
 
-// setBinPath assigns `bin` to the *BinPath var matching `name` and registers
-// cleanup to restore the previous value. Unlike fakeBin, it does not write
-// any file — useful when a test wants to point a var at an existing path.
+// setBinPath assigns `bin` to the cached path matching `name` and registers
+// cleanup to restore the previous value (plus a binsOnce reset so a later
+// accessor call may re-resolve). Unlike fakeBin, it does not write any file
+// — useful when a test wants to point a var at an existing path. Delegates to
+// bins.SetPathForTest (the cross-package seam); name set is identical.
 func setBinPath(t *testing.T, name, bin string) {
 	t.Helper()
-	var orig string
-	switch name {
-	case "dnsmasq":
-		orig = dnsmasqBinPath
-		dnsmasqBinPath = bin
-		t.Cleanup(func() { dnsmasqBinPath = orig })
-	case "sudo":
-		orig = sudoBinPath
-		sudoBinPath = bin
-		t.Cleanup(func() { sudoBinPath = orig })
-	case "systemctl":
-		orig = systemctlBinPath
-		systemctlBinPath = bin
-		t.Cleanup(func() { systemctlBinPath = orig })
-	case "service":
-		orig = serviceBinPath
-		serviceBinPath = bin
-		t.Cleanup(func() { serviceBinPath = orig })
-	case "rc-service":
-		orig = rcServiceBinPath
-		rcServiceBinPath = bin
-		t.Cleanup(func() { rcServiceBinPath = orig })
-	case "sv":
-		orig = svBinPath
-		svBinPath = bin
-		t.Cleanup(func() { svBinPath = orig })
-	default:
-		t.Fatalf("setBinPath: unknown binary name %q", name)
-	}
+	bins.SetPathForTest(t, name, bin)
 }
 
 // itoa is a tiny stdlib-free itoa so we avoid importing strconv just for the
