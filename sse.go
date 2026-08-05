@@ -29,6 +29,8 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"intermask/internal/stats"
 )
 
 type sseClient struct {
@@ -118,12 +120,12 @@ func checkDnsmasqStatus() bool {
 func reloadDnsmasq() error {
 	testCmd := exec.Command(dnsmasqBin(), "--test")
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
-		counters.TestFailures.Add(1)
+		stats.Counters.TestFailures.Add(1)
 		return fmt.Errorf("%s", testOut)
 	}
 	if err := sysCaller.Restart("dnsmasq"); err != nil {
 		return err
 	}
-	counters.Reloads.Add(1)
+	stats.Counters.Reloads.Add(1)
 	return nil
 }

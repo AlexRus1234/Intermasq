@@ -1,4 +1,7 @@
-package main
+// Package oui maps IEEE OUI prefixes (the first 3 octets of a MAC address)
+// to vendor names. It is a self-contained lookup table with no dependencies
+// on the rest of the codebase.
+package oui
 
 import "strings"
 
@@ -686,7 +689,10 @@ var ouiTable = map[string]string{
 	"f0:cb:a1": "Netgear",
 }
 
-func lookupOUI(mac string) string {
+// LookupOUI returns the vendor name for the given MAC address based on its
+// OUI prefix, or an empty string if the prefix is unknown or the input is
+// too short. The lookup is case-insensitive.
+func LookupOUI(mac string) string {
 	if len(mac) < 8 {
 		return ""
 	}

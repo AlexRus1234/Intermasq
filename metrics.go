@@ -22,23 +22,16 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+
+	"intermask/internal/stats"
 )
 
-// metricsCounters holds in-process operational counters exported via /metrics.
-// All fields are atomic so they can be updated from any handler goroutine
-// without taking the global mutex.
-type metricsCounters struct {
-	Reloads      atomic.Int64 // successful dnsmasq reloads
-	TestFailures atomic.Int64 // dnsmasq --test failures (prevented reloads)
-	StartedAt    time.Time
-}
-
-var counters = &metricsCounters{StartedAt: time.Now()}
+// metricsCounters / counters live in internal/stats (var stats.Counters) so
+// that packages which bump the counters do not import the metrics handler.
 
 // dnsHealthEntry is the latest result of resolving a managed domain.
 type dnsHealthEntry struct {
@@ -73,9 +66,9 @@ func metricsHandler(c *gin.Context) {
 	writeSimpleMetric(&b, "intermasq_leases_active", "Current number of active DHCP leases.", float64(len(leases)))
 	writeSimpleMetric(&b, "intermasq_arp_online_total", "Number of devices currently flagged online by ARP.", float64(len(arp)))
 	writeSimpleMetric(&b, "intermasq_dnsmasq_active", "1 if dnsmasq unit is active, 0 otherwise.", boolToFloat(active))
-	writeSimpleMetric(&b, "intermasq_reloads_total", "Total number of successful dnsmasq reloads triggered via the panel.", float64(counters.Reloads.Load()))
-	writeSimpleMetric(&b, "intermasq_dnsmasq_test_failures_total", "Number of times dnsmasq --test rejected a change.", float64(counters.TestFailures.Load()))
-	writeSimpleMetric(&b, "intermasq_uptime_seconds", "Seconds since the panel process started.", time.Since(counters.StartedAt).Seconds())
+	writeSimpleMetric(&b, "intermasq_reloads_total", "Total number of successful dnsmasq reloads triggered via the panel.", float64(stats.Counters.Reloads.Load()))
+	writeSimpleMetric(&b, "intermasq_dnsmasq_test_failures_total", "Number of times dnsmasq --test rejected a change.", float64(stats.Counters.TestFailures.Load()))
+	writeSimpleMetric(&b, "intermasq_uptime_seconds", "Seconds since the panel process started.", time.Since(stats.Counters.StartedAt).Seconds())
 
 	dnsHealthMu.RLock()
 	for domain, h := range dnsHealth {

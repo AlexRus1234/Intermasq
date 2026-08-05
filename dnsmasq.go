@@ -39,6 +39,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"intermask/internal/stats"
+	"intermask/internal/validate"
 )
 
 // octetPrefixRegex matches 1-3 dot-separated octets (e.g. "10", "10.0",
@@ -76,7 +79,7 @@ func writeFileRaw(path string, content []byte) error {
 	}
 	testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+path)
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
-		counters.TestFailures.Add(1)
+		stats.Counters.TestFailures.Add(1)
 		_ = rollbackFile(path)
 		return fmt.Errorf("dnsmasq_test_failed: %s", testOut)
 	}
@@ -96,7 +99,7 @@ func writeConfigWithTest(path string, content []byte) error {
 	}
 	testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+path)
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
-		counters.TestFailures.Add(1)
+		stats.Counters.TestFailures.Add(1)
 		_ = rollbackFile(path)
 		return fmt.Errorf("dnsmasq_test_failed: %s", testOut)
 	}
@@ -106,7 +109,7 @@ func writeConfigWithTest(path string, content []byte) error {
 // parseDhcpHostLine parses a single "dhcp-host=..." line into a HostEntry.
 // This is the single canonical parser used everywhere in the codebase;
 // previously the same logic was duplicated in 5 places. It recognises:
-//   - MAC (any token matching macRegex)
+//   - MAC (any token passing validate.ValidMAC)
 //   - IPv4/IPv6 (any token parseable by net.ParseIP)
 //   - tag qualifiers "set:<name>" / "tag:<name>"  -> collected into Tags
 //   - everything else                             -> Hostname
@@ -129,7 +132,7 @@ func parseDhcpHostLine(raw, file string) (HostEntry, bool) {
 			continue
 		}
 		switch {
-		case macRegex.MatchString(p):
+		case validate.ValidMAC(p):
 			entry.Mac = p
 		case net.ParseIP(p) != nil:
 			entry.Ip = p
@@ -374,39 +377,8 @@ func hostsToCSV(hosts []HostEntry) []byte {
 	return buf.Bytes()
 }
 
-// normalizeMAC converts the dash-separated MAC form (common when pasting
-// from Windows `getmac` or some network tools) into the colon-separated
-// form that dnsmasq accepts. dnsmasq --test rejects aa-bb-cc-dd-ee-ff, so
-// every user input path normalises through this helper before validation
-// and before writing. Case is preserved.
-func normalizeMAC(mac string) string {
-	return strings.ReplaceAll(mac, "-", ":")
-}
-
-// validateHostFields проверяет поля dhcp-host записи без требования «все
-// три обязательны». Контракт:
-//   - MAC обязателен и валиден по macRegex.
-//   - Если IP указан — должен парситься net.ParseIP.
-//   - Если hostname указан — должен удовлетворять validHostname.
-func validateHostFields(mac, ip, hostname string) bool {
-	mac = normalizeMAC(mac)
-	if !macRegex.MatchString(mac) {
-		return false
-	}
-	// Reject zero and broadcast MACs: dnsmasq either rejects them or, worse,
-	// silently accepts and breaks DHCP for the whole segment.
-	if strings.EqualFold(mac, "00:00:00:00:00:00") ||
-		strings.EqualFold(mac, "ff:ff:ff:ff:ff:ff") {
-		return false
-	}
-	if ip != "" && net.ParseIP(ip) == nil {
-		return false
-	}
-	if hostname != "" && !validHostname(hostname) {
-		return false
-	}
-	return true
-}
+// validateHostFields / normalizeMAC live in internal/validate; the dhcp-host
+// parsers below call them as validate.ValidateHostFields / validate.NormalizeMAC.
 
 func parseCSVHosts(r io.Reader, targetFile string) ([]HostEntry, error) {
 	reader := csv.NewReader(r)
@@ -423,10 +395,10 @@ func parseCSVHosts(r io.Reader, targetFile string) ([]HostEntry, error) {
 		if len(row) < 3 {
 			continue
 		}
-		mac := normalizeMAC(strings.TrimSpace(row[0]))
+		mac := validate.NormalizeMAC(strings.TrimSpace(row[0]))
 		ip := strings.TrimSpace(row[1])
 		hostname := strings.TrimSpace(row[2])
-		if validateHostFields(mac, ip, hostname) {
+		if validate.ValidateHostFields(mac, ip, hostname) {
 			hosts = append(hosts, HostEntry{Mac: mac, Ip: ip, Hostname: hostname, File: targetFile})
 		}
 	}

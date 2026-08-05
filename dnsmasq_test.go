@@ -126,41 +126,6 @@ func TestIsSafePath(t *testing.T) {
 	}
 }
 
-func TestValidHostname(t *testing.T) {
-	tests := []struct {
-		host     string
-		expected bool
-		reason   string
-	}{
-		{"host1", true, "simple"},
-		{"my-host", true, "single label with hyphen"},
-		{"a", true, "single char"},
-		{"a-b-c", true, "multiple hyphens"},
-		{"host.example.com", true, "fqdn"},
-		{"1host", true, "leading digit allowed by RFC 1123"},
-		{"h1-h2.h3-h4", true, "hyphens in multi-label"},
-
-		{"", false, "empty"},
-		{"-host", false, "leading hyphen"},
-		{"host-", false, "trailing hyphen"},
-		{".host", false, "leading dot"},
-		{"host.", false, "trailing dot"},
-		{"host..name", false, "consecutive dots"},
-		{"host name", false, "space"},
-		{"host_name", false, "underscore"},
-		{"host.name-", false, "trailing hyphen in label"},
-		{"-a.b", false, "leading hyphen in first label"},
-		{strings.Repeat("a", 254), false, "too long (>253)"},
-		{strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 60), true, "max total length (253)"},
-	}
-	for _, tt := range tests {
-		got := validHostname(tt.host)
-		if got != tt.expected {
-			t.Errorf("validHostname(%q) = %v, want %v (%s)", tt.host, got, tt.expected, tt.reason)
-		}
-	}
-}
-
 func TestResolveSystemCaller(t *testing.T) {
 	tests := []struct {
 		input   string
@@ -1457,56 +1422,7 @@ func TestLogoutRevokesToken(t *testing.T) {
 }
 
 // ========== OUI lookup ==========
-
-func TestLookupOUIKnownVMware(t *testing.T) {
-	v := lookupOUI("00:0c:29:aa:bb:cc")
-	if v != "VMware" {
-		t.Errorf("expected VMware, got %q", v)
-	}
-}
-
-func TestLookupOUIKnownApple(t *testing.T) {
-	v := lookupOUI("f0:18:98:11:22:33")
-	if v != "Apple" {
-		t.Errorf("expected Apple, got %q", v)
-	}
-}
-
-func TestLookupOUIUnknown(t *testing.T) {
-	v := lookupOUI("ff:ff:ff:aa:bb:cc")
-	if v != "" {
-		t.Errorf("expected empty for unknown OUI, got %q", v)
-	}
-}
-
-func TestLookupOUIShort(t *testing.T) {
-	v := lookupOUI("aa:bb")
-	if v != "" {
-		t.Errorf("expected empty for short MAC, got %q", v)
-	}
-}
-
-func TestLookupOUICaseInsensitive(t *testing.T) {
-	v1 := lookupOUI("00:0C:29:AA:BB:CC")
-	v2 := lookupOUI("00:0c:29:11:22:33")
-	if v1 != "VMware" || v2 != "VMware" {
-		t.Errorf("case-insensitive lookup failed: v1=%q v2=%q", v1, v2)
-	}
-}
-
-func TestLookupOUIKnownCisco(t *testing.T) {
-	v := lookupOUI("f4:7a:c2:11:22:33")
-	if v != "Cisco" {
-		t.Errorf("expected Cisco, got %q", v)
-	}
-}
-
-func TestLookupOUIKnownNetgear(t *testing.T) {
-	v := lookupOUI("c0:3f:0e:11:22:33")
-	if v != "Netgear" {
-		t.Errorf("expected Netgear, got %q", v)
-	}
-}
+// (TestLookupOUI* moved to internal/oui.)
 
 // ========== Auth middleware (header + query token for SSE) ==========
 
@@ -2084,43 +2000,7 @@ func TestSaveUsersAtomicPreservesExistingOnFailure(t *testing.T) {
 }
 
 // ========== Feature 3: optional IP/hostname in dhcp-host ==========
-
-func TestValidateHostFieldsAllCombinations(t *testing.T) {
-	cases := []struct {
-		name     string
-		mac      string
-		ip       string
-		hostname string
-		want     bool
-	}{
-		{"full valid", "aa:bb:cc:dd:ee:ff", "192.168.1.10", "nas", true},
-		{"mac only", "aa:bb:cc:dd:ee:ff", "", "", true},
-		{"mac + hostname", "aa:bb:cc:dd:ee:ff", "", "phone", true},
-		{"mac + ip", "aa:bb:cc:dd:ee:ff", "192.168.1.10", "", true},
-		{"mac + bad ip", "aa:bb:cc:dd:ee:ff", "not-an-ip", "", false},
-		{"mac + bad hostname", "aa:bb:cc:dd:ee:ff", "", "with space", false},
-		{"bad mac", "not-a-mac", "1.2.3.4", "host", false},
-		{"empty mac", "", "1.2.3.4", "host", false},
-		{"empty all", "", "", "", false},
-		// A3: zero/broadcast MACs must be rejected even though they match macRegex.
-		{"zero mac", "00:00:00:00:00:00", "", "", false},
-		{"broadcast mac", "ff:ff:ff:ff:ff:ff", "", "", false},
-		{"zero mac upper", "FF:FF:FF:FF:FF:FF", "", "", false},
-		// A4: dash-separated MAC is normalised inside validateHostFields, so the
-		// validator accepts it (the entry point then writes the colon form).
-		{"dash mac", "aa-bb-cc-dd-ee-ff", "", "", true},
-		{"dash mac + ip", "aa-bb-cc-dd-ee-ff", "10.0.0.5", "x", true},
-		{"dash zero mac", "00-00-00-00-00-00", "", "", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := validateHostFields(tc.mac, tc.ip, tc.hostname)
-			if got != tc.want {
-				t.Errorf("validateHostFields(%q,%q,%q) = %v, want %v", tc.mac, tc.ip, tc.hostname, got, tc.want)
-			}
-		})
-	}
-}
+// (TestValidateHostFieldsAllCombinations moved to internal/validate.)
 
 // TestAddHostHandlerMacOnly — POST /api/hosts только с MAC создаёт строку
 // dhcp-host=<mac> (infinite lease без имени и IP).
@@ -2292,24 +2172,9 @@ func TestAddHostHandlerMACDuplicateRejected(t *testing.T) {
 	}
 }
 
-// TestNormalizeMAC (A4) confirms dash-separated MACs become colon-separated.
-func TestNormalizeMAC(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"aa-bb-cc-dd-ee-ff", "aa:bb:cc:dd:ee:ff"},
-		{"aa:bb:cc:dd:ee:ff", "aa:bb:cc:dd:ee:ff"},
-		{"AA-BB-CC-DD-EE-FF", "AA:BB:CC:DD:EE:FF"},
-		{"", ""},
-	}
-	for _, tc := range cases {
-		if got := normalizeMAC(tc.in); got != tc.want {
-			t.Errorf("normalizeMAC(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
 // TestAddHostHandlerRejectsZeroBroadcastMAC (A3 regression) — zero and
 // broadcast MACs must be rejected at the handler layer even though they
-// match macRegex.
+// match validate.ValidMAC.
 func TestAddHostHandlerRejectsZeroBroadcastMAC(t *testing.T) {
 	for _, mac := range []string{"00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff"} {
 		dir := t.TempDir()
@@ -2534,38 +2399,7 @@ func TestValidateAliasEntryPTRAndTXT(t *testing.T) {
 	}
 }
 
-// TestAliasDomainRegexUnderscore (A12 regression) confirms that the domain
-// regex accepts underscore-prefixed/suffixed owner names required for DMARC
-// (_dmarc), DKIM (default._domainkey), SRV (_sip._tcp) and ACME DNS-01
-// (_acme-challenge), while still rejecting malformed domains.
-func TestAliasDomainRegexUnderscore(t *testing.T) {
-	accept := []string{
-		"_dmarc.local",
-		"_sip._tcp.example.com",
-		"default._domainkey.example.com",
-		"_acme-challenge.example.com",
-		"nas.local",
-		"a",
-		"_",
-	}
-	reject := []string{
-		"",
-		"-leading.example.com",
-		".leadingdot.example.com",
-		"with space.example.com",
-		"bad!char.example.com",
-	}
-	for _, d := range accept {
-		if !aliasDomainRegex.MatchString(d) {
-			t.Errorf("aliasDomainRegex should accept %q (A12)", d)
-		}
-	}
-	for _, d := range reject {
-		if aliasDomainRegex.MatchString(d) {
-			t.Errorf("aliasDomainRegex should reject %q", d)
-		}
-	}
-}
+// TestAliasDomainRegexUnderscore moved to internal/validate (white-box).
 
 func TestRemoveAliasLinePTR(t *testing.T) {
 	dir := t.TempDir()

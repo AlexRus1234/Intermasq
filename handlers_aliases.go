@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"intermask/internal/validate"
 )
 
 // resolveAliasesTargetFile returns the absolute path to the aliases target
@@ -39,14 +41,14 @@ func validateAliasEntry(a DnsAliasEntry) bool {
 	if a.Type != "A" && a.Type != "CNAME" && a.Type != "PTR" && a.Type != "TXT" {
 		return false
 	}
-	if !aliasDomainRegex.MatchString(a.Domain) {
+	if !validate.ValidAliasDomain(a.Domain) {
 		return false
 	}
 	switch a.Type {
 	case "A":
 		return net.ParseIP(a.Target) != nil
 	case "CNAME", "PTR":
-		return aliasDomainRegex.MatchString(a.Target)
+		return validate.ValidAliasDomain(a.Target)
 	case "TXT":
 		return a.Target != "" && !strings.Contains(a.Target, "\n")
 	}

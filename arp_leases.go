@@ -25,6 +25,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"intermask/internal/oui"
 )
 
 // getArpTable reads /proc/net/arp (path overridable via -arp-file) and
@@ -108,7 +110,7 @@ func getNewDevices() []NewDeviceInfo {
 		if !knownMacs[macLower] {
 			devices = append(devices, NewDeviceInfo{
 				Mac:    macLower,
-				Vendor: lookupOUI(macLower),
+				Vendor: oui.LookupOUI(macLower),
 			})
 		}
 	}

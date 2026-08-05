@@ -777,53 +777,8 @@ func TestMetricsHandler_TokenQuery_200(t *testing.T) {
 
 // ===== Gap 3: Edge cases =====
 
-// TestValidateHostFields_IPv6 confirms that net.ParseIP in validateHostFields
-// accepts IPv6 addresses. dnsmasq itself supports IPv6 in dhcp-host, so the
-// panel should not reject them at the validation layer.
-func TestValidateHostFields_IPv6(t *testing.T) {
-	cases := []struct {
-		name string
-		mac  string
-		ip   string
-		want bool
-	}{
-		{"ipv6 loopback", "aa:bb:cc:dd:ee:ff", "::1", true},
-		{"ipv6 full", "aa:bb:cc:dd:ee:ff", "2001:db8::1", true},
-		{"ipv6 link-local", "aa:bb:cc:dd:ee:ff", "fe80::1", true},
-		{"ipv6 invalid", "aa:bb:cc:dd:ee:ff", "not-ipv6", false},
-		{"ipv6 empty", "aa:bb:cc:dd:ee:ff", "", true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := validateHostFields(tc.mac, tc.ip, "")
-			if got != tc.want {
-				t.Errorf("validateHostFields(%q,%q,...) = %v, want %v", tc.mac, tc.ip, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestValidHostname_Unicode verifies that non-ASCII hostnames are rejected.
-// hostnameRegex is [a-zA-Z0-9]... which deliberately excludes UTF-8 multibyte.
-func TestValidHostname_Unicode(t *testing.T) {
-	cases := []struct {
-		hostname string
-		want     bool
-	}{
-		{"host", true},    // ASCII baseline
-		{"höst", false},   // Latin Extended
-		{"сервер", false}, // Cyrillic
-		{"サーバ", false},    // Japanese
-		{"hōst", false},   // Maori macron
-		{"host₀₁", false}, // Unicode subscripts
-	}
-	for _, tc := range cases {
-		got := validHostname(tc.hostname)
-		if got != tc.want {
-			t.Errorf("validHostname(%q) = %v, want %v", tc.hostname, got, tc.want)
-		}
-	}
-}
+// TestValidateHostFields_IPv6 and TestValidHostname_Unicode moved to
+// internal/validate (white-box).
 
 // TestReadAllHosts_EmptyFile confirms that an empty .conf file yields zero
 // hosts without errors. This covers the "fresh install" scenario where the
@@ -1524,64 +1479,7 @@ func TestCoalesce(t *testing.T) {
 	}
 }
 
-// TestValidateHostTags covers every branch: empty (skip), set:/tag: ok,
-// id:-prefixed accepted for round-trip, garbage rejected.
-func TestValidateHostTags(t *testing.T) {
-	cases := []struct {
-		name string
-		tags []string
-		want bool
-	}{
-		{"empty slice", []string{}, true},
-		{"only empties", []string{"", "  ", ""}, true},
-		{"set tag", []string{"set:foo"}, true},
-		{"tag tag", []string{"tag:bar"}, true},
-		{"id accepted for round-trip", []string{"id:abc"}, true},
-		{"mixed valid", []string{"set:foo", "tag:bar", "id:xyz"}, true},
-		{"whitespace trimmed valid", []string{"  set:foo  "}, true},
-		{"invalid bareword", []string{"foo"}, false},
-		{"invalid prefix unknown", []string{"foo:bar"}, false},
-		{"one invalid in mix", []string{"set:foo", "BAD"}, false},
-		{"empty inside still ok", []string{"set:foo", "", "tag:bar"}, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := validateHostTags(tc.tags); got != tc.want {
-				t.Errorf("validateHostTags(%v) = %v, want %v", tc.tags, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestNormalizeHostTags covers trim, lowercased dedup and first-seen order.
-func TestNormalizeHostTags(t *testing.T) {
-	cases := []struct {
-		name string
-		in   []string
-		want []string
-	}{
-		{"empty", []string{}, []string{}},
-		{"all-empty dropped", []string{"", "  ", ""}, []string{}},
-		{"simple", []string{"set:foo"}, []string{"set:foo"}},
-		{"preserves order", []string{"tag:z", "set:a", "tag:b"}, []string{"tag:z", "set:a", "tag:b"}},
-		{"dedup case-insensitive", []string{"set:FOO", "set:foo", "SET:Foo"}, []string{"set:FOO"}},
-		{"trim whitespace", []string{"  set:foo  ", "tag:bar"}, []string{"set:foo", "tag:bar"}},
-		{"dedup after trim", []string{"  set:foo", "set:foo"}, []string{"set:foo"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := normalizeHostTags(tc.in)
-			if len(got) != len(tc.want) {
-				t.Fatalf("normalizeHostTags(%v) = %v, want %v", tc.in, got, tc.want)
-			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Errorf("idx %d: got %q, want %q", i, got[i], tc.want[i])
-				}
-			}
-		})
-	}
-}
+// TestValidateHostTags / TestNormalizeHostTags moved to internal/validate.
 
 // ===== Coverage sweep §3 (Этап 3): handler success-ветки =====
 //

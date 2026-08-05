@@ -17,6 +17,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
+
+	"intermask/internal/validate"
 )
 
 func statusHandler(c *gin.Context) {
@@ -142,7 +144,7 @@ func bulkLeaseToStaticHandler(c *gin.Context) {
 	}
 
 	for _, l := range req.Leases {
-		if !macRegex.MatchString(l.Mac) {
+		if !validate.ValidMAC(l.Mac) {
 			c.JSON(400, gin.H{"error": "invalid_mac", "mac": l.Mac})
 			return
 		}
@@ -168,7 +170,7 @@ func bulkLeaseToStaticHandler(c *gin.Context) {
 	newLines := []string{}
 	newMacs := make(map[string]bool)
 	for _, l := range req.Leases {
-		if macRegex.MatchString(l.Mac) {
+		if validate.ValidMAC(l.Mac) {
 			newMacs[strings.ToLower(l.Mac)] = true
 		}
 	}
@@ -194,7 +196,7 @@ func bulkLeaseToStaticHandler(c *gin.Context) {
 
 	count := 0
 	for _, l := range req.Leases {
-		if !macRegex.MatchString(l.Mac) {
+		if !validate.ValidMAC(l.Mac) {
 			continue
 		}
 		hostname := l.Hostname

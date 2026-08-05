@@ -35,12 +35,14 @@ import (
 	"bufio"
 	"strings"
 	"testing"
+
+	"intermask/internal/validate"
 )
 
 // FuzzParseDhcpHostLine guarantees parseDhcpHostLine never panics on
 // arbitrary input and that a successfully parsed entry round-trips: the MAC
-// stays macRegex-valid, File is propagated, and formatDhcpHostLine re-parses
-// to an entry with the same MAC.
+// stays valid (validate.ValidMAC), File is propagated, and
+// formatDhcpHostLine re-parses to an entry with the same MAC.
 func FuzzParseDhcpHostLine(f *testing.F) {
 	seeds := []struct {
 		raw, file string
@@ -63,8 +65,8 @@ func FuzzParseDhcpHostLine(f *testing.F) {
 		if !ok {
 			return
 		}
-		if !macRegex.MatchString(normalizeMAC(entry.Mac)) {
-			t.Errorf("parsed MAC %q fails macRegex (raw=%q)", entry.Mac, raw)
+		if !validate.ValidMAC(validate.NormalizeMAC(entry.Mac)) {
+			t.Errorf("parsed MAC %q fails validate.ValidMAC (raw=%q)", entry.Mac, raw)
 		}
 		if entry.File != file {
 			t.Errorf("File not propagated: got %q want %q", entry.File, file)

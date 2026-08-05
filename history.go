@@ -35,6 +35,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"intermask/internal/stats"
 )
 
 // historyVersionRegex matches a version id used by the history subsystem.
@@ -244,7 +246,7 @@ func restoreHistoryVersion(filePath, version string) error {
 	}
 	testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+filePath)
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
-		counters.TestFailures.Add(1)
+		stats.Counters.TestFailures.Add(1)
 		if prev != nil {
 			_ = os.WriteFile(filePath, prev, 0644)
 		}

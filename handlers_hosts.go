@@ -17,6 +17,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"intermask/internal/validate"
 )
 
 func getHostsHandler(c *gin.Context) {
@@ -62,16 +64,16 @@ func addHostHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
 	}
-	req.Mac = normalizeMAC(req.Mac)
-	if !validateHostFields(req.Mac, req.Ip, req.Hostname) {
+	req.Mac = validate.NormalizeMAC(req.Mac)
+	if !validate.ValidateHostFields(req.Mac, req.Ip, req.Hostname) {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
 	}
-	if !validateHostTags(req.Tags) {
+	if !validate.ValidateHostTags(req.Tags) {
 		c.JSON(400, gin.H{"error": "invalid_tag", "detail": "tags must look like set:iot or tag:guest"})
 		return
 	}
-	req.Tags = normalizeHostTags(req.Tags)
+	req.Tags = validate.NormalizeHostTags(req.Tags)
 
 	if req.Ip != "" {
 		conflicts := findHostsByIP(req.Ip, req.Mac)
@@ -130,37 +132,7 @@ func addHostHandler(c *gin.Context) {
 	c.JSON(200, gin.H{"status": "ok"})
 }
 
-// validateHostTags returns false if any tag is not a recognized dhcp-host
-// qualifier ("set:<name>" / "tag:<name>"). "id:<client-id>" is also accepted
-// so existing configs round-trip without being rejected on edit.
-func validateHostTags(tags []string) bool {
-	for _, t := range tags {
-		t = strings.TrimSpace(t)
-		if t == "" {
-			continue
-		}
-		if !dhcpTagRegex.MatchString(t) && !strings.HasPrefix(t, "id:") {
-			return false
-		}
-	}
-	return true
-}
-
-// normalizeHostTags drops empties and de-duplicates case-insensitively while
-// preserving the first-seen order.
-func normalizeHostTags(tags []string) []string {
-	seen := make(map[string]bool)
-	out := make([]string, 0, len(tags))
-	for _, t := range tags {
-		t = strings.TrimSpace(t)
-		if t == "" || seen[strings.ToLower(t)] {
-			continue
-		}
-		seen[strings.ToLower(t)] = true
-		out = append(out, t)
-	}
-	return out
-}
+// validateHostTags / normalizeHostTags live in internal/validate.
 
 func bulkAddHostsHandler(c *gin.Context) {
 	var req BulkHostReq
@@ -176,11 +148,11 @@ func bulkAddHostsHandler(c *gin.Context) {
 	// Normalise MAC separators up-front so the in-batch cross-check and the
 	// eventual write both see the canonical colon form.
 	for i := range req.Hosts {
-		req.Hosts[i].Mac = normalizeMAC(req.Hosts[i].Mac)
+		req.Hosts[i].Mac = validate.NormalizeMAC(req.Hosts[i].Mac)
 	}
 
 	for i, h1 := range req.Hosts {
-		if !macRegex.MatchString(h1.Mac) {
+		if !validate.ValidMAC(h1.Mac) {
 			c.JSON(400, gin.H{"error": "invalid_mac", "mac": h1.Mac})
 			return
 		}
@@ -188,7 +160,7 @@ func bulkAddHostsHandler(c *gin.Context) {
 			c.JSON(400, gin.H{"error": "invalid_ip", "mac": h1.Mac})
 			return
 		}
-		if h1.Hostname != "" && !validHostname(h1.Hostname) {
+		if h1.Hostname != "" && !validate.ValidHostname(h1.Hostname) {
 			c.JSON(400, gin.H{"error": "invalid_hostname", "mac": h1.Mac})
 			return
 		}
@@ -231,7 +203,7 @@ func bulkAddHostsHandler(c *gin.Context) {
 
 	newMacs := make(map[string]bool)
 	for _, h := range req.Hosts {
-		if validateHostFields(h.Mac, h.Ip, h.Hostname) {
+		if validate.ValidateHostFields(h.Mac, h.Ip, h.Hostname) {
 			newMacs[strings.ToLower(h.Mac)] = true
 		}
 	}
@@ -279,7 +251,7 @@ func bulkAddHostsHandler(c *gin.Context) {
 func deleteHostHandler(c *gin.Context) {
 	mac := c.Param("mac")
 	file := c.Query("file")
-	if !macRegex.MatchString(mac) || !isSafePath(file) {
+	if !validate.ValidMAC(mac) || !isSafePath(file) {
 		c.JSON(400, gin.H{"error": "bad_request"})
 		return
 	}
@@ -311,7 +283,7 @@ func deleteHostHandler(c *gin.Context) {
 				p = strings.TrimSpace(p)
 				if net.ParseIP(p) != nil {
 					deletedIP = p
-				} else if !macRegex.MatchString(p) && p != "" {
+				} else if !validate.ValidMAC(p) && p != "" {
 					deletedHostname = p
 				}
 			}
@@ -476,7 +448,7 @@ func bulkMoveHandler(c *gin.Context) {
 	}
 
 	for _, h := range req.Hosts {
-		if !macRegex.MatchString(h.Mac) || !isSafePath(h.File) {
+		if !validate.ValidMAC(h.Mac) || !isSafePath(h.File) {
 			c.JSON(400, gin.H{"error": "invalid_data"})
 			return
 		}
@@ -567,7 +539,7 @@ func bulkEditHandler(c *gin.Context) {
 	}
 
 	for _, h := range req.Hosts {
-		if !macRegex.MatchString(h.Mac) || !isSafePath(h.File) {
+		if !validate.ValidMAC(h.Mac) || !isSafePath(h.File) {
 			c.JSON(400, gin.H{"error": "invalid_data", "mac": h.Mac})
 			return
 		}
@@ -609,7 +581,7 @@ func bulkEditHandler(c *gin.Context) {
 		if suffix := req.HostnameTransform.Suffix; suffix != "" {
 			newHostname = newHostname + suffix
 		}
-		if !validHostname(newHostname) {
+		if !validate.ValidHostname(newHostname) {
 			c.JSON(400, gin.H{"error": "invalid_hostname", "mac": h.Mac, "hostname": newHostname})
 			return
 		}
@@ -730,7 +702,7 @@ func applyTemplateHandler(c *gin.Context) {
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
-	if !macRegex.MatchString(req.Mac) {
+	if !validate.ValidMAC(req.Mac) {
 		c.JSON(400, gin.H{"error": "invalid_mac"})
 		return
 	}

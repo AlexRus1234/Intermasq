@@ -31,6 +31,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"intermask/internal/validate"
 )
 
 // isAliasDirective returns true if the given trimmed line is a managed
@@ -271,7 +273,7 @@ func parseCSVAliases(r io.Reader, targetFile string) ([]DnsAliasEntry, error) {
 		if t != "A" && t != "CNAME" && t != "PTR" && t != "TXT" {
 			continue
 		}
-		if !aliasDomainRegex.MatchString(domain) {
+		if !validate.ValidAliasDomain(domain) {
 			continue
 		}
 		switch t {
@@ -280,7 +282,7 @@ func parseCSVAliases(r io.Reader, targetFile string) ([]DnsAliasEntry, error) {
 				continue
 			}
 		case "CNAME", "PTR":
-			if !aliasDomainRegex.MatchString(target) {
+			if !validate.ValidAliasDomain(target) {
 				continue
 			}
 		case "TXT":

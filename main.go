@@ -29,7 +29,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sync"
 	"time"
 
@@ -75,14 +74,6 @@ var (
 )
 
 var (
-	macRegex         = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
-	hostnameRegex    = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
-	aliasDomainRegex = regexp.MustCompile(`^[a-zA-Z0-9_]([a-zA-Z0-9-._]*[a-zA-Z0-9_])?$`)
-	// dhcpTagRegex validates a single dhcp-host tag qualifier. dnsmasq
-	// accepts "set:<name>" (assigns a tag to the host) and "tag:<name>"
-	// (host matches only if that tag is already set by dhcp-match).
-	// "id:..." (client-id) is intentionally out of scope for the UI.
-	dhcpTagRegex  = regexp.MustCompile(`^(set|tag):[a-zA-Z0-9_][a-zA-Z0-9_-]*$`)
 	mu            sync.Mutex
 	loadedPlugins []PluginManifest
 )
@@ -91,17 +82,6 @@ type PluginManifest struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Bin  string `json:"bin"`
-}
-
-// validHostname reports whether s is a syntactically valid DNS hostname
-// per RFC 952 / RFC 1123 / RFC 1034: each dot-separated label is 1-63 chars,
-// alphanumeric boundaries with hyphens allowed inside, total length <=253.
-// Used for dhcp-host hostnames written by the panel.
-func validHostname(s string) bool {
-	if len(s) == 0 || len(s) > 253 {
-		return false
-	}
-	return hostnameRegex.MatchString(s)
 }
 
 func init() {

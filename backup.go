@@ -31,6 +31,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"intermask/internal/stats"
 )
 
 // createBackupZip archives every .conf file in ConfigDir into a ZIP and
@@ -122,7 +124,7 @@ func restoreBackupZip(zipData []byte) error {
 		testCmd := exec.Command(dnsmasqBin(), "--test", "--conf-file="+fullPath)
 		testOut, testErr := testCmd.CombinedOutput()
 		if testErr != nil {
-			counters.TestFailures.Add(1)
+			stats.Counters.TestFailures.Add(1)
 			for _, rb := range restoredFiles {
 				rbPath := filepath.Join(*ConfigDir, rb)
 				bakPath := rbPath + ".restore.bak"
