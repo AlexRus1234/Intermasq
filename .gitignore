@@ -43,3 +43,7 @@ npm-debug.log*
 
 # Plans (local only)
 планы/
+
+# Refactoring artifacts (local only)
+рефакторинг/
+логи/
