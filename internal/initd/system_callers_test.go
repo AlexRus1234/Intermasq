@@ -2,8 +2,8 @@
 // Copyright (C) 2026 AlexRus1234
 //
 // This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published
-// by the Free Software Foundation, either version 3 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // This program is distributed in the hope that it will be useful,
@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-package main
+package initd
 
 // Coverage sweep block D — system.go init-callers via fake binaries
 // (логи/Coverage_sweep.md §2.D + §3.T-D).
@@ -30,8 +30,37 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
+
+	"intermask/internal/bins"
 )
+
+// fakeBin writes a shell-script binary `name` (with `script` body, no
+// shebang) into a temp dir, installs it under the matching bin-path var in
+// internal/bins for the duration of the test (via bins.SetPathForTest), and
+// registers cleanup to restore the previous value. Recognised names:
+// "dnsmasq", "sudo", "systemctl", "service", "rc-service", "sv". Windows is
+// skipped because the shebang trick is not honoured by os/exec there.
+//
+// Inlined mirror of the helper that lives in main-package linux_test.go:
+// the cross-package seam (bins.SetPathForTest) lets both copies stay in
+// sync without one package reaching into the other's test files.
+func fakeBin(t *testing.T, name, script string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake shell-script binary unsupported on Windows")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, name)
+	full := "#!/bin/sh\n" + script + "\n"
+	if err := os.WriteFile(bin, []byte(full), 0o755); err != nil {
+		t.Fatalf("write fake %s: %v", name, err)
+	}
+	bins.SetPathForTest(t, name, bin)
+}
 
 // sudoDispatch is the body of a fake `sudo`: it strips any leading
 // dash-flags (notably `-n` from SystemdSystemCaller.IsActive) and then

@@ -34,6 +34,8 @@ import (
 	"strings"
 	"testing"
 
+	"intermask/internal/initd"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -42,10 +44,10 @@ import (
 // cleanup. It also neutralizes the long-lived background goroutines
 // (SSE broadcaster + DNS-health checker) that setupServer would otherwise
 // spawn: those read the same flag-owned paths the cleanup restores, which
-// is a data race under `-race`. Finally it snapshots sysCaller, which
-// setupServer mutates via initSystemCaller — without this restore any test
-// that runs setupServer leaks a resolved caller into the next. Returns the
-// sandbox root.
+// is a data race under `-race`. Finally it snapshots sysCaller (via
+// initd.SetCurrentForTest), which setupServer mutates through initd.Init —
+// without this restore any test that runs setupServer leaks a resolved
+// caller into the next. Returns the sandbox root.
 func withSandboxFlags(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
@@ -53,12 +55,16 @@ func withSandboxFlags(t *testing.T) string {
 	origDNS := startDNSHealthCheckerFn
 	startSSEBroadcasterFn = func() {}
 	startDNSHealthCheckerFn = func() {}
+	// Snapshot the current caller so a later initd.Init inside setupServer
+	// cannot leak past this test. Equivalent to the previous inline
+	// `orig.sysCaller` field but goes through the cross-package seam now
+	// that sysCaller lives in internal/initd.
+	initd.SetCurrentForTest(t, initd.Current())
 	orig := struct {
 		DBPath, TemplatesPath, HistoryDir, ConfigDir, ArpPath, LeasesPath *string
 		InitSystem, SystemdScope                                          *string
 		PluginsDir, SocketsDir                                            string
 		loadedPlugins                                                     []PluginManifest
-		sysCaller                                                         SystemCaller
 	}{
 		DBPath:        DBPath,
 		TemplatesPath: TemplatesPath,
@@ -71,7 +77,6 @@ func withSandboxFlags(t *testing.T) string {
 		PluginsDir:    PluginsDir,
 		SocketsDir:    SocketsDir,
 		loadedPlugins: loadedPlugins,
-		sysCaller:     sysCaller,
 	}
 	*DBPath = filepath.Join(tmp, "users.json")
 	*TemplatesPath = filepath.Join(tmp, "templates.json")
@@ -98,7 +103,6 @@ func withSandboxFlags(t *testing.T) string {
 		PluginsDir = orig.PluginsDir
 		SocketsDir = orig.SocketsDir
 		loadedPlugins = orig.loadedPlugins
-		sysCaller = orig.sysCaller
 	})
 	return tmp
 }
@@ -193,11 +197,11 @@ func TestSetupServer_InitSystemNone(t *testing.T) {
 	if _, err := setupServer(); err != nil {
 		t.Fatalf("setupServer: %v", err)
 	}
-	// With *InitSystem=none, sysCaller must be a NoneCaller.
-	if sysCaller == nil {
+	// With *InitSystem=none, the caller must be a NoneCaller.
+	if initd.Current() == nil {
 		t.Fatal("expected sysCaller to be initialised")
 	}
-	if got := sysCaller.String(); got != "none" {
+	if got := initd.Current().String(); got != "none" {
 		t.Errorf("expected None caller, got %q", got)
 	}
 }
@@ -249,23 +253,23 @@ func TestSetupServer_HistoryDirFail(t *testing.T) {
 
 // TestWithSandboxFlags_RestoresSysCaller pins P2.5: withSandboxFlags
 // snapshots sysCaller at entry and restores it on cleanup, so any test that
-// runs setupServer (which mutates sysCaller via initSystemCaller) cannot
-// leak its resolved caller into the next test. Uses SystemdSystemCaller as a
+// runs setupServer (which mutates sysCaller via initd.Init) cannot leak its
+// resolved caller into the next test. Uses SystemdSystemCaller as a
 // non-zero-size sentinel so pointer identity is reliable (zero-size struct
 // pointers may alias per the Go spec).
 func TestWithSandboxFlags_RestoresSysCaller(t *testing.T) {
-	savedCaller := sysCaller
-	sentinel := &SystemdSystemCaller{UseSudo: true}
-	sysCaller = sentinel
-	t.Cleanup(func() { sysCaller = savedCaller })
+	sentinel := &initd.SystemdSystemCaller{UseSudo: true}
+	initd.SetCurrentForTest(t, sentinel)
 
 	t.Run("sandbox_scope", func(t *testing.T) {
 		withSandboxFlags(t)
-		// Simulate setupServer -> initSystemCaller mutating the global.
-		sysCaller = &NoneCaller{}
+		// Simulate setupServer -> initd.Init mutating the global. initd.Init
+		// resolves "none" to a fresh &NoneCaller{}, replacing the sentinel
+		// for the duration of the subtest.
+		initd.Init("none")
 	})
 
-	if sysCaller != sentinel {
-		t.Errorf("withSandboxFlags did not restore sysCaller on cleanup: got %#v, want sentinel %p", sysCaller, sentinel)
+	if initd.Current() != sentinel {
+		t.Errorf("withSandboxFlags did not restore sysCaller on cleanup: got %#v, want sentinel %p", initd.Current(), sentinel)
 	}
 }

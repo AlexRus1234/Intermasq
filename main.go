@@ -37,6 +37,7 @@ import (
 	"github.com/swaggo/gin-swagger"
 	_ "intermask/docs"
 	"intermask/internal/bins"
+	"intermask/internal/initd"
 )
 
 //go:embed frontend/dist/*
@@ -201,7 +202,7 @@ func setupServer() (*gin.Engine, error) {
 
 	initValue := *InitSystem
 	if *SystemdScope != "" {
-		mapped := mapLegacyScope(*SystemdScope)
+		mapped := initd.MapLegacyScope(*SystemdScope)
 		if *SystemdScope != "auto" {
 			fmt.Printf("[INIT] Warning: -systemd-scope is deprecated, use -init-system=%s\n", mapped)
 		}
@@ -210,7 +211,7 @@ func setupServer() (*gin.Engine, error) {
 		}
 	}
 
-	initSystemCaller(initValue)
+	initd.Init(initValue)
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
@@ -238,7 +239,7 @@ func setupServer() (*gin.Engine, error) {
 				c.JSON(200, gin.H{"status": "restarting"})
 				if !*CiMode {
 					go func() {
-						if err := sysCaller.RestartSelf(); err != nil {
+						if err := initd.Current().RestartSelf(); err != nil {
 							fmt.Printf("[INIT] self-restart failed: %v\n", err)
 						}
 					}()

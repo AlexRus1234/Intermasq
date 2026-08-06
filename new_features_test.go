@@ -33,6 +33,8 @@ import (
 	"testing"
 	"time"
 
+	"intermask/internal/initd"
+
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -441,11 +443,9 @@ func TestStatusHandlerSafeUnderConcurrentUserWrite(t *testing.T) {
 	users = map[string]string{}
 	usersMu = sync.RWMutex{}
 	*AuditLogPath = filepath.Join(dir, "audit.log")
-	// statusHandler calls sysCaller.IsActive("dnsmasq"); the test binary
-	// never runs initSystemCaller, so wire up the no-op caller manually.
-	origCaller := sysCaller
-	sysCaller = &NoneCaller{}
-	defer func() { sysCaller = origCaller }()
+	// statusHandler calls initd.Current().IsActive("dnsmasq"); the test
+	// binary never runs initd.Init, so wire up the no-op caller manually.
+	initd.SetCurrentForTest(t, &initd.NoneCaller{})
 
 	const n = 50
 	var wg sync.WaitGroup

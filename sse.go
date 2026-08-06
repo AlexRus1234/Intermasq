@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"intermask/internal/bins"
+	"intermask/internal/initd"
 	"intermask/internal/stats"
 )
 
@@ -111,7 +112,7 @@ func arpToJSON(arp map[string]bool) string {
 // checkDnsmasqStatus asks the active init-system caller whether the dnsmasq
 // service is currently running. Returns false on any caller error.
 func checkDnsmasqStatus() bool {
-	return sysCaller.IsActive("dnsmasq")
+	return initd.Current().IsActive("dnsmasq")
 }
 
 // reloadDnsmasq runs `dnsmasq --test` first and, on success, asks the
@@ -124,7 +125,7 @@ func reloadDnsmasq() error {
 		stats.Counters.TestFailures.Add(1)
 		return fmt.Errorf("%s", testOut)
 	}
-	if err := sysCaller.Restart("dnsmasq"); err != nil {
+	if err := initd.Current().Restart("dnsmasq"); err != nil {
 		return err
 	}
 	stats.Counters.Reloads.Add(1)

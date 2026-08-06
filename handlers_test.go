@@ -39,6 +39,7 @@ import (
 	"testing"
 
 	"intermask/internal/bins"
+	"intermask/internal/initd"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -707,12 +708,8 @@ func setupMetricsGlobals(t *testing.T) {
 	newTestDir(t)
 	origKey := SecretKey
 	SecretKey = []byte("test-secret-key-32-bytes-long!!")
-	origCaller := sysCaller
-	sysCaller = &NoneCaller{}
-	t.Cleanup(func() {
-		SecretKey = origKey
-		sysCaller = origCaller
-	})
+	t.Cleanup(func() { SecretKey = origKey })
+	initd.SetCurrentForTest(t, &initd.NoneCaller{})
 }
 
 func TestMetricsHandler_NoAuth_401(t *testing.T) {

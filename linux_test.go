@@ -39,6 +39,7 @@ import (
 	"testing"
 
 	"intermask/internal/bins"
+	"intermask/internal/initd"
 
 	"github.com/gin-gonic/gin"
 )
@@ -205,15 +206,12 @@ func itoa(n int) string {
 	return string(buf[i:])
 }
 
-// withSysCaller swaps the global `sysCaller` for the duration of the test.
-// Used to make reloadDnsmasq's Restart() call deterministic (success via
-// NoneCaller, failure via failCaller below).
-func withSysCaller(t *testing.T, c SystemCaller) {
-	t.Helper()
-	orig := sysCaller
-	sysCaller = c
-	t.Cleanup(func() { sysCaller = orig })
-}
+// withSysCaller used to live here in package main and swap the package var
+// sysCaller for the test. It moved with system.go to internal/initd: the
+// exported seam initd.SetCurrentForTest now plays that role across packages
+// (see linux_test.go reload tests below). failCaller remains here — it is a
+// main-package-only SystemCaller implementation used by reloadDnsmasq's
+// caller-failure test; it satisfies initd.SystemCaller structurally.
 
 // failCaller is a minimal SystemCaller whose Restart returns an error and
 // IsActive returns false. Used to drive the Post-test-failure branch of
@@ -383,7 +381,7 @@ func TestRestoreHistoryVersion_TestFailRollback(t *testing.T) {
 
 func TestReloadDnsmasq_Success(t *testing.T) {
 	fakeDnsmasq(t, 0)
-	withSysCaller(t, &NoneCaller{})
+	initd.SetCurrentForTest(t, &initd.NoneCaller{})
 	if err := reloadDnsmasq(); err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}
@@ -391,7 +389,7 @@ func TestReloadDnsmasq_Success(t *testing.T) {
 
 func TestReloadDnsmasq_TestFail(t *testing.T) {
 	fakeDnsmasq(t, 1)
-	withSysCaller(t, &NoneCaller{})
+	initd.SetCurrentForTest(t, &initd.NoneCaller{})
 	if err := reloadDnsmasq(); err == nil || !strings.Contains(err.Error(), "fake dnsmasq") {
 		t.Fatalf("expected dnsmasq-test failure propagated, got %v", err)
 	}
@@ -399,7 +397,7 @@ func TestReloadDnsmasq_TestFail(t *testing.T) {
 
 func TestReloadDnsmasq_CallerFail(t *testing.T) {
 	fakeDnsmasq(t, 0)
-	withSysCaller(t, &failCaller{})
+	initd.SetCurrentForTest(t, &failCaller{})
 	if err := reloadDnsmasq(); err == nil {
 		t.Fatal("expected caller-restart error, got nil")
 	}
@@ -407,7 +405,7 @@ func TestReloadDnsmasq_CallerFail(t *testing.T) {
 
 func TestReloadHandler_200(t *testing.T) {
 	fakeDnsmasq(t, 0)
-	withSysCaller(t, &NoneCaller{})
+	initd.SetCurrentForTest(t, &initd.NoneCaller{})
 	w, c := newJSONContext("POST", "/api/reload", "")
 	reloadHandler(c)
 	if w.Code != 200 {
@@ -417,7 +415,7 @@ func TestReloadHandler_200(t *testing.T) {
 
 func TestReloadHandler_400(t *testing.T) {
 	fakeDnsmasq(t, 1)
-	withSysCaller(t, &NoneCaller{})
+	initd.SetCurrentForTest(t, &initd.NoneCaller{})
 	w, c := newJSONContext("POST", "/api/reload", "")
 	reloadHandler(c)
 	if w.Code != 400 {

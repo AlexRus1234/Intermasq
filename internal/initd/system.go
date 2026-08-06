@@ -14,13 +14,14 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-package main
+package initd
 
 import (
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"testing"
 
 	"intermask/internal/bins"
 )
@@ -309,8 +310,11 @@ func detectSystemCaller() SystemCaller {
 	}
 }
 
-func resolveSystemCaller(initSystem string) SystemCaller {
-	initSystem = mapLegacyScope(initSystem)
+// ResolveSystemCaller maps the configured init-system string to a concrete
+// SystemCaller. Unknown strings fall back to autodetection via
+// detectSystemCaller.
+func ResolveSystemCaller(initSystem string) SystemCaller {
+	initSystem = MapLegacyScope(initSystem)
 	useSudo := os.Getuid() != 0
 
 	switch initSystem {
@@ -331,7 +335,9 @@ func resolveSystemCaller(initSystem string) SystemCaller {
 	}
 }
 
-func mapLegacyScope(scope string) string {
+// MapLegacyScope rewrites the deprecated -systemd-scope values (system/user)
+// to the equivalent -init-system tokens. Other values pass through verbatim.
+func MapLegacyScope(scope string) string {
 	switch scope {
 	case "system":
 		return "systemd"
@@ -344,9 +350,29 @@ func mapLegacyScope(scope string) string {
 	}
 }
 
+// sysCaller is the package-level caller resolved during bootstrap by Init.
+// Unexported: external callers reach it via Current / SetCurrentForTest.
 var sysCaller SystemCaller
 
-func initSystemCaller(initSystem string) {
-	sysCaller = resolveSystemCaller(initSystem)
+// Init resolves and installs the active SystemCaller based on initSystem.
+// Equivalent to the legacy package-main initSystemCaller.
+func Init(initSystem string) {
+	sysCaller = ResolveSystemCaller(initSystem)
 	fmt.Printf("[INIT] System: %s\n", sysCaller)
+}
+
+// Current returns the caller installed by Init. main-package callers
+// (setupServer, sse, /restart-self) use this instead of touching the
+// unexported global.
+func Current() SystemCaller { return sysCaller }
+
+// SetCurrentForTest swaps sysCaller for the duration of the test and
+// restores the previous value on cleanup. Exported so cross-package tests
+// in package main (which used to mutate the package var directly) can drive
+// the caller during modularization.
+func SetCurrentForTest(t *testing.T, c SystemCaller) {
+	t.Helper()
+	orig := sysCaller
+	sysCaller = c
+	t.Cleanup(func() { sysCaller = orig })
 }

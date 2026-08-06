@@ -2,8 +2,8 @@
 // Copyright (C) 2026 AlexRus1234
 //
 // This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published
-// by the Free Software Foundation, either version 3 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // This program is distributed in the hope that it will be useful,
@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-package main
+package initd
 
 // Coverage sweep block C — system.go bootstrap tests (логи/Coverage_sweep.md
 // §2.C). detectInitSystem is tested by pointing the package var
@@ -175,41 +175,41 @@ func TestCallerStrings(t *testing.T) {
 	}
 }
 
-// ===== resolveSystemCaller (pure given inputs) =====
+// ===== ResolveSystemCaller (pure given inputs) =====
 // (TestMapLegacyScope and TestResolveSystemCaller already live in
-// dnsmasq_test.go — not duplicated here.)
+// dnsmasq_test.go in package main — not duplicated here.)
 
 func TestResolveSystemCaller_Systemd(t *testing.T) {
 	// The UseSudo field depends on os.Getuid(); we only assert the type
 	// via String() prefix, not the sudo/root suffix, to stay portable.
-	c := resolveSystemCaller("systemd")
+	c := ResolveSystemCaller("systemd")
 	s := c.String()
 	if !startsWith(s, "systemd") {
-		t.Errorf("resolveSystemCaller(systemd).String() = %q, want systemd* prefix", s)
+		t.Errorf("ResolveSystemCaller(systemd).String() = %q, want systemd* prefix", s)
 	}
 }
 
 func TestResolveSystemCaller_OpenRC(t *testing.T) {
-	c := resolveSystemCaller("openrc")
+	c := ResolveSystemCaller("openrc")
 	s := c.String()
 	if !startsWith(s, "openrc") {
-		t.Errorf("resolveSystemCaller(openrc).String() = %q, want openrc* prefix", s)
+		t.Errorf("ResolveSystemCaller(openrc).String() = %q, want openrc* prefix", s)
 	}
 }
 
 func TestResolveSystemCaller_Runit(t *testing.T) {
-	c := resolveSystemCaller("runit")
+	c := ResolveSystemCaller("runit")
 	s := c.String()
 	if !startsWith(s, "runit") {
-		t.Errorf("resolveSystemCaller(runit).String() = %q, want runit* prefix", s)
+		t.Errorf("ResolveSystemCaller(runit).String() = %q, want runit* prefix", s)
 	}
 }
 
 func TestResolveSystemCaller_SysVinit(t *testing.T) {
-	c := resolveSystemCaller("sysvinit")
+	c := ResolveSystemCaller("sysvinit")
 	s := c.String()
 	if !startsWith(s, "sysvinit") {
-		t.Errorf("resolveSystemCaller(sysvinit).String() = %q, want sysvinit* prefix", s)
+		t.Errorf("ResolveSystemCaller(sysvinit).String() = %q, want sysvinit* prefix", s)
 	}
 }
 
@@ -217,7 +217,7 @@ func TestResolveSystemCaller_Unknown_FallsBackToDetect(t *testing.T) {
 	// An unrecognised string falls into the default arm, which calls
 	// detectSystemCaller. We only assert it returns a non-nil caller with
 	// a non-empty String().
-	c := resolveSystemCaller("totally-unknown-init")
+	c := ResolveSystemCaller("totally-unknown-init")
 	if c == nil {
 		t.Fatal("expected non-nil caller")
 	}

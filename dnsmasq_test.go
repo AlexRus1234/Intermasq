@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"intermask/internal/bins"
+	"intermask/internal/initd"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -142,21 +143,21 @@ func TestResolveSystemCaller(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		caller := resolveSystemCaller(tt.input)
+		caller := initd.ResolveSystemCaller(tt.input)
 		if !strings.Contains(caller.String(), tt.wantStr) {
-			t.Errorf("resolveSystemCaller(%q) = %q, want containing %q", tt.input, caller.String(), tt.wantStr)
+			t.Errorf("ResolveSystemCaller(%q) = %q, want containing %q", tt.input, caller.String(), tt.wantStr)
 		}
 	}
 }
 
 func TestResolveSystemCallerLegacy(t *testing.T) {
-	caller := resolveSystemCaller("system")
-	if _, ok := caller.(*SystemdSystemCaller); !ok {
+	caller := initd.ResolveSystemCaller("system")
+	if _, ok := caller.(*initd.SystemdSystemCaller); !ok {
 		t.Error("expected SystemdSystemCaller for legacy scope 'system'")
 	}
 
-	caller = resolveSystemCaller("user")
-	if _, ok := caller.(*SystemdUserCaller); !ok {
+	caller = initd.ResolveSystemCaller("user")
+	if _, ok := caller.(*initd.SystemdUserCaller); !ok {
 		t.Error("expected SystemdUserCaller for legacy scope 'user'")
 	}
 }
@@ -173,15 +174,15 @@ func TestMapLegacyScope(t *testing.T) {
 		{"openrc", "openrc"},
 	}
 	for _, tt := range tests {
-		result := mapLegacyScope(tt.input)
+		result := initd.MapLegacyScope(tt.input)
 		if result != tt.expect {
-			t.Errorf("mapLegacyScope(%q) = %q, want %q", tt.input, result, tt.expect)
+			t.Errorf("MapLegacyScope(%q) = %q, want %q", tt.input, result, tt.expect)
 		}
 	}
 }
 
 func TestNoneCaller(t *testing.T) {
-	caller := &NoneCaller{}
+	caller := &initd.NoneCaller{}
 	if !caller.IsActive("anything") {
 		t.Error("NoneCaller.IsActive should always return true")
 	}
@@ -194,18 +195,18 @@ func TestNoneCaller(t *testing.T) {
 }
 
 func TestOpenRCCaller(t *testing.T) {
-	caller := &OpenRCCaller{UseSudo: false}
+	caller := &initd.OpenRCCaller{UseSudo: false}
 	if caller.String() != "openrc (root)" {
 		t.Errorf("OpenRC String() = %q", caller.String())
 	}
-	callerSudo := &OpenRCCaller{UseSudo: true}
+	callerSudo := &initd.OpenRCCaller{UseSudo: true}
 	if callerSudo.String() != "openrc (via sudo)" {
 		t.Errorf("OpenRC sudo String() = %q", callerSudo.String())
 	}
 }
 
 func TestRunitCaller(t *testing.T) {
-	caller := &RunitCaller{UseSudo: false, ServiceDir: "/etc/service"}
+	caller := &initd.RunitCaller{UseSudo: false, ServiceDir: "/etc/service"}
 	if !strings.Contains(caller.String(), "runit") {
 		t.Errorf("Runit String() = %q", caller.String())
 	}
@@ -215,11 +216,11 @@ func TestRunitCaller(t *testing.T) {
 }
 
 func TestSysVinitCaller(t *testing.T) {
-	caller := &SysVinitCaller{UseSudo: false}
+	caller := &initd.SysVinitCaller{UseSudo: false}
 	if caller.String() != "sysvinit (root)" {
 		t.Errorf("SysVinit String() = %q", caller.String())
 	}
-	callerSudo := &SysVinitCaller{UseSudo: true}
+	callerSudo := &initd.SysVinitCaller{UseSudo: true}
 	if callerSudo.String() != "sysvinit (via sudo)" {
 		t.Errorf("SysVinit sudo String() = %q", callerSudo.String())
 	}

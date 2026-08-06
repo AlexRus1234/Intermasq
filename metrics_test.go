@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"intermask/internal/initd"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -218,13 +220,12 @@ func TestMetricsHandler_AllMetricNames(t *testing.T) {
 	SecretKey = []byte("test-secret-key-32-bytes-long!!")
 	t.Cleanup(func() { SecretKey = orig })
 
-	// metricsHandler -> checkDnsmasqStatus -> sysCaller.IsActive. Without
-	// setupServer the package-level sysCaller is a nil interface and the
-	// handler nil-derefs. NoneCaller is side-effect-free and returns false
-	// for IsActive, which is all we need to exercise the output assembly.
-	origCaller := sysCaller
-	sysCaller = &NoneCaller{}
-	t.Cleanup(func() { sysCaller = origCaller })
+	// metricsHandler -> checkDnsmasqStatus -> initd.Current().IsActive.
+	// Without setupServer the package-level sysCaller is a nil interface and
+	// the handler nil-derefs. NoneCaller is side-effect-free and returns
+	// false for IsActive, which is all we need to exercise the output
+	// assembly.
+	initd.SetCurrentForTest(t, &initd.NoneCaller{})
 
 	dnsHealthMu.Lock()
 	dnsHealth["test.example.lan"] = dnsHealthEntry{Up: true, Latency: time.Millisecond}

@@ -30,6 +30,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"intermask/internal/initd"
 )
 
 // ===== T-C.2 ssePollOnce =====
@@ -41,9 +43,7 @@ func TestSsePollOnce(t *testing.T) {
 	origArp := *ArpPath
 	*ArpPath = filepath.Join(t.TempDir(), "no-arp")
 	t.Cleanup(func() { *ArpPath = origArp })
-	origCaller := sysCaller
-	sysCaller = &NoneCaller{}
-	t.Cleanup(func() { sysCaller = origCaller })
+	initd.SetCurrentForTest(t, &initd.NoneCaller{})
 
 	// Register a throwaway client so we can observe the broadcast side effect
 	// is NOT produced here (ssePollOnce just returns values; the broadcaster
@@ -64,9 +64,7 @@ func TestSsePollOnce_BroadcastsOnDelta(t *testing.T) {
 	origArp := *ArpPath
 	*ArpPath = filepath.Join(t.TempDir(), "no-arp")
 	t.Cleanup(func() { *ArpPath = origArp })
-	origCaller := sysCaller
-	sysCaller = &NoneCaller{}
-	t.Cleanup(func() { sysCaller = origCaller })
+	initd.SetCurrentForTest(t, &initd.NoneCaller{})
 
 	// Spin a fake client and run one broadcaster-iteration logic by hand.
 	client := &sseClient{ch: make(chan string, 1)}
