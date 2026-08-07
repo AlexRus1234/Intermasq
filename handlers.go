@@ -27,8 +27,8 @@ func statusHandler(c *gin.Context) {
 	usersMu.RLock()
 	setupRequired := len(users) == 0
 	usersMu.RUnlock()
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 	c.JSON(200, gin.H{
 		"setup_required": setupRequired,
 		"version":        "3.0",
@@ -135,7 +135,7 @@ func bulkLeaseToStaticHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
 	}
-	if !isSafePath(req.File) {
+	if !dnsmasq.IsSafePath(req.File) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
@@ -156,10 +156,10 @@ func bulkLeaseToStaticHandler(c *gin.Context) {
 		}
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
-	createLocalBackup(req.File)
+	dnsmasq.CreateLocalBackup(req.File)
 
 	content, err := os.ReadFile(req.File)
 	if err != nil && !os.IsNotExist(err) {

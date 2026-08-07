@@ -29,7 +29,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -37,6 +36,7 @@ import (
 	"github.com/swaggo/gin-swagger"
 	_ "intermask/docs"
 	"intermask/internal/bins"
+	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
 )
 
@@ -56,21 +56,16 @@ var (
 	// default flag set at package init): -dnsmasq-bin / -sudo-bin /
 	// -systemctl-bin / -service-bin / -rc-service-bin / -sv-bin. Empty value
 	// means: resolve via $PATH, then fall back to well-known absolute paths.
-	// ConfigDir is the registered -conf-dir flag in internal/dnsmasq.
+	// ConfigDir is the registered -conf-dir flag in internal/dnsmasq;
+	// HistoryDir / HistoryDepth are also registered there.
 	AuditLogPath  = flag.String("audit-log", "/etc/intermasq/audit.log", "Path to audit log file")
 	TemplatesPath = flag.String("templates", "/etc/intermasq/templates.json", "Path to templates file")
-	HistoryDir    = flag.String("history-dir", "/etc/intermasq/history", "Directory for versioned config history")
-	HistoryDepth  = flag.Int("history-depth", 10, "Maximum number of history versions per file")
 	PluginsDir    = "/etc/intermasq/plugins"
 	SocketsDir    = "/run/intermasq/sockets"
 	SecretKey     = []byte(os.Getenv("INTERMASQ_SECRET"))
-	// DefaultAliasesFile is the file created on first alias add when no
-	// explicit target file is provided. Relative to ConfigDir.
-	DefaultAliasesFileName = "10-dns-aliases.conf"
 )
 
 var (
-	mu            sync.Mutex
 	loadedPlugins []PluginManifest
 )
 
@@ -196,8 +191,8 @@ func setupServer() (*gin.Engine, error) {
 	bins.Resolve()
 	loadUsers()
 	loadTemplates()
-	if err := ensureHistoryDir(); err != nil {
-		fmt.Printf("[HISTORY] Failed to create dir %s: %v\n", *HistoryDir, err)
+	if err := dnsmasq.EnsureHistoryDir(); err != nil {
+		fmt.Printf("[HISTORY] Failed to create dir %s: %v\n", *dnsmasq.HistoryDir, err)
 	}
 
 	initValue := *InitSystem

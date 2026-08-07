@@ -16,9 +16,8 @@
 
 // aliases.go — pure (side-effect-free) DNS alias helpers: parsers,
 // formatters, file scanning, duplicate detection, CSV import/export.
-// The file-level manipulation (append/remove, ensureAliasesFile, isSafePath
-// gating) lives in the main package's aliases.go — stage 5 of the
-// modularization will move the file-mutating half.
+// The file-level manipulation (append/remove, EnsureAliasesFile, IsSafePath
+// gating) lives in write.go in this package after stage 5.
 
 package dnsmasq
 

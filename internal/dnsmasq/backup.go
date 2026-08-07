@@ -14,13 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// backup.go — ZIP backup/restore of all .conf files in ConfigDir. Mirrors
-// the audit-trail and .bak logic used by the live editor: existing files
-// are stashed as .restore.bak before being overwritten, and on test failure
-// every change is rolled back. This is the disaster-recovery fallback for
-// the more granular history subsystem (history.go).
-
-package main
+package dnsmasq
 
 import (
 	"archive/zip"
@@ -33,17 +27,16 @@ import (
 	"time"
 
 	"intermask/internal/bins"
-	"intermask/internal/dnsmasq"
 	"intermask/internal/stats"
 )
 
-// createBackupZip archives every .conf file in ConfigDir into a ZIP and
+// CreateBackupZip archives every .conf file in ConfigDir into a ZIP and
 // returns the bytes plus a timestamped filename.
-func createBackupZip() ([]byte, string, error) {
+func CreateBackupZip() ([]byte, string, error) {
 	buf := new(bytes.Buffer)
 	zipWriter := zip.NewWriter(buf)
 
-	files, err := os.ReadDir(*dnsmasq.ConfigDir)
+	files, err := os.ReadDir(*ConfigDir)
 	if err != nil {
 		return nil, "", err
 	}
@@ -52,7 +45,7 @@ func createBackupZip() ([]byte, string, error) {
 		if f.IsDir() || filepath.Ext(f.Name()) != ".conf" {
 			continue
 		}
-		fullPath := filepath.Join(*dnsmasq.ConfigDir, f.Name())
+		fullPath := filepath.Join(*ConfigDir, f.Name())
 		content, err := os.ReadFile(fullPath)
 		if err != nil {
 			continue
@@ -70,12 +63,12 @@ func createBackupZip() ([]byte, string, error) {
 	return buf.Bytes(), fileName, nil
 }
 
-// restoreBackupZip unpacks a ZIP into ConfigDir. For every .conf file in
+// RestoreBackupZip unpacks a ZIP into ConfigDir. For every .conf file in
 // the archive the existing on-disk file is preserved as <name>.restore.bak
 // before being overwritten. After all writes, dnsmasq --test --conf-file=<path>
 // runs for each restored file; on the first failure every changed file is
 // rolled back from its .restore.bak.
-func restoreBackupZip(zipData []byte) error {
+func RestoreBackupZip(zipData []byte) error {
 	reader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
 		return fmt.Errorf("invalid_zip: %v", err)
@@ -91,8 +84,8 @@ func restoreBackupZip(zipData []byte) error {
 		if filepath.Ext(name) != ".conf" {
 			continue
 		}
-		fullPath := filepath.Join(*dnsmasq.ConfigDir, name)
-		if !isSafePath(fullPath) {
+		fullPath := filepath.Join(*ConfigDir, name)
+		if !IsSafePath(fullPath) {
 			continue
 		}
 
@@ -122,13 +115,13 @@ func restoreBackupZip(zipData []byte) error {
 	}
 
 	for _, name := range restoredFiles {
-		fullPath := filepath.Join(*dnsmasq.ConfigDir, name)
+		fullPath := filepath.Join(*ConfigDir, name)
 		testCmd := exec.Command(bins.Dnsmasq(), "--test", "--conf-file="+fullPath)
 		testOut, testErr := testCmd.CombinedOutput()
 		if testErr != nil {
 			stats.Counters.TestFailures.Add(1)
 			for _, rb := range restoredFiles {
-				rbPath := filepath.Join(*dnsmasq.ConfigDir, rb)
+				rbPath := filepath.Join(*ConfigDir, rb)
 				bakPath := rbPath + ".restore.bak"
 				if bakContent, err := os.ReadFile(bakPath); err == nil {
 					os.WriteFile(rbPath, bakContent, 0644)
@@ -141,15 +134,15 @@ func restoreBackupZip(zipData []byte) error {
 	return nil
 }
 
-// deleteConfigFile removes a .conf file and its .bak sibling from ConfigDir.
+// DeleteConfigFile removes a .conf file and its .bak sibling from ConfigDir.
 // The .bak is taken first into the history subsystem so the deletion can be
 // undone via the versioned-history UI. dnsmasq --test is NOT run — an absent
 // file is functionally equivalent to an empty one for dnsmasq (the file is
 // simply not loaded), and the user is expected to click "Apply" afterwards
 // when ready. Returns os.ErrPermission for paths outside ConfigDir,
 // os.ErrNotExist when the file is missing.
-func deleteConfigFile(path string) error {
-	if !isSafePath(path) {
+func DeleteConfigFile(path string) error {
+	if !IsSafePath(path) {
 		return os.ErrPermission
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -157,7 +150,7 @@ func deleteConfigFile(path string) error {
 	}
 	// Snapshot current state to history so the file can be restored via
 	// the versioned-history modal even after physical deletion.
-	saveHistory(path)
+	SaveHistory(path)
 	if err := os.Remove(path); err != nil {
 		return err
 	}

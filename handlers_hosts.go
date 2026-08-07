@@ -61,7 +61,7 @@ func addHostHandler(c *gin.Context) {
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
-	if !isSafePath(req.File) {
+	if !dnsmasq.IsSafePath(req.File) {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
 	}
@@ -93,10 +93,10 @@ func addHostHandler(c *gin.Context) {
 	}
 	fmt.Printf("[VALIDATION] MAC %s accepted (ip=%q hostname=%q)\n", req.Mac, req.Ip, req.Hostname)
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
-	createLocalBackup(req.File)
+	dnsmasq.CreateLocalBackup(req.File)
 
 	content, err := os.ReadFile(req.File)
 	if err != nil && !os.IsNotExist(err) {
@@ -141,7 +141,7 @@ func bulkAddHostsHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
 	}
-	if !isSafePath(req.File) {
+	if !dnsmasq.IsSafePath(req.File) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
@@ -188,10 +188,10 @@ func bulkAddHostsHandler(c *gin.Context) {
 		}
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
-	createLocalBackup(req.File)
+	dnsmasq.CreateLocalBackup(req.File)
 
 	content, err := os.ReadFile(req.File)
 	if err != nil && !os.IsNotExist(err) {
@@ -252,17 +252,17 @@ func bulkAddHostsHandler(c *gin.Context) {
 func deleteHostHandler(c *gin.Context) {
 	mac := c.Param("mac")
 	file := c.Query("file")
-	if !validate.ValidMAC(mac) || !isSafePath(file) {
+	if !validate.ValidMAC(mac) || !dnsmasq.IsSafePath(file) {
 		c.JSON(400, gin.H{"error": "bad_request"})
 		return
 	}
 
 	macLower := strings.ToLower(mac)
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
-	createLocalBackup(file)
+	dnsmasq.CreateLocalBackup(file)
 
 	content, err := os.ReadFile(file)
 	if err != nil {
@@ -331,7 +331,7 @@ func importCSVHandler(c *gin.Context) {
 	}
 
 	targetFile := c.PostForm("target_file")
-	if !isSafePath(targetFile) {
+	if !dnsmasq.IsSafePath(targetFile) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
@@ -376,10 +376,10 @@ func importCSVHandler(c *gin.Context) {
 		}
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
-	createLocalBackup(targetFile)
+	dnsmasq.CreateLocalBackup(targetFile)
 
 	content, err := os.ReadFile(targetFile)
 	if err != nil && !os.IsNotExist(err) {
@@ -439,7 +439,7 @@ func bulkMoveHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
 	}
-	if !isSafePath(req.Target) {
+	if !dnsmasq.IsSafePath(req.Target) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
@@ -449,7 +449,7 @@ func bulkMoveHandler(c *gin.Context) {
 	}
 
 	for _, h := range req.Hosts {
-		if !validate.ValidMAC(h.Mac) || !isSafePath(h.File) {
+		if !validate.ValidMAC(h.Mac) || !dnsmasq.IsSafePath(h.File) {
 			c.JSON(400, gin.H{"error": "invalid_data"})
 			return
 		}
@@ -459,8 +459,8 @@ func bulkMoveHandler(c *gin.Context) {
 		}
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
 	moved := 0
 	skipped := []string{}
@@ -498,14 +498,14 @@ func bulkMoveHandler(c *gin.Context) {
 			continue
 		}
 
-		createLocalBackup(h.File)
-		createLocalBackup(req.Target)
+		dnsmasq.CreateLocalBackup(h.File)
+		dnsmasq.CreateLocalBackup(req.Target)
 
-		if err := removeHostLine(h.File, h.Mac); err != nil {
+		if err := dnsmasq.RemoveHostLine(h.File, h.Mac); err != nil {
 			c.JSON(500, gin.H{"error": "file_write_error", "mac": h.Mac})
 			return
 		}
-		if err := appendHostLine(req.Target, *existing); err != nil {
+		if err := dnsmasq.AppendHostLine(req.Target, *existing); err != nil {
 			c.JSON(500, gin.H{"error": "file_write_error", "mac": h.Mac})
 			return
 		}
@@ -540,7 +540,7 @@ func bulkEditHandler(c *gin.Context) {
 	}
 
 	for _, h := range req.Hosts {
-		if !validate.ValidMAC(h.Mac) || !isSafePath(h.File) {
+		if !validate.ValidMAC(h.Mac) || !dnsmasq.IsSafePath(h.File) {
 			c.JSON(400, gin.H{"error": "invalid_data", "mac": h.Mac})
 			return
 		}
@@ -609,23 +609,23 @@ func bulkEditHandler(c *gin.Context) {
 		})
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
 	affectedFiles := make(map[string]bool)
 	for _, p := range planned {
 		affectedFiles[p.file] = true
 	}
 	for f := range affectedFiles {
-		createLocalBackup(f)
+		dnsmasq.CreateLocalBackup(f)
 	}
 
 	for _, p := range planned {
-		if err := removeHostLine(p.file, p.mac); err != nil {
+		if err := dnsmasq.RemoveHostLine(p.file, p.mac); err != nil {
 			c.JSON(500, gin.H{"error": "file_write_error", "mac": p.mac})
 			return
 		}
-		if err := appendHostLine(p.file, HostEntry{
+		if err := dnsmasq.AppendHostLine(p.file, HostEntry{
 			Mac: p.mac, Hostname: p.newHost, Ip: p.newIP, File: p.file, Tags: p.newTags,
 		}); err != nil {
 			c.JSON(500, gin.H{"error": "file_write_error", "mac": p.mac})
@@ -646,8 +646,8 @@ func bulkEditHandler(c *gin.Context) {
 // ===== Templates (host add presets) =====
 
 func getTemplatesHandler(c *gin.Context) {
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
 	result := []Template{}
 	for _, t := range templates {
@@ -665,13 +665,13 @@ func createTemplateHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "missing_fields"})
 		return
 	}
-	if !isSafePath(req.TargetFile) {
+	if !dnsmasq.IsSafePath(req.TargetFile) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
 	req.ID = strings.ToLower(strings.ReplaceAll(req.Name, " ", "-"))
 	if _, exists := templates[req.ID]; exists {
@@ -686,8 +686,8 @@ func createTemplateHandler(c *gin.Context) {
 func deleteTemplateHandler(c *gin.Context) {
 	id := c.Param("id")
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
 	if _, exists := templates[id]; !exists {
 		c.JSON(404, gin.H{"error": "template_not_found"})
@@ -708,9 +708,9 @@ func applyTemplateHandler(c *gin.Context) {
 		return
 	}
 
-	mu.Lock()
+	dnsmasq.Mu.Lock()
 	tpl, exists := templates[req.TemplateID]
-	mu.Unlock()
+	dnsmasq.Mu.Unlock()
 	if !exists {
 		c.JSON(404, gin.H{"error": "template_not_found"})
 		return

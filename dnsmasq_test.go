@@ -17,8 +17,6 @@
 package main
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -87,45 +85,9 @@ func TestParseArpContentUppercaseMac(t *testing.T) {
 	}
 }
 
-// TestIsSafePath pins the A11 defense-in-depth layer (isSafePath,
-// dnsmasq.go:51) DIRECTLY, independently of the handler-level substring
-// filter (handlers_config.go:199/223).
-//
-// Every external HTTP traversal vector today carries "/" or "\", so the
-// substring filter in getFileHandler/putFileHandler rejects it BEFORE
-// isSafePath-after-Join ever fires (see TestGetFileHandlerRejectsUnsafePath /
-// TestPutFileHandlerRejectsUnsafePath for that layer). There is no external
-// HTTP vector that bypasses the substring filter but is caught by isSafePath
-// by design — isSafePath exists precisely as the second gate in case the
-// substring filter is ever weakened (e.g. to allow "/" in names) or a new
-// call site forgets it. This test pins that second gate on its own.
-//
-// The "/etc/dnsmasq.d_evil/host.conf" case is the discriminating one: it
-// catches a regression that drops the path-separator from the HasPrefix
-// check (strings.HasPrefix(cleanPath, cleanDir+sep) → ...HasPrefix(_, cleanDir)),
-// which would let a sibling directory whose name shares a prefix with ConfigDir
-// pass as "inside". Mutate isSafePath that way and this case fails.
-func TestIsSafePath(t *testing.T) {
-	*dnsmasq.ConfigDir = "/etc/dnsmasq.d"
-	tests := []struct {
-		path     string
-		expected bool
-	}{
-		{"/etc/dnsmasq.d/host.conf", true},
-		{"/etc/dnsmasq.d/sub/host.conf", true},
-		{"/etc/dnsmasq.d", true},
-		{"/etc/passwd", false},
-		{"/etc/dnsmasq.d_evil/host.conf", false},
-		{"../etc/passwd", false},
-	}
-
-	for _, tt := range tests {
-		result := isSafePath(tt.path)
-		if result != tt.expected {
-			t.Errorf("isSafePath(%q) = %v, want %v", tt.path, result, tt.expected)
-		}
-	}
-}
+// Migrated to internal/dnsmasq (stage 5):
+//   TestIsSafePath, TestReadFileRaw, TestReadFileRawUnsafePath,
+//   TestReadFileRawNotExist, TestWriteFileRaw, TestWriteFileRawUnsafePath.
 
 func TestResolveSystemCaller(t *testing.T) {
 	tests := []struct {
@@ -235,253 +197,18 @@ func TestSysVinitCaller(t *testing.T) {
 //   TestParseAliasLineRejectsMalformed, TestAliasToLineRoundTrip,
 //   TestReadAllAliases, TestReadAllAliasesHasBakMarker.
 
-func TestRemoveAliasLine(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "dns.conf")
-	content := []byte("address=/nas.lan/192.168.1.10\ncname=wiki,nas.lan\naddress=/other/10.0.0.1\n")
-	if err := os.WriteFile(path, content, 0644); err != nil {
-		t.Fatal(err)
-	}
-	removed, err := removeAliasLine(path, "A", "nas.lan")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !removed {
-		t.Fatal("expected removal")
-	}
-	out, _ := os.ReadFile(path)
-	s := string(out)
-	if strings.Contains(s, "address=/nas.lan/") {
-		t.Errorf("nas.lan not removed:\n%s", s)
-	}
-	if !strings.Contains(s, "cname=wiki,nas.lan") {
-		t.Errorf("cname should be preserved:\n%s", s)
-	}
-	if !strings.Contains(s, "address=/other/10.0.0.1") {
-		t.Errorf("other A should be preserved:\n%s", s)
-	}
-}
+// Migrated to internal/dnsmasq (stage 5):
+//   TestRemoveAliasLine, TestRemoveAliasLineNotFound,
+//   TestRemoveAliasLinePTR, TestRemoveAliasLineTXT.
 
-func TestRemoveAliasLineNotFound(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "dns.conf")
-	if err := os.WriteFile(path, []byte("address=/nas.lan/192.168.1.10\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	removed, err := removeAliasLine(path, "A", "missing.lan")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if removed {
-		t.Fatal("expected no removal for missing domain")
-	}
-}
-
-// Migrated to internal/dnsmasq:
-//   TestSerializeConfigFilePreservesAliases, TestReadConfigSnapshotFiltersAliases.
-
-// setupHistoryEnv prepares temp ConfigDir and HistoryDir for history tests.
-func setupHistoryEnv(t *testing.T) (confDir, histDir string) {
-	t.Helper()
-	confDir = t.TempDir()
-	histDir = t.TempDir()
-	*dnsmasq.ConfigDir = confDir
-	*HistoryDir = histDir
-	*HistoryDepth = 10
-	return confDir, histDir
-}
-
-func TestSaveHistoryCreatesVersion(t *testing.T) {
-	confDir, _ := setupHistoryEnv(t)
-	path := filepath.Join(confDir, "hosts.conf")
-	if err := os.WriteFile(path, []byte("dhcp-host=aa:bb:cc:dd:ee:ff,1.2.3.4,host\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	saveHistory(path)
-	versions, err := listHistory(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(versions) != 1 {
-		t.Fatalf("expected 1 version, got %d", len(versions))
-	}
-	if !historyVersionRegex.MatchString(versions[0].Version) {
-		t.Errorf("bad version id: %q", versions[0].Version)
-	}
-}
-
-func TestSaveHistoryNoOpForMissingFile(t *testing.T) {
-	confDir, _ := setupHistoryEnv(t)
-	path := filepath.Join(confDir, "nope.conf")
-	saveHistory(path)
-	versions, err := listHistory(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(versions) != 0 {
-		t.Fatalf("expected 0 versions for missing file, got %d", len(versions))
-	}
-}
-
-func TestSaveHistoryRejectsUnsafePath(t *testing.T) {
-	setupHistoryEnv(t)
-	// Path outside ConfigDir — must be ignored.
-	saveHistory("/etc/passwd")
-	versions, _ := listHistory("/etc/passwd")
-	if len(versions) != 0 {
-		t.Fatalf("history written for unsafe path")
-	}
-}
-
-func TestRotateHistoryKeepsDepth(t *testing.T) {
-	confDir, _ := setupHistoryEnv(t)
-	*HistoryDepth = 3
-	path := filepath.Join(confDir, "hosts.conf")
-	if err := os.WriteFile(path, []byte("v0\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// Save 5 versions with distinct mtimes so rotation order is stable.
-	for i := 0; i < 5; i++ {
-		os.WriteFile(path, []byte("v"+string(rune('0'+i))+"\n"), 0644)
-		saveHistory(path)
-		// Bump mtime of just-written history file so sort is deterministic.
-		entries, _ := os.ReadDir(*HistoryDir)
-		for _, e := range entries {
-			full := filepath.Join(*HistoryDir, e.Name())
-			mtime := time.Now().Add(time.Duration(i) * time.Minute)
-			os.Chtimes(full, mtime, mtime)
-		}
-	}
-	versions, err := listHistory(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(versions) != 3 {
-		t.Fatalf("expected 3 versions after rotation, got %d", len(versions))
-	}
-}
-
-func TestReadHistoryVersionInvalid(t *testing.T) {
-	confDir, _ := setupHistoryEnv(t)
-	path := filepath.Join(confDir, "hosts.conf")
-	os.WriteFile(path, []byte("x\n"), 0644)
-	if _, err := readHistoryVersion(path, "../escape"); err == nil {
-		t.Fatal("expected error for invalid version")
-	}
-	if _, err := readHistoryVersion(path, "not-a-date"); err == nil {
-		t.Fatal("expected error for non-date version")
-	}
-}
-
-func TestListHistorySortedNewestFirst(t *testing.T) {
-	confDir, _ := setupHistoryEnv(t)
-	path := filepath.Join(confDir, "hosts.conf")
-	os.WriteFile(path, []byte("a\n"), 0644)
-	saveHistory(path)
-	os.Chtimes(filepath.Join(*HistoryDir, historyFilePrefix(path)+firstVersion(t, path)+".bak"), time.Now().Add(-time.Hour), time.Now().Add(-time.Hour))
-	os.WriteFile(path, []byte("b\n"), 0644)
-	saveHistory(path)
-	v, err := listHistory(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(v) != 2 {
-		t.Fatalf("expected 2 versions, got %d", len(v))
-	}
-	if v[0].Version < v[1].Version {
-		t.Errorf("expected newest first, got %q before %q", v[0].Version, v[1].Version)
-	}
-}
-
-// firstVersion returns the single stored version id for path (test helper).
-func firstVersion(t *testing.T, path string) string {
-	t.Helper()
-	v, err := listHistory(path)
-	if err != nil || len(v) != 1 {
-		t.Fatalf("firstVersion: %v (%d)", err, len(v))
-	}
-	return v[0].Version
-}
-
-func TestUnifiedDiffAddsAndRemoves(t *testing.T) {
-	a := "line1\nline2\nline3\n"
-	bText := "line1\nlineX\nline3\nline4\n"
-	d := unifiedDiff(a, bText, "a", "b")
-	if !strings.Contains(d, "-line2") {
-		t.Errorf("diff missing removal: %s", d)
-	}
-	if !strings.Contains(d, "+lineX") || !strings.Contains(d, "+line4") {
-		t.Errorf("diff missing additions: %s", d)
-	}
-	if strings.Contains(d, "+line1") || strings.Contains(d, "-line1") {
-		t.Errorf("common line should not appear: %s", d)
-	}
-}
-
-func TestUnifiedDiffEmptyA(t *testing.T) {
-	d := unifiedDiff("", "x\ny\n", "a", "b")
-	if !strings.Contains(d, "+x") || !strings.Contains(d, "+y") {
-		t.Errorf("expected both lines added: %s", d)
-	}
-}
-
-// ========== Raw file read/write ==========
-
-func TestReadFileRaw(t *testing.T) {
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	path := filepath.Join(dir, "raw.conf")
-	os.WriteFile(path, []byte("server=1.2.3.4\n"), 0644)
-	content, err := readFileRaw(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(content) != "server=1.2.3.4\n" {
-		t.Errorf("unexpected content: %q", content)
-	}
-}
-
-func TestReadFileRawUnsafePath(t *testing.T) {
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	_, err := readFileRaw("/etc/passwd")
-	if err != os.ErrPermission {
-		t.Errorf("expected ErrPermission, got %v", err)
-	}
-}
-
-func TestReadFileRawNotExist(t *testing.T) {
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	path := filepath.Join(dir, "nope.conf")
-	_, err := readFileRaw(path)
-	if err == nil {
-		t.Fatal("expected error for missing file")
-	}
-}
-
-func TestWriteFileRaw(t *testing.T) {
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	*HistoryDir = t.TempDir()
-	*HistoryDepth = 5
-	path := filepath.Join(dir, "writetest.conf")
-	os.WriteFile(path, []byte("old\n"), 0644)
-	_ = writeFileRaw(path, []byte("server=8.8.8.8\n"))
-	_, err := os.Stat(path + ".bak")
-	if os.IsNotExist(err) {
-		t.Error(".bak should exist even if dnsmasq --test fails")
-	}
-}
-
-func TestWriteFileRawUnsafePath(t *testing.T) {
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	err := writeFileRaw("/etc/passwd", []byte("x"))
-	if err != os.ErrPermission {
-		t.Errorf("expected ErrPermission, got %v", err)
-	}
-}
+// setupHistoryEnv + the history-test block below migrated to internal/dnsmasq
+// (stage 5): TestSaveHistoryCreatesVersion, TestSaveHistoryNoOpForMissingFile,
+// TestSaveHistoryRejectsUnsafePath, TestRotateHistoryKeepsDepth,
+// TestReadHistoryVersionInvalid, TestListHistorySortedNewestFirst,
+// firstVersion, TestUnifiedDiffAddsAndRemoves, TestUnifiedDiffEmptyA,
+// TestReadFileRaw/TestReadFileRawUnsafePath/TestReadFileRawNotExist (already
+// listed above), TestWriteFileRaw/TestWriteFileRawUnsafePath (already listed
+// above).
 
 // ========== SSE broker ==========
 
@@ -838,82 +565,11 @@ func TestBulkLeaseToStaticDefaultHostname(t *testing.T) {
 }
 
 // ========== Restore from ZIP ==========
-
-func makeTestZip(entries map[string]string) []byte {
-	buf := new(bytes.Buffer)
-	zw := zip.NewWriter(buf)
-	for name, content := range entries {
-		fw, _ := zw.Create(name)
-		fw.Write([]byte(content))
-	}
-	zw.Close()
-	return buf.Bytes()
-}
-
-func TestRestoreBackupZipValid(t *testing.T) {
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	zipData := makeTestZip(map[string]string{
-		"hosts.conf": "dhcp-host=aa:bb:cc:dd:ee:ff,host1,1.2.3.4\n",
-	})
-	_ = restoreBackupZip(zipData)
-	_, err := os.ReadFile(filepath.Join(dir, "hosts.conf"))
-	if err != nil {
-		t.Error("file should have been written before dnsmasq test")
-	}
-}
-
-func TestRestoreBackupZipCreatesRestoreBak(t *testing.T) {
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	os.WriteFile(filepath.Join(dir, "hosts.conf"), []byte("old content\n"), 0644)
-	zipData := makeTestZip(map[string]string{
-		"hosts.conf": "new content\n",
-	})
-	_ = restoreBackupZip(zipData)
-	bak, _ := os.ReadFile(filepath.Join(dir, "hosts.conf.restore.bak"))
-	if string(bak) != "old content\n" {
-		t.Errorf("bak mismatch: %q", bak)
-	}
-}
-
-func TestRestoreBackupZipNoConfFiles(t *testing.T) {
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	zipData := makeTestZip(map[string]string{
-		"notes.txt": "hello\n",
-	})
-	err := restoreBackupZip(zipData)
-	if err == nil || !strings.Contains(err.Error(), "no_valid_conf_files") {
-		t.Errorf("expected no_valid_conf_files error, got %v", err)
-	}
-}
-
-func TestRestoreBackupZipInvalidData(t *testing.T) {
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	err := restoreBackupZip([]byte("not a zip file"))
-	if err == nil || !strings.Contains(err.Error(), "invalid_zip") {
-		t.Errorf("expected invalid_zip error, got %v", err)
-	}
-}
-
-func TestRestoreBackupZipIgnoresUnsafeNames(t *testing.T) {
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	zipData := makeTestZip(map[string]string{
-		"../evil.conf": "bad\n",
-		"hosts.conf":   "good\n",
-	})
-	_ = restoreBackupZip(zipData)
-	_, err := os.ReadFile(filepath.Join(dir, "hosts.conf"))
-	if err != nil {
-		t.Fatal("hosts.conf should have been extracted")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "..", "evil.conf")); err == nil {
-		t.Fatal("evil.conf should not have been extracted")
-	}
-}
+//
+// Migrated to internal/dnsmasq (stage 5):
+//   makeTestZip, TestRestoreBackupZipValid, TestRestoreBackupZipCreatesRestoreBak,
+//   TestRestoreBackupZipNoConfFiles, TestRestoreBackupZipInvalidData,
+//   TestRestoreBackupZipIgnoresUnsafeNames.
 
 // ========== Rate-limit ==========
 
@@ -1849,52 +1505,8 @@ func TestValidateAliasEntryPTRAndTXT(t *testing.T) {
 }
 
 // TestAliasDomainRegexUnderscore moved to internal/validate (white-box).
-
-func TestRemoveAliasLinePTR(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "dns.conf")
-	content := []byte("ptr-record=10.1.168.192.in-addr.arpa,nas.lan\naddress=/other/10.0.0.1\n")
-	if err := os.WriteFile(path, content, 0644); err != nil {
-		t.Fatal(err)
-	}
-	removed, err := removeAliasLine(path, "PTR", "10.1.168.192.in-addr.arpa")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !removed {
-		t.Fatal("expected PTR line to be removed")
-	}
-	out, _ := os.ReadFile(path)
-	if strings.Contains(string(out), "ptr-record=") {
-		t.Errorf("PTR not removed:\n%s", out)
-	}
-	if !strings.Contains(string(out), "address=/other/10.0.0.1") {
-		t.Errorf("A record should be preserved:\n%s", out)
-	}
-}
-
-func TestRemoveAliasLineTXT(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "dns.conf")
-	content := []byte("txt-record=nas.lan,v=spf1 -all\ncname=wiki,nas.lan\n")
-	if err := os.WriteFile(path, content, 0644); err != nil {
-		t.Fatal(err)
-	}
-	removed, err := removeAliasLine(path, "TXT", "nas.lan")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !removed {
-		t.Fatal("expected TXT line to be removed")
-	}
-	out, _ := os.ReadFile(path)
-	if strings.Contains(string(out), "txt-record=") {
-		t.Errorf("TXT not removed:\n%s", out)
-	}
-	if !strings.Contains(string(out), "cname=wiki,nas.lan") {
-		t.Errorf("CNAME should be preserved:\n%s", out)
-	}
-}
+// TestRemoveAliasLinePTR / TestRemoveAliasLineTXT moved to internal/dnsmasq
+// (stage 5).
 
 // TestAddAliasHandlerPTR — end-to-end: POST /api/aliases с type=PTR
 // создаёт ptr-record= строку в файле.
@@ -2007,51 +1619,13 @@ func TestDeleteAliasHandlerSecondDeleteNotFound(t *testing.T) {
 //   TestIPTransform_Apply_CIDR, TestIPTransform_Apply_CIDRRoundTrip,
 //   TestIsLeaseTime, TestDirectiveGroup.
 
-// TestEnsureAliasesFile covers all three branches.
-func TestEnsureAliasesFile(t *testing.T) {
-	dir := newTestDir(t)
-
-	// 1. Path traversal attempt → ErrPermission.
-	unsafe := filepath.Join(dir, "..", "escape.conf")
-	if err := ensureAliasesFile(unsafe); err != os.ErrPermission {
-		t.Fatalf("expected os.ErrPermission for unsafe path, got %v", err)
-	}
-
-	// 2. New file inside ConfigDir → created with header.
-	good := filepath.Join(dir, "aliases.conf")
-	if err := ensureAliasesFile(good); err != nil {
-		t.Fatalf("ensureAliasesFile err: %v", err)
-	}
-	data, err := os.ReadFile(good)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(string(data), "# DNS aliases") {
-		t.Errorf("expected header comment, got: %q", string(data))
-	}
-
-	// 3. Already exists → no-op (preserve prior content).
-	stamped := []byte("address=/existing/x\n")
-	if err := os.WriteFile(good, stamped, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := ensureAliasesFile(good); err != nil {
-		t.Fatalf("ensureAliasesFile on existing err: %v", err)
-	}
-	after, _ := os.ReadFile(good)
-	if string(after) != string(stamped) {
-		t.Errorf("existing file modified: before %q, after %q", stamped, after)
-	}
-}
-
-// Migrated to internal/dnsmasq:
-//   TestIsLeaseTime, TestDirectiveGroup.
+// TestEnsureAliasesFile moved to internal/dnsmasq (stage 5).
 
 // ========== Coverage sweep §3 (Этап 3): resolveAliasesTargetFile ==========
 
 // TestResolveAliasesTargetFile_EmptyCreatesDefault covers the empty-reqFile
 // branch (was 50%): when the caller omits the file, the default aliases file
-// (DefaultAliasesFileName) is created on demand inside ConfigDir and
+// (dnsmasq.DefaultAliasesFileName) is created on demand inside ConfigDir and
 // returned. This is the path POST /api/aliases takes when the UI sends no
 // explicit target file.
 func TestResolveAliasesTargetFile_EmptyCreatesDefault(t *testing.T) {
@@ -2062,7 +1636,7 @@ func TestResolveAliasesTargetFile_EmptyCreatesDefault(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ok=true for empty reqFile")
 	}
-	want := filepath.Join(dir, DefaultAliasesFileName)
+	want := filepath.Join(dir, dnsmasq.DefaultAliasesFileName)
 	if path != want {
 		t.Errorf("path = %q, want %q", path, want)
 	}

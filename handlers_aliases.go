@@ -24,13 +24,13 @@ import (
 // supplied path is unsafe.
 func resolveAliasesTargetFile(reqFile string) (string, bool) {
 	if reqFile == "" {
-		path := filepath.Join(*dnsmasq.ConfigDir, DefaultAliasesFileName)
-		if err := ensureAliasesFile(path); err != nil {
+		path := filepath.Join(*dnsmasq.ConfigDir, dnsmasq.DefaultAliasesFileName)
+		if err := dnsmasq.EnsureAliasesFile(path); err != nil {
 			return "", false
 		}
 		return path, true
 	}
-	if !isSafePath(reqFile) {
+	if !dnsmasq.IsSafePath(reqFile) {
 		return "", false
 	}
 	return reqFile, true
@@ -82,11 +82,11 @@ func addAliasHandler(c *gin.Context) {
 		return
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
-	createLocalBackup(req.File)
-	if err := appendAliasLine(req.File, req); err != nil {
+	dnsmasq.CreateLocalBackup(req.File)
+	if err := dnsmasq.AppendAliasLine(req.File, req); err != nil {
 		c.JSON(500, gin.H{"error": "file_write_error"})
 		return
 	}
@@ -146,10 +146,10 @@ func bulkAddAliasesHandler(c *gin.Context) {
 		}
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
-	createLocalBackup(req.File)
+	dnsmasq.CreateLocalBackup(req.File)
 
 	content, err := os.ReadFile(req.File)
 	if err != nil && !os.IsNotExist(err) {
@@ -207,16 +207,16 @@ func deleteAliasHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "bad_request"})
 		return
 	}
-	if !isSafePath(req.File) {
+	if !dnsmasq.IsSafePath(req.File) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
-	createLocalBackup(req.File)
-	removed, err := removeAliasLine(req.File, req.Type, req.Domain)
+	dnsmasq.CreateLocalBackup(req.File)
+	removed, err := dnsmasq.RemoveAliasLine(req.File, req.Type, req.Domain)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "file_write_error"})
 		return
@@ -294,10 +294,10 @@ func importAliasesCSVHandler(c *gin.Context) {
 		}
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
-	createLocalBackup(targetFile)
+	dnsmasq.CreateLocalBackup(targetFile)
 
 	content, err := os.ReadFile(targetFile)
 	if err != nil && !os.IsNotExist(err) {

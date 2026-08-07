@@ -62,15 +62,16 @@ func withSandboxFlags(t *testing.T) string {
 	// that sysCaller lives in internal/initd.
 	initd.SetCurrentForTest(t, initd.Current())
 	orig := struct {
-		DBPath, TemplatesPath, HistoryDir, ArpPath, LeasesPath *string
-		ConfigDir                                              *string
-		InitSystem, SystemdScope                               *string
-		PluginsDir, SocketsDir                                 string
-		loadedPlugins                                          []PluginManifest
+		DBPath, TemplatesPath, ArpPath, LeasesPath *string
+		HistoryDir                                 *string
+		ConfigDir                                  *string
+		InitSystem, SystemdScope                   *string
+		PluginsDir, SocketsDir                     string
+		loadedPlugins                              []PluginManifest
 	}{
 		DBPath:        DBPath,
 		TemplatesPath: TemplatesPath,
-		HistoryDir:    HistoryDir,
+		HistoryDir:    dnsmasq.HistoryDir,
 		ConfigDir:     dnsmasq.ConfigDir,
 		ArpPath:       ArpPath,
 		LeasesPath:    LeasesPath,
@@ -82,7 +83,7 @@ func withSandboxFlags(t *testing.T) string {
 	}
 	*DBPath = filepath.Join(tmp, "users.json")
 	*TemplatesPath = filepath.Join(tmp, "templates.json")
-	*HistoryDir = filepath.Join(tmp, "history")
+	*dnsmasq.HistoryDir = filepath.Join(tmp, "history")
 	*dnsmasq.ConfigDir = filepath.Join(tmp, "conf")
 	*ArpPath = filepath.Join(tmp, "arp")
 	*LeasesPath = filepath.Join(tmp, "leases")
@@ -96,7 +97,7 @@ func withSandboxFlags(t *testing.T) string {
 		startDNSHealthCheckerFn = origDNS
 		*DBPath = *orig.DBPath
 		*TemplatesPath = *orig.TemplatesPath
-		*HistoryDir = *orig.HistoryDir
+		*dnsmasq.HistoryDir = *orig.HistoryDir
 		*dnsmasq.ConfigDir = *orig.ConfigDir
 		*ArpPath = *orig.ArpPath
 		*LeasesPath = *orig.LeasesPath
@@ -238,7 +239,7 @@ func TestSetupServer_HistoryDirFail(t *testing.T) {
 	if err := os.WriteFile(parent, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	*HistoryDir = filepath.Join(parent, "history")
+	*dnsmasq.HistoryDir = filepath.Join(parent, "history")
 
 	gin.SetMode(gin.ReleaseMode)
 	// Note: setupServer currently logs the ensureHistoryDir error but does

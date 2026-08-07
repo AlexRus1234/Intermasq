@@ -22,10 +22,8 @@
 // parsers. The flag ConfigDir (-conf-dir) lives here so these helpers can
 // read from the configured directory without re-importing the host binary.
 //
-// The file-level manipulation (write, backup, history) lives in the main
-// package (see dnsmasq.go / backup.go / history.go in the host binary) and
-// is intentionally kept out of this package — stage 4 of the modularization
-// extracts only the side-effect-free parsers.
+// The file-level manipulation (write, backup, history) also lives in this
+// package after stage 5 of the modularization.
 package dnsmasq
 
 import (

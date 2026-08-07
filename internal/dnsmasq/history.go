@@ -14,19 +14,11 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// history.go — multi-level versioned history of dnsmasq config files.
-// Each time createLocalBackup is called (i.e. before every write to a
-// .conf file), the current content is snapshotted into -history-dir under
-// a name derived from sha256(path)+UTC timestamp. Up to -history-depth
-// versions are kept per file. REST endpoints allow listing, diffing and
-// restoring any stored version. The legacy single-shot .bak file is still
-// maintained in parallel — it powers the quick "rollback" button, while
-// history supports the more deliberate "pick a version" flow.
-
-package main
+package dnsmasq
 
 import (
 	"crypto/sha256"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,10 +32,28 @@ import (
 	"intermask/internal/stats"
 )
 
-// historyVersionRegex matches a version id used by the history subsystem.
+// HistoryDir is the directory containing the versioned config snapshots.
+// Registered on the default flag set at package init as -history-dir with
+// default "/etc/intermasq/history". The host binary doesn't redefine this
+// flag — callers (main package, handlers, tests) refer to it via
+// dnsmasq.HistoryDir.
+var HistoryDir = flag.String("history-dir", "/etc/intermasq/history", "Directory for versioned config history")
+
+// HistoryDepth caps the number of snapshots kept per file. Registered on
+// the default flag set at package init as -history-depth with default 10.
+var HistoryDepth = flag.Int("history-depth", 10, "Maximum number of history versions per file")
+
+// HistoryVersionRegex matches a version id used by the history subsystem.
 // Format: YYYYMMDD-HHMMSS with an optional numeric suffix (-2, -3, ...)
-// used when multiple snapshots are taken within the same second.
-var historyVersionRegex = regexp.MustCompile(`^\d{8}-\d{6}(-\d+)?$`)
+// used when multiple snapshots are taken within the same second. Exported
+// because the legacy main-package tests (which stay in main until stage 11)
+// assert version ids directly via this regex.
+var HistoryVersionRegex = regexp.MustCompile(`^\d{8}-\d{6}(-\d+)?$`)
+
+// historyVersionRegex is the in-package alias kept as a private identifier
+// for backward-compatibility with code that previously referred to it
+// lower-case; it points at the same compiled regex as HistoryVersionRegex.
+var historyVersionRegex = HistoryVersionRegex
 
 // historyFilePrefix returns the stable prefix used for all history files
 // related to the given config file. The original absolute path is hashed
@@ -77,32 +87,32 @@ func nextHistoryVersion(filePath string) string {
 }
 
 // isSafeHistoryPath reports whether filePath is inside the configured
-// ConfigDir (same policy as isSafePath).
+// ConfigDir (same policy as IsSafePath).
 func isSafeHistoryPath(filePath string) bool {
-	return isSafePath(filePath)
+	return IsSafePath(filePath)
 }
 
-// ensureHistoryDir creates HistoryDir if it does not exist.
-func ensureHistoryDir() error {
+// EnsureHistoryDir creates HistoryDir if it does not exist.
+func EnsureHistoryDir() error {
 	if *HistoryDir == "" {
 		return nil
 	}
 	return os.MkdirAll(*HistoryDir, 0750)
 }
 
-// saveHistory copies the current content of filePath into HistoryDir under
+// SaveHistory copies the current content of filePath into HistoryDir under
 // a name derived from a hash of the path + current UTC timestamp. After
 // writing, older versions beyond HistoryDepth are deleted (oldest first).
 // No-op if filePath does not exist or is not inside ConfigDir. Errors are
 // logged but not returned — history is best-effort.
-func saveHistory(filePath string) {
+func SaveHistory(filePath string) {
 	if !isSafeHistoryPath(filePath) {
 		return
 	}
 	if *HistoryDir == "" || *HistoryDepth <= 0 {
 		return
 	}
-	if err := ensureHistoryDir(); err != nil {
+	if err := EnsureHistoryDir(); err != nil {
 		fmt.Printf("[HISTORY] mkdir %s: %v\n", *HistoryDir, err)
 		return
 	}
@@ -120,12 +130,12 @@ func saveHistory(filePath string) {
 		fmt.Printf("[HISTORY] write %s: %v\n", full, err)
 		return
 	}
-	rotateHistory(filePath)
+	RotateHistory(filePath)
 }
 
-// rotateHistory deletes the oldest history files for filePath until at
+// RotateHistory deletes the oldest history files for filePath until at
 // most HistoryDepth remain.
-func rotateHistory(filePath string) {
+func RotateHistory(filePath string) {
 	entries, err := os.ReadDir(*HistoryDir)
 	if err != nil {
 		return
@@ -169,8 +179,8 @@ type HistoryEntry struct {
 	Size      int    `json:"size"`
 }
 
-// listHistory returns all stored versions for filePath, newest first.
-func listHistory(filePath string) ([]HistoryEntry, error) {
+// ListHistory returns all stored versions for filePath, newest first.
+func ListHistory(filePath string) ([]HistoryEntry, error) {
 	if !isSafeHistoryPath(filePath) {
 		return nil, os.ErrPermission
 	}
@@ -214,8 +224,8 @@ func listHistory(filePath string) ([]HistoryEntry, error) {
 	return out, nil
 }
 
-// readHistoryVersion returns the raw bytes of a stored version.
-func readHistoryVersion(filePath, version string) ([]byte, error) {
+// ReadHistoryVersion returns the raw bytes of a stored version.
+func ReadHistoryVersion(filePath, version string) ([]byte, error) {
 	if !isSafeHistoryPath(filePath) {
 		return nil, os.ErrPermission
 	}
@@ -226,22 +236,22 @@ func readHistoryVersion(filePath, version string) ([]byte, error) {
 	return os.ReadFile(full)
 }
 
-// restoreHistoryVersion overwrites filePath with the content of the given
+// RestoreHistoryVersion overwrites filePath with the content of the given
 // version, but only after saving the current state to history and running
 // `dnsmasq --test`. If the test fails the previous content is restored.
-func restoreHistoryVersion(filePath, version string) error {
+func RestoreHistoryVersion(filePath, version string) error {
 	if !isSafeHistoryPath(filePath) {
 		return os.ErrPermission
 	}
 	if !historyVersionRegex.MatchString(version) {
 		return fmt.Errorf("invalid_version")
 	}
-	content, err := readHistoryVersion(filePath, version)
+	content, err := ReadHistoryVersion(filePath, version)
 	if err != nil {
 		return err
 	}
 	prev, _ := os.ReadFile(filePath)
-	saveHistory(filePath)
+	SaveHistory(filePath)
 	if err := os.WriteFile(filePath, content, 0644); err != nil {
 		return err
 	}
@@ -256,24 +266,24 @@ func restoreHistoryVersion(filePath, version string) error {
 	return nil
 }
 
-// createLocalBackup creates a single-shot .bak copy of filePath (overwriting
+// CreateLocalBackup creates a single-shot .bak copy of filePath (overwriting
 // any previous .bak) and also persists a versioned snapshot to history.
 // Called before every write to a .conf file. No-op for unsafe paths.
-func createLocalBackup(filePath string) {
-	if !isSafePath(filePath) {
+func CreateLocalBackup(filePath string) {
+	if !IsSafePath(filePath) {
 		return
 	}
-	saveHistory(filePath)
+	SaveHistory(filePath)
 	content, err := os.ReadFile(filePath)
 	if err == nil {
 		os.WriteFile(filePath+".bak", content, 0644)
 	}
 }
 
-// rollbackFile restores filePath from its .bak sibling. A fresh .bak is
+// RollbackFile restores filePath from its .bak sibling. A fresh .bak is
 // taken first so the rollback itself can be rolled back.
-func rollbackFile(filePath string) error {
-	if !isSafePath(filePath) {
+func RollbackFile(filePath string) error {
+	if !IsSafePath(filePath) {
 		return os.ErrPermission
 	}
 	bakPath := filePath + ".bak"
@@ -281,13 +291,13 @@ func rollbackFile(filePath string) error {
 	if err != nil {
 		return err
 	}
-	createLocalBackup(filePath)
+	CreateLocalBackup(filePath)
 	return os.WriteFile(filePath, content, 0644)
 }
 
-// unifiedDiff produces a minimal unified-style line diff between a and b.
+// UnifiedDiff produces a minimal unified-style line diff between a and b.
 // LCS-based — sufficient for short config files and avoids external deps.
-func unifiedDiff(a, bText, headerA, headerB string) string {
+func UnifiedDiff(a, bText, headerA, headerB string) string {
 	aLines := strings.Split(strings.TrimRight(a, "\n"), "\n")
 	bLines := strings.Split(strings.TrimRight(bText, "\n"), "\n")
 	if a == "" {

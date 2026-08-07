@@ -25,7 +25,6 @@ package main
 // skip on non-Linux platforms.
 
 import (
-	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -38,7 +37,6 @@ import (
 	"sync"
 	"testing"
 
-	"intermask/internal/bins"
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
 
@@ -551,8 +549,8 @@ func TestHistoryDiffHandler_MissingParams(t *testing.T) {
 
 func TestHistoryDiffHandler_UnknownVersion(t *testing.T) {
 	dir := newTestDir(t)
-	*HistoryDir = t.TempDir()
-	*HistoryDepth = 5
+	*dnsmasq.HistoryDir = t.TempDir()
+	*dnsmasq.HistoryDepth = 5
 	file := filepath.Join(dir, "test.conf")
 	os.WriteFile(file, []byte("test\n"), 0644)
 
@@ -849,53 +847,9 @@ func TestConcurrentAddHost_SameMAC(t *testing.T) {
 	}
 }
 
-// TestRestoreBackupZip_EmptyArchive verifies that a ZIP with no .conf files
-// is rejected with "no_valid_conf_files".
-func TestRestoreBackupZip_EmptyArchive(t *testing.T) {
-	newTestDir(t)
-
-	buf := new(bytes.Buffer)
-	zw := zip.NewWriter(buf)
-	fw, _ := zw.Create("readme.txt")
-	fw.Write([]byte("no conf files here"))
-	zw.Close()
-
-	err := restoreBackupZip(buf.Bytes())
-	if err == nil {
-		t.Fatal("expected error for empty archive (no .conf files)")
-	}
-	if !strings.Contains(err.Error(), "no_valid_conf_files") {
-		t.Errorf("expected 'no_valid_conf_files' error, got: %v", err)
-	}
-}
-
-// TestRestoreBackupZip_ValidArchive confirms that a well-formed ZIP with
-// .conf files restores correctly on Linux CI (dnsmasq --test passes).
-// On non-Linux the dnsmasq binary is unavailable so the test skips.
-func TestRestoreBackupZip_ValidArchive(t *testing.T) {
-	if bins.Dnsmasq() == "" {
-		t.Skip("dnsmasq binary not found, skipping restore test")
-	}
-
-	dir := newTestDir(t)
-	buf := new(bytes.Buffer)
-	zw := zip.NewWriter(buf)
-	fw, _ := zw.Create("restored.conf")
-	fw.Write([]byte("domain-needed\nbogus-priv\n"))
-	zw.Close()
-
-	err := restoreBackupZip(buf.Bytes())
-	if err != nil {
-		t.Fatalf("expected success, got: %v", err)
-	}
-	content, err := os.ReadFile(filepath.Join(dir, "restored.conf"))
-	if err != nil {
-		t.Fatalf("restored file should exist: %v", err)
-	}
-	if !strings.Contains(string(content), "domain-needed") {
-		t.Error("restored content should contain 'domain-needed'")
-	}
-}
+// TestRestoreBackupZip_EmptyArchive and TestRestoreBackupZip_ValidArchive
+// moved to internal/dnsmasq (stage 5): they exercise restoreBackupZip
+// directly (not the handler), so they live next to the implementation.
 
 // ===== Read-only GET handlers (L2) =====
 
@@ -1110,14 +1064,14 @@ func TestNextIPHandler_InvalidCIDR(t *testing.T) {
 
 func TestHistoryListHandler_ReturnsVersions(t *testing.T) {
 	dir := newTestDir(t)
-	*HistoryDir = t.TempDir()
-	*HistoryDepth = 10
+	*dnsmasq.HistoryDir = t.TempDir()
+	*dnsmasq.HistoryDepth = 10
 	file := filepath.Join(dir, "test.conf")
 	os.WriteFile(file, []byte("domain-needed\n"), 0644)
 
 	// Trigger a history save by calling createLocalBackup.
-	createLocalBackup(file)
-	createLocalBackup(file)
+	dnsmasq.CreateLocalBackup(file)
+	dnsmasq.CreateLocalBackup(file)
 
 	w, c := newJSONContext("GET", "/api/history?file="+url.QueryEscape(file), "")
 	historyListHandler(c)
@@ -1445,13 +1399,13 @@ func TestCoalesce(t *testing.T) {
 // is the primary feature of the endpoint and was entirely uncovered.
 func TestHistoryDiffHandler_Success_Current(t *testing.T) {
 	dir := newTestDir(t)
-	*HistoryDir = t.TempDir()
-	*HistoryDepth = 5
+	*dnsmasq.HistoryDir = t.TempDir()
+	*dnsmasq.HistoryDepth = 5
 	file := filepath.Join(dir, "h.conf")
 	if err := os.WriteFile(file, []byte("line1\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	createLocalBackup(file) // snapshot "line1\n"
+	dnsmasq.CreateLocalBackup(file) // snapshot "line1\n"
 	fromVer := firstVersion(t, file)
 	// Mutate the on-disk content so the diff has something to say.
 	if err := os.WriteFile(file, []byte("line1\nline2\n"), 0644); err != nil {
@@ -1477,19 +1431,19 @@ func TestHistoryDiffHandler_Success_Current(t *testing.T) {
 // branch: diff between two stored versions (not the current file).
 func TestHistoryDiffHandler_Success_VersionToVersion(t *testing.T) {
 	dir := newTestDir(t)
-	*HistoryDir = t.TempDir()
-	*HistoryDepth = 5
+	*dnsmasq.HistoryDir = t.TempDir()
+	*dnsmasq.HistoryDepth = 5
 	file := filepath.Join(dir, "h.conf")
 	if err := os.WriteFile(file, []byte("alpha\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	createLocalBackup(file) // version A: "alpha\n"
+	dnsmasq.CreateLocalBackup(file) // version A: "alpha\n"
 	if err := os.WriteFile(file, []byte("alpha\nbeta\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	createLocalBackup(file) // version B: "alpha\nbeta\n"
+	dnsmasq.CreateLocalBackup(file) // version B: "alpha\nbeta\n"
 
-	versions, err := listHistory(file)
+	versions, err := dnsmasq.ListHistory(file)
 	if err != nil {
 		t.Fatalf("listHistory: %v", err)
 	}
@@ -1527,13 +1481,13 @@ func TestHistoryDiffHandler_UnsafePath(t *testing.T) {
 // current file no longer exists on disk (404 current_not_found).
 func TestHistoryDiffHandler_CurrentNotFound(t *testing.T) {
 	dir := newTestDir(t)
-	*HistoryDir = t.TempDir()
-	*HistoryDepth = 5
+	*dnsmasq.HistoryDir = t.TempDir()
+	*dnsmasq.HistoryDepth = 5
 	file := filepath.Join(dir, "h.conf")
 	if err := os.WriteFile(file, []byte("x\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	createLocalBackup(file)
+	dnsmasq.CreateLocalBackup(file)
 	fromVer := firstVersion(t, file)
 	if err := os.Remove(file); err != nil {
 		t.Fatal(err)
@@ -1553,13 +1507,13 @@ func TestHistoryDiffHandler_CurrentNotFound(t *testing.T) {
 // (404 version_not_found for the "to" side).
 func TestHistoryDiffHandler_UnknownToVersion(t *testing.T) {
 	dir := newTestDir(t)
-	*HistoryDir = t.TempDir()
-	*HistoryDepth = 5
+	*dnsmasq.HistoryDir = t.TempDir()
+	*dnsmasq.HistoryDepth = 5
 	file := filepath.Join(dir, "h.conf")
 	if err := os.WriteFile(file, []byte("x\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	createLocalBackup(file)
+	dnsmasq.CreateLocalBackup(file)
 	fromVer := firstVersion(t, file)
 
 	w, c := newJSONContext("GET", "/api/history/diff?file="+url.QueryEscape(file)+"&from="+url.QueryEscape(fromVer)+"&to=19990101-000000", "")
@@ -1579,8 +1533,8 @@ func TestHistoryDiffHandler_UnknownToVersion(t *testing.T) {
 // does not run dnsmasq --test, so this is portable.
 func TestRollbackHandler_Success(t *testing.T) {
 	dir := newTestDir(t)
-	*HistoryDir = t.TempDir()
-	*HistoryDepth = 5
+	*dnsmasq.HistoryDir = t.TempDir()
+	*dnsmasq.HistoryDepth = 5
 	file := filepath.Join(dir, "r.conf")
 	if err := os.WriteFile(file, []byte("new-broken\n"), 0644); err != nil {
 		t.Fatal(err)

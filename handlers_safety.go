@@ -2,7 +2,7 @@ package main
 
 // Safety-net handlers: .bak rollback, multi-level versioned history
 // (list/diff/restore), ZIP backup download, ZIP restore. The backend logic
-// lives in history.go and backup.go.
+// lives in internal/dnsmasq (history.go + backup.go there).
 
 import (
 	"fmt"
@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"intermask/internal/dnsmasq"
 )
 
 func rollbackHandler(c *gin.Context) {
@@ -21,10 +23,10 @@ func rollbackHandler(c *gin.Context) {
 		return
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
-	if err := rollbackFile(req.File); err != nil {
+	if err := dnsmasq.RollbackFile(req.File); err != nil {
 		c.JSON(500, gin.H{"error": "rollback_error"})
 		return
 	}
@@ -46,11 +48,11 @@ func historyListHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "file_required"})
 		return
 	}
-	if !isSafePath(file) {
+	if !dnsmasq.IsSafePath(file) {
 		c.JSON(400, gin.H{"error": "invalid_path"})
 		return
 	}
-	versions, err := listHistory(file)
+	versions, err := dnsmasq.ListHistory(file)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "history_error"})
 		return
@@ -69,11 +71,11 @@ func historyDiffHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "params_required"})
 		return
 	}
-	if !isSafePath(file) {
+	if !dnsmasq.IsSafePath(file) {
 		c.JSON(400, gin.H{"error": "invalid_path"})
 		return
 	}
-	fromBytes, err := readHistoryVersion(file, from)
+	fromBytes, err := dnsmasq.ReadHistoryVersion(file, from)
 	if err != nil {
 		c.JSON(404, gin.H{"error": "version_not_found"})
 		return
@@ -86,13 +88,13 @@ func historyDiffHandler(c *gin.Context) {
 			return
 		}
 	} else {
-		toBytes, err = readHistoryVersion(file, to)
+		toBytes, err = dnsmasq.ReadHistoryVersion(file, to)
 		if err != nil {
 			c.JSON(404, gin.H{"error": "version_not_found"})
 			return
 		}
 	}
-	diff := unifiedDiff(string(fromBytes), string(toBytes), file+" (@"+from+")", file+" (@"+coalesce(to, "current")+")")
+	diff := dnsmasq.UnifiedDiff(string(fromBytes), string(toBytes), file+" (@"+from+")", file+" (@"+coalesce(to, "current")+")")
 	c.JSON(200, gin.H{"diff": diff})
 }
 
@@ -106,13 +108,13 @@ func historyRestoreHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "params_required"})
 		return
 	}
-	if !isSafePath(req.File) {
+	if !dnsmasq.IsSafePath(req.File) {
 		c.JSON(400, gin.H{"error": "invalid_path"})
 		return
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if err := restoreHistoryVersion(req.File, req.Version); err != nil {
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
+	if err := dnsmasq.RestoreHistoryVersion(req.File, req.Version); err != nil {
 		c.JSON(500, gin.H{"error": "restore_error", "detail": err.Error()})
 		return
 	}
@@ -135,7 +137,7 @@ func coalesce(a, b string) string {
 // ===== ZIP backup / restore =====
 
 func backupHandler(c *gin.Context) {
-	zipBytes, fileName, err := createBackupZip()
+	zipBytes, fileName, err := dnsmasq.CreateBackupZip()
 	if err != nil {
 		c.JSON(500, gin.H{"error": "backup_error"})
 		return
@@ -161,9 +163,9 @@ func restoreBackupHandler(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "read_error"})
 		return
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if err := restoreBackupZip(zipData); err != nil {
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
+	if err := dnsmasq.RestoreBackupZip(zipData); err != nil {
 		if strings.HasPrefix(err.Error(), "dnsmasq_test_failed") {
 			c.JSON(400, gin.H{"error": "dnsmasq_test_failed", "detail": strings.TrimPrefix(err.Error(), "dnsmasq_test_failed: ")})
 		} else {

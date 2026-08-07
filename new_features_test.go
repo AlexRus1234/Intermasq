@@ -133,90 +133,7 @@ func TestLoginHandlerResetsRateLimit(t *testing.T) {
 	}
 }
 
-// ========================== File deletion ==========================
-
-// TestDeleteConfigFileRemovesFileAndBak checks that the backend function
-// removes both the .conf file and its .bak sibling (a leftover .bak for a
-// deleted file serves no purpose and confuses the UI's "show rollback
-// button" logic).
-func TestDeleteConfigFileRemovesFileAndBak(t *testing.T) {
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	*HistoryDir = filepath.Join(dir, "history")
-	*HistoryDepth = 5
-	path := filepath.Join(dir, "old.conf")
-	os.WriteFile(path, []byte("domain-needed\n"), 0644)
-	os.WriteFile(path+".bak", []byte("domain-needed\n"), 0644)
-
-	if err := deleteConfigFile(path); err != nil {
-		t.Fatalf("deleteConfigFile failed: %v", err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Error(".conf file should be removed")
-	}
-	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
-		t.Error(".bak sibling should also be removed")
-	}
-}
-
-// TestDeleteConfigFileSavesHistory verifies that the file's content is
-// snapshotted into versioned history BEFORE the physical removal, so the
-// operator can recover via the history modal.
-func TestDeleteConfigFileSavesHistory(t *testing.T) {
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	*HistoryDir = filepath.Join(dir, "history")
-	*HistoryDepth = 5
-	path := filepath.Join(dir, "doomed.conf")
-	content := []byte("# managed by Intermasq\ndomain-needed\nserver=1.1.1.1\n")
-	os.WriteFile(path, content, 0644)
-
-	if err := deleteConfigFile(path); err != nil {
-		t.Fatalf("deleteConfigFile failed: %v", err)
-	}
-
-	versions, err := listHistory(path)
-	if err != nil {
-		t.Fatalf("listHistory after delete: %v", err)
-	}
-	if len(versions) != 1 {
-		t.Fatalf("expected 1 history version saved before deletion, got %d", len(versions))
-	}
-	saved, err := readHistoryVersion(path, versions[0].Version)
-	if err != nil {
-		t.Fatalf("readHistoryVersion: %v", err)
-	}
-	if string(saved) != string(content) {
-		t.Errorf("saved history content does not match pre-deletion file:\nwant: %q\ngot:  %q", content, saved)
-	}
-}
-
-// TestDeleteConfigFileRejectsUnsafePath ensures path-traversal defence
-// holds: a path outside ConfigDir must be refused with os.ErrPermission.
-func TestDeleteConfigFileRejectsUnsafePath(t *testing.T) {
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	*HistoryDir = filepath.Join(dir, "history")
-	outside := filepath.Join(dir, "..", "escape.conf")
-	err := deleteConfigFile(outside)
-	if err != os.ErrPermission {
-		t.Errorf("expected os.ErrPermission for path outside ConfigDir, got %v", err)
-	}
-}
-
-// TestDeleteConfigFileMissingReturnsNotExist — deleting a file that
-// doesn't exist should bubble up os.ErrNotExist so the handler can
-// produce a 404.
-func TestDeleteConfigFileMissingReturnsNotExist(t *testing.T) {
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	*HistoryDir = filepath.Join(dir, "history")
-	path := filepath.Join(dir, "ghost.conf")
-	err := deleteConfigFile(path)
-	if !os.IsNotExist(err) {
-		t.Errorf("expected os.ErrNotExist, got %v", err)
-	}
-}
+// Backend TestDeleteConfigFile* tests migrated to internal/dnsmasq in stage 5.
 
 // TestDeleteConfigFileHandlerSuccess exercises the HTTP handler end-to-end:
 // existing file → 200, audit entry written, snapshot returned without the
@@ -224,8 +141,8 @@ func TestDeleteConfigFileMissingReturnsNotExist(t *testing.T) {
 func TestDeleteConfigFileHandlerSuccess(t *testing.T) {
 	dir := t.TempDir()
 	*dnsmasq.ConfigDir = dir
-	*HistoryDir = filepath.Join(dir, "history")
-	*HistoryDepth = 5
+	*dnsmasq.HistoryDir = filepath.Join(dir, "history")
+	*dnsmasq.HistoryDepth = 5
 	*AuditLogPath = filepath.Join(dir, "audit.log")
 
 	path := filepath.Join(dir, "trash.conf")
@@ -271,7 +188,7 @@ func TestDeleteConfigFileHandlerSuccess(t *testing.T) {
 func TestDeleteConfigFileHandlerUnsafePath(t *testing.T) {
 	dir := t.TempDir()
 	*dnsmasq.ConfigDir = dir
-	*HistoryDir = filepath.Join(dir, "history")
+	*dnsmasq.HistoryDir = filepath.Join(dir, "history")
 
 	evilPath := filepath.Join(dir, "..", "escape.conf")
 	w := httptest.NewRecorder()
@@ -295,7 +212,7 @@ func TestDeleteConfigFileHandlerUnsafePath(t *testing.T) {
 func TestDeleteConfigFileHandlerNonConfExtension(t *testing.T) {
 	dir := t.TempDir()
 	*dnsmasq.ConfigDir = dir
-	*HistoryDir = filepath.Join(dir, "history")
+	*dnsmasq.HistoryDir = filepath.Join(dir, "history")
 	path := filepath.Join(dir, "notes.txt")
 	os.WriteFile(path, []byte("hi"), 0644)
 
@@ -318,7 +235,7 @@ func TestDeleteConfigFileHandlerNonConfExtension(t *testing.T) {
 func TestDeleteConfigFileHandlerMissing(t *testing.T) {
 	dir := t.TempDir()
 	*dnsmasq.ConfigDir = dir
-	*HistoryDir = filepath.Join(dir, "history")
+	*dnsmasq.HistoryDir = filepath.Join(dir, "history")
 	path := filepath.Join(dir, "ghost.conf")
 
 	w := httptest.NewRecorder()

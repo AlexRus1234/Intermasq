@@ -27,7 +27,7 @@ func updateConfigHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
 	}
-	if !isSafePath(req.File) {
+	if !dnsmasq.IsSafePath(req.File) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
@@ -43,15 +43,15 @@ func updateConfigHandler(c *gin.Context) {
 		}
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
 	content, err := dnsmasq.SerializeConfigFile(req.File, req.Directives)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "serialize_error"})
 		return
 	}
-	if err := writeConfigWithTest(req.File, content); err != nil {
+	if err := dnsmasq.WriteConfigWithTest(req.File, content); err != nil {
 		errMsg := err.Error()
 		if strings.HasPrefix(errMsg, "dnsmasq_test_failed") {
 			c.JSON(400, gin.H{"error": "dnsmasq_test_failed", "detail": strings.TrimPrefix(errMsg, "dnsmasq_test_failed: ")})
@@ -97,13 +97,13 @@ func createConfigFileHandler(c *gin.Context) {
 		return
 	}
 	fullPath := filepath.Join(*dnsmasq.ConfigDir, name)
-	if !isSafePath(fullPath) {
+	if !dnsmasq.IsSafePath(fullPath) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
 	if _, err := os.Stat(fullPath); err == nil {
 		c.JSON(409, gin.H{"error": "file_exists"})
@@ -149,15 +149,15 @@ func deleteConfigFileHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid_filename"})
 		return
 	}
-	if !isSafePath(req.File) {
+	if !dnsmasq.IsSafePath(req.File) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
 
-	if err := deleteConfigFile(req.File); err != nil {
+	if err := dnsmasq.DeleteConfigFile(req.File); err != nil {
 		if os.IsNotExist(err) {
 			c.JSON(404, gin.H{"error": "file_not_found"})
 			return
@@ -180,8 +180,8 @@ func deleteConfigFileHandler(c *gin.Context) {
 	c.JSON(200, snap)
 }
 
-// listConfigTemplatesHandler отдаёт каталог известных шаблонов для UI:
-// список ID + preview-содержимое.
+// listConfigTemplatesHandler РѕС‚РґР°С‘С‚ РєР°С‚Р°Р»РѕРі РёР·РІРµСЃС‚РЅС‹С… С€Р°Р±Р»РѕРЅРѕРІ РґР»СЏ UI:
+// СЃРїРёСЃРѕРє ID + preview-СЃРѕРґРµСЂР¶РёРјРѕРµ.
 func listConfigTemplatesHandler(c *gin.Context) {
 	ids := dnsmasq.KnownConfigTemplateIDs()
 	out := make([]gin.H, 0, len(ids))
@@ -207,12 +207,12 @@ func getFileHandler(c *gin.Context) {
 	// separator-bearing name, so filepath.Join cannot escape ConfigDir today.
 	// Re-check via isSafePath so a future weakening of the substring filter
 	// (or a new call site) still cannot read outside ConfigDir. readFileRaw
-	// checks isSafePath again — three layers, by design.
-	if !isSafePath(path) {
+	// checks isSafePath again вЂ” three layers, by design.
+	if !dnsmasq.IsSafePath(path) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
-	content, err := readFileRaw(path)
+	content, err := dnsmasq.ReadFileRaw(path)
 	if err != nil {
 		c.JSON(404, gin.H{"error": "file_not_found"})
 		return
@@ -227,8 +227,8 @@ func putFileHandler(c *gin.Context) {
 		return
 	}
 	path := filepath.Join(*dnsmasq.ConfigDir, name)
-	// Defense in depth (A11): mirror getFileHandler — isSafePath after Join.
-	if !isSafePath(path) {
+	// Defense in depth (A11): mirror getFileHandler вЂ” isSafePath after Join.
+	if !dnsmasq.IsSafePath(path) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
@@ -238,9 +238,9 @@ func putFileHandler(c *gin.Context) {
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if err := writeFileRaw(path, []byte(req.Content)); err != nil {
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
+	if err := dnsmasq.WriteFileRaw(path, []byte(req.Content)); err != nil {
 		if strings.HasPrefix(err.Error(), "dnsmasq_test_failed") {
 			c.JSON(400, gin.H{"error": "dnsmasq_test_failed", "detail": strings.TrimPrefix(err.Error(), "dnsmasq_test_failed: ")})
 		} else {

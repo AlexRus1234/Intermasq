@@ -39,6 +39,7 @@ import (
 	"testing"
 
 	"intermask/internal/bins"
+	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
 
 	"github.com/gin-gonic/gin"
@@ -230,96 +231,16 @@ var errFailCallerRestart = errors.New("caller restart failed")
 func withHistoryDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	orig := *HistoryDir
-	*HistoryDir = dir
-	t.Cleanup(func() { *HistoryDir = orig })
+	orig := *dnsmasq.HistoryDir
+	*dnsmasq.HistoryDir = dir
+	t.Cleanup(func() { *dnsmasq.HistoryDir = orig })
 	return dir
 }
 
-// ===== T-B.1 writeConfigWithTest =====
-
-func TestWriteConfigWithTest_Success(t *testing.T) {
-	fakeDnsmasq(t, 0)
-	dir := newTestDir(t)
-	path := filepath.Join(dir, "x.conf")
-	if err := os.WriteFile(path, []byte("# old\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := writeConfigWithTest(path, []byte("# new\ndomain=lan\n")); err != nil {
-		t.Fatalf("expected nil, got %v", err)
-	}
-	got, _ := os.ReadFile(path)
-	if !bytes.Contains(got, []byte("domain=lan")) {
-		t.Errorf("file not updated: %q", got)
-	}
-}
-
-func TestWriteConfigWithTest_TestFailRollback(t *testing.T) {
-	fakeDnsmasq(t, 1)
-	dir := newTestDir(t)
-	path := filepath.Join(dir, "x.conf")
-	orig := []byte("# preserved\n")
-	if err := os.WriteFile(path, orig, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	err := writeConfigWithTest(path, []byte("# would-be-bad\n"))
-	if err == nil || !strings.HasPrefix(err.Error(), "dnsmasq_test_failed") {
-		t.Fatalf("expected dnsmasq_test_failed, got %v", err)
-	}
-	got, _ := os.ReadFile(path)
-	if !bytes.Equal(got, orig) {
-		t.Errorf("rollback failed: file content changed (got %q, want %q)", got, orig)
-	}
-}
-
-// TestWriteConfigWithTest_StrictFakeRejectsInvalid exercises the full
-// writeConfigWithTest wiring WITH content validation. The plain fakeDnsmasq
-// (`exit 0`) accepts any garbage, so TestWriteConfigWithTest_TestFailRollback
-// above only proves the rollback plumbing fires when dnsmasq exits non-zero —
-// it cannot prove dnsmasq was pointed at the just-written file. fakeDnsmasqStrict
-// actually reads --conf-file=<path> and rejects the `# INVALID` marker, so a
-// pass here means: the content was written, dnsmasq was invoked on THAT file,
-// and the rejection correctly surfaced as `dnsmasq_test_failed` with rollback.
-// The accept case proves the strict fake does not over-reject valid content.
-func TestWriteConfigWithTest_StrictFakeRejectsInvalid(t *testing.T) {
-	fakeDnsmasqStrict(t)
-	dir := newTestDir(t)
-	path := filepath.Join(dir, "strict.conf")
-
-	// Valid content (no marker) → accepted, file updated.
-	valid := []byte("# valid\ndomain=lan\n")
-	if err := writeConfigWithTest(path, valid); err != nil {
-		t.Fatalf("valid content rejected: %v", err)
-	}
-	got, _ := os.ReadFile(path)
-	if !bytes.Contains(got, []byte("domain=lan")) {
-		t.Errorf("valid content not written: %q", got)
-	}
-
-	// Invalid content (marker present) → dnsmasq_test_failed + rollback to valid.
-	orig := valid
-	invalid := []byte("# INVALID\ndhcp-host=not-checked\n")
-	err := writeConfigWithTest(path, invalid)
-	if err == nil {
-		t.Fatal("expected dnsmasq_test_failed for # INVALID marker, got nil")
-	}
-	if !strings.HasPrefix(err.Error(), "dnsmasq_test_failed") {
-		t.Fatalf("expected dnsmasq_test_failed prefix, got: %v", err)
-	}
-	got, _ = os.ReadFile(path)
-	if !bytes.Equal(got, orig) {
-		t.Errorf("rollback failed: file changed after rejection (got %q, want %q)", got, orig)
-	}
-}
-
-// ===== T-B.2 restoreHistoryVersion =====
-
-// newestHistoryVersion reads HistoryDir via listHistory and returns the
-// identifier of the most recent stored version for filePath (listHistory
-// already sorts newest-first). Fatal if no version is present.
+// newestHistoryVersion is kept for the remaining handler-level tests.
 func newestHistoryVersion(t *testing.T, filePath string) string {
 	t.Helper()
-	versions, err := listHistory(filePath)
+	versions, err := dnsmasq.ListHistory(filePath)
 	if err != nil {
 		t.Fatalf("listHistory: %v", err)
 	}
@@ -329,52 +250,14 @@ func newestHistoryVersion(t *testing.T, filePath string) string {
 	return versions[0].Version
 }
 
-func TestRestoreHistoryVersion_Success(t *testing.T) {
-	fakeDnsmasq(t, 0)
-	dir := newTestDir(t)
-	withHistoryDir(t)
-	path := filepath.Join(dir, "x.conf")
-	v1 := []byte("domain=lan\n")
-	if err := os.WriteFile(path, v1, 0o644); err != nil {
-		t.Fatal(err)
+// firstVersion returns the only stored version for a handler-level test.
+func firstVersion(t *testing.T, filePath string) string {
+	t.Helper()
+	versions, err := dnsmasq.ListHistory(filePath)
+	if err != nil || len(versions) != 1 {
+		t.Fatalf("firstVersion: %v (%d)", err, len(versions))
 	}
-	saveHistory(path)
-	version := newestHistoryVersion(t, path)
-	// Now mutate the file, then restore the snapshot.
-	if err := os.WriteFile(path, []byte("domain=other.lan\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := restoreHistoryVersion(path, version); err != nil {
-		t.Fatalf("restore err: %v", err)
-	}
-	got, _ := os.ReadFile(path)
-	if !bytes.Equal(got, v1) {
-		t.Errorf("restore mismatch: got %q, want %q", got, v1)
-	}
-}
-
-func TestRestoreHistoryVersion_TestFailRollback(t *testing.T) {
-	fakeDnsmasq(t, 1)
-	dir := newTestDir(t)
-	withHistoryDir(t)
-	path := filepath.Join(dir, "x.conf")
-	v1 := []byte("domain=lan\n")
-	if err := os.WriteFile(path, v1, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	saveHistory(path)
-	version := newestHistoryVersion(t, path)
-	mutated := []byte("domain=mutated\n")
-	if err := os.WriteFile(path, mutated, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := restoreHistoryVersion(path, version); err == nil || !strings.HasPrefix(err.Error(), "dnsmasq_test_failed") {
-		t.Fatalf("expected dnsmasq_test_failed, got %v", err)
-	}
-	got, _ := os.ReadFile(path)
-	if !bytes.Equal(got, mutated) {
-		t.Errorf("expected rollback to mutated content (pre-restore), got %q", got)
-	}
+	return versions[0].Version
 }
 
 // ===== T-B.3 + T-B.4 reloadDnsmasq / reloadHandler =====
@@ -509,7 +392,7 @@ func TestHistoryRestoreHandler_Success(t *testing.T) {
 	if err := os.WriteFile(path, orig, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	saveHistory(path)
+	dnsmasq.SaveHistory(path)
 	version := newestHistoryVersion(t, path)
 	if err := os.WriteFile(path, []byte("domain=mutated\n"), 0o644); err != nil {
 		t.Fatal(err)
