@@ -38,6 +38,7 @@ import (
 	"intermask/internal/audit"
 	authpkg "intermask/internal/auth"
 	"intermask/internal/bins"
+	"intermask/internal/control"
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
 	"intermask/internal/metrics"
@@ -93,7 +94,7 @@ func init() {
 // concurrently, which is a data race under `-race`. Production bootstrap
 // keeps using the real starters.
 var (
-	startSSEBroadcasterFn   = startSSEBroadcaster
+	startSSEBroadcasterFn   = control.StartBroadcaster
 	startDNSHealthCheckerFn = metrics.StartDNSHealthChecker
 )
 

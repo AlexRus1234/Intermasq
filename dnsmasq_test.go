@@ -26,7 +26,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"intermask/internal/auth"
 	"intermask/internal/dnsmasq"
@@ -213,63 +212,8 @@ func TestSysVinitCaller(t *testing.T) {
 // above).
 
 // ========== SSE broker ==========
-
-func TestSseRegisterUnregister(t *testing.T) {
-	cl := &sseClient{ch: make(chan string, 1)}
-	sseRegister(cl)
-	if !sseClients[cl] {
-		t.Fatal("client should be registered")
-	}
-	sseUnregister(cl)
-	if sseClients[cl] {
-		t.Fatal("client should be unregistered")
-	}
-}
-
-func TestSseBroadcast(t *testing.T) {
-	cl := &sseClient{ch: make(chan string, 10)}
-	sseRegister(cl)
-	defer sseUnregister(cl)
-	sseBroadcast("arp", `{"aa:bb:cc:dd:ee:ff":true}`)
-	select {
-	case msg := <-cl.ch:
-		if !strings.Contains(msg, "event: arp") {
-			t.Errorf("bad event: %s", msg)
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("message not received")
-	}
-}
-
-func TestSseBroadcastFullChannel(t *testing.T) {
-	cl := &sseClient{ch: make(chan string, 0)}
-	sseRegister(cl)
-	defer sseUnregister(cl)
-	sseBroadcast("arp", "{}")
-	select {
-	case <-cl.ch:
-		t.Errorf("expected broadcast to be dropped on full/unbuffered channel, but a message was delivered")
-	default:
-	}
-	if len(cl.ch) != 0 {
-		t.Errorf("expected empty channel after broadcast to full/unbuffered channel, got len=%d", len(cl.ch))
-	}
-}
-
-func TestArpToJSON(t *testing.T) {
-	arp := map[string]bool{"aa:bb:cc:dd:ee:ff": true, "11:22:33:44:55:66": false}
-	s := arpToJSON(arp)
-	var decoded map[string]bool
-	if err := json.Unmarshal([]byte(s), &decoded); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if len(decoded) != 2 {
-		t.Errorf("expected 2 entries, got %d", len(decoded))
-	}
-	if !decoded["aa:bb:cc:dd:ee:ff"] {
-		t.Error("expected aa:bb:cc:dd:ee:ff=true")
-	}
-}
+// (TestSseRegisterUnregister, TestSseBroadcast, TestSseBroadcastFullChannel,
+// TestArpToJSON moved to internal/control during stage 9 of the modularization.)
 
 // ========== User management ==========
 

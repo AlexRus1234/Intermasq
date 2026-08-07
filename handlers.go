@@ -20,13 +20,14 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"intermask/internal/auth"
+	"intermask/internal/control"
 	"intermask/internal/dnsmasq"
 	"intermask/internal/netstate"
 	"intermask/internal/validate"
 )
 
 func statusHandler(c *gin.Context) {
-	isActive := checkDnsmasqStatus()
+	isActive := control.CheckDnsmasqStatus()
 	setupRequired := auth.UserCount() == 0
 	dnsmasq.Mu.Lock()
 	defer dnsmasq.Mu.Unlock()
@@ -95,7 +96,7 @@ func nextIPHandler(c *gin.Context) {
 }
 
 func reloadHandler(c *gin.Context) {
-	if err := reloadDnsmasq(); err != nil {
+	if err := control.ReloadDnsmasq(); err != nil {
 		c.JSON(400, gin.H{"error": "reload_error"})
 		return
 	}
@@ -233,9 +234,9 @@ func eventsHandler(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("Access-Control-Allow-Origin", "*")
 
-	client := &sseClient{ch: make(chan string, 10)}
-	sseRegister(client)
-	defer sseUnregister(client)
+	client := &control.Client{Ch: make(chan string, 10)}
+	control.Register(client)
+	defer control.Unregister(client)
 
 	arp := netstate.GetArpTable()
 	c.SSEvent("arp", arp)
@@ -243,7 +244,7 @@ func eventsHandler(c *gin.Context) {
 
 	for {
 		select {
-		case msg := <-client.ch:
+		case msg := <-client.Ch:
 			c.Writer.Write([]byte(msg))
 			c.Writer.Flush()
 		case <-c.Request.Context().Done():

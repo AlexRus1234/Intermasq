@@ -29,7 +29,6 @@ package main
 import (
 	"archive/zip"
 	"bytes"
-	"errors"
 	"mime/multipart"
 	"net/http/httptest"
 	"os"
@@ -210,21 +209,10 @@ func itoa(n int) string {
 // withSysCaller used to live here in package main and swap the package var
 // sysCaller for the test. It moved with system.go to internal/initd: the
 // exported seam initd.SetCurrentForTest now plays that role across packages
-// (see linux_test.go reload tests below). failCaller remains here — it is a
-// main-package-only SystemCaller implementation used by reloadDnsmasq's
-// caller-failure test; it satisfies initd.SystemCaller structurally.
-
-// failCaller is a minimal SystemCaller whose Restart returns an error and
-// IsActive returns false. Used to drive the Post-test-failure branch of
-// reloadDnsmasq (where dnsmasq --test succeeded but the init caller failed).
-type failCaller struct{}
-
-func (f *failCaller) IsActive(service string) bool { return false }
-func (f *failCaller) Restart(service string) error { return errFailCallerRestart }
-func (f *failCaller) RestartSelf() error           { return errFailCallerRestart }
-func (f *failCaller) String() string               { return "fail" }
-
-var errFailCallerRestart = errors.New("caller restart failed")
+// (see the reload-handler tests below). failCaller used to live here too as
+// a main-package-only SystemCaller driving reloadDnsmasq's caller-failure
+// branch; it moved to internal/control with the ReloadDnsmasq tests during
+// stage 9 of the modularization.
 
 // withHistoryDir points *HistoryDir at a temp dir for the duration of the
 // test. Restores the previous value on cleanup.
@@ -261,30 +249,9 @@ func firstVersion(t *testing.T, filePath string) string {
 }
 
 // ===== T-B.3 + T-B.4 reloadDnsmasq / reloadHandler =====
-
-func TestReloadDnsmasq_Success(t *testing.T) {
-	fakeDnsmasq(t, 0)
-	initd.SetCurrentForTest(t, &initd.NoneCaller{})
-	if err := reloadDnsmasq(); err != nil {
-		t.Fatalf("expected nil, got %v", err)
-	}
-}
-
-func TestReloadDnsmasq_TestFail(t *testing.T) {
-	fakeDnsmasq(t, 1)
-	initd.SetCurrentForTest(t, &initd.NoneCaller{})
-	if err := reloadDnsmasq(); err == nil || !strings.Contains(err.Error(), "fake dnsmasq") {
-		t.Fatalf("expected dnsmasq-test failure propagated, got %v", err)
-	}
-}
-
-func TestReloadDnsmasq_CallerFail(t *testing.T) {
-	fakeDnsmasq(t, 0)
-	initd.SetCurrentForTest(t, &failCaller{})
-	if err := reloadDnsmasq(); err == nil {
-		t.Fatal("expected caller-restart error, got nil")
-	}
-}
+// (TestReloadDnsmasq_Success / _TestFail / _CallerFail moved to internal/control
+// during stage 9 of the modularization; the handler-level TestReloadHandler_*
+// stay here until stage 11.)
 
 func TestReloadHandler_200(t *testing.T) {
 	fakeDnsmasq(t, 0)
