@@ -2,8 +2,8 @@
 // Copyright (C) 2026 AlexRus1234
 //
 // This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
+// it under the terms of the GNU Affero General Public License as published
+// by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // This program is distributed in the hope that it will be useful,
@@ -14,24 +14,25 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// arp_leases.go — read-only access to the ARP table and the dnsmasq leases
-// file, plus the "discovery" feature that surfaces devices present in ARP
-// but missing from both static hosts and active leases.
-
-package main
+package netstate
 
 import (
 	"bufio"
+	"flag"
 	"os"
 	"sort"
 	"strings"
 
 	"intermask/internal/dnsmasq"
+	"intermask/internal/models"
 	"intermask/internal/oui"
 )
 
-// getArpTable reads /proc/net/arp (path overridable via -arp-file) and
-// returns the set of MACs whose flags indicate a reachable neighbour.
+var (
+	LeasesPath = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
+	ArpPath    = flag.String("arp-file", "/proc/net/arp", "Path to ARP table file")
+)
+
 func getArpTable() map[string]bool {
 	content, err := os.ReadFile(*ArpPath)
 	if err != nil {
@@ -40,9 +41,6 @@ func getArpTable() map[string]bool {
 	return parseArpContent(string(content))
 }
 
-// parseArpContent extracts the set of MAC addresses flagged as reachable
-// (0x2) from the textual representation of /proc/net/arp. The first line
-// (header) is always skipped. Zero MACs are filtered out.
 func parseArpContent(content string) map[string]bool {
 	activeMacs := make(map[string]bool)
 	scanner := bufio.NewScanner(strings.NewReader(content))
@@ -56,18 +54,13 @@ func parseArpContent(content string) map[string]bool {
 	return activeMacs
 }
 
-// parseLeasesContent parses the textual content of a dnsmasq.leases file
-// (whitespace-separated: timestamp MAC IP [hostname] [client-id]) and
-// returns one LeaseEntry per line with at least 3 fields. Pure (no I/O) so
-// it can be fuzzed and unit-tested directly. Behaviour is identical to the
-// previous in-place scan of parseLeases.
-func parseLeasesContent(content string) []LeaseEntry {
-	leases := []LeaseEntry{}
+func parseLeasesContent(content string) []models.LeaseEntry {
+	leases := []models.LeaseEntry{}
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
 		if len(fields) >= 3 {
-			l := LeaseEntry{Ip: fields[2], Mac: fields[1]}
+			l := models.LeaseEntry{Ip: fields[2], Mac: fields[1]}
 			if len(fields) > 3 {
 				l.Hostname = fields[3]
 			}
@@ -77,22 +70,15 @@ func parseLeasesContent(content string) []LeaseEntry {
 	return leases
 }
 
-// parseLeases reads dnsmasq.leases (path overridable via -leases) and
-// delegates parsing to parseLeasesContent. Returns an empty list when the
-// file is missing or unreadable.
-func parseLeases() []LeaseEntry {
+func parseLeases() []models.LeaseEntry {
 	data, err := os.ReadFile(*LeasesPath)
 	if err != nil {
-		return []LeaseEntry{}
+		return []models.LeaseEntry{}
 	}
 	return parseLeasesContent(string(data))
 }
 
-// getNewDevices returns MACs that appear in the ARP table (i.e. recently
-// talked to the LAN) but are neither configured as static dhcp-host= entries
-// nor have an active DHCP lease. Each entry is enriched with a vendor name
-// via the embedded OUI table. Sorted by MAC for stable UI output.
-func getNewDevices() []NewDeviceInfo {
+func getNewDevices() []models.NewDeviceInfo {
 	arp := getArpTable()
 	leases := parseLeases()
 	hosts := dnsmasq.ReadAllHosts()
@@ -105,19 +91,18 @@ func getNewDevices() []NewDeviceInfo {
 		knownMacs[strings.ToLower(h.Mac)] = true
 	}
 
-	var devices []NewDeviceInfo
+	var devices []models.NewDeviceInfo
 	for mac := range arp {
 		macLower := strings.ToLower(mac)
 		if !knownMacs[macLower] {
-			devices = append(devices, NewDeviceInfo{
-				Mac:    macLower,
-				Vendor: oui.LookupOUI(macLower),
-			})
+			devices = append(devices, models.NewDeviceInfo{Mac: macLower, Vendor: oui.LookupOUI(macLower)})
 		}
 	}
-
-	sort.Slice(devices, func(i, j int) bool {
-		return devices[i].Mac < devices[j].Mac
-	})
+	sort.Slice(devices, func(i, j int) bool { return devices[i].Mac < devices[j].Mac })
 	return devices
 }
+
+func GetArpTable() map[string]bool                          { return getArpTable() }
+func ParseArpContent(content string) map[string]bool        { return parseArpContent(content) }
+func ParseLeases() []models.LeaseEntry                      { return parseLeases() }
+func GetNewDevices() []models.NewDeviceInfo                 { return getNewDevices() }

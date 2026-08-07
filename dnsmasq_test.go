@@ -30,6 +30,7 @@ import (
 
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
+	templatepkg "intermask/internal/templates"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -1171,7 +1172,7 @@ func TestLoadTemplatesFailsOnCorruptJSON(t *testing.T) {
 		dir := t.TempDir()
 		*TemplatesPath = filepath.Join(dir, "templates.json")
 		os.WriteFile(*TemplatesPath, []byte("definitely not json"), 0600)
-		loadTemplates()
+		templatepkg.Load()
 		t.Fatal("loadTemplates should have called os.Exit on corrupt JSON")
 		return
 	}

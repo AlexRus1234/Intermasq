@@ -19,6 +19,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"intermask/internal/dnsmasq"
+	"intermask/internal/netstate"
 	"intermask/internal/validate"
 )
 
@@ -78,7 +79,7 @@ func loginHandler(c *gin.Context) {
 }
 
 func getArpHandler(c *gin.Context) {
-	c.JSON(200, getArpTable())
+	c.JSON(200, netstate.GetArpTable())
 }
 
 func nextIPHandler(c *gin.Context) {
@@ -110,7 +111,7 @@ func reloadHandler(c *gin.Context) {
 }
 
 func getLeasesHandler(c *gin.Context) {
-	c.JSON(200, parseLeases())
+	c.JSON(200, netstate.ParseLeases())
 }
 
 func getUser(c *gin.Context) string {
@@ -120,7 +121,7 @@ func getUser(c *gin.Context) string {
 }
 
 func getNewDevicesHandler(c *gin.Context) {
-	c.JSON(200, getNewDevices())
+	c.JSON(200, netstate.GetNewDevices())
 }
 
 // bulkLeaseToStaticHandler writes one dhcp-host= line per selected lease.
@@ -238,7 +239,7 @@ func eventsHandler(c *gin.Context) {
 	sseRegister(client)
 	defer sseUnregister(client)
 
-	arp := getArpTable()
+	arp := netstate.GetArpTable()
 	c.SSEvent("arp", arp)
 	c.Writer.Flush()
 

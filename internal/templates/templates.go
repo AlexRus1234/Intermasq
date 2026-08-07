@@ -2,8 +2,8 @@
 // Copyright (C) 2026 AlexRus1234
 //
 // This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
+// it under the terms of the GNU Affero General Public License as published
+// by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // This program is distributed in the hope that it will be useful,
@@ -14,19 +14,25 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-package main
+package templates
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"intermask/internal/models"
 )
 
-var templates = make(map[string]Template)
+var TemplatesPath = flag.String("templates", "/etc/intermasq/templates.json", "Path to templates file")
+var templates = make(map[string]models.Template)
 
-func loadTemplates() {
+func Reset() { templates = make(map[string]models.Template) }
+
+func Load() {
 	if _, err := os.Stat(*TemplatesPath); os.IsNotExist(err) {
 		os.MkdirAll(filepath.Dir(*TemplatesPath), 0700)
 		return
@@ -42,9 +48,7 @@ func loadTemplates() {
 	}
 }
 
-// saveTemplates writes templates atomically (tmp + rename). Same rationale
-// as saveUsers: corrupted templates.json must not silently zero the map.
-func saveTemplates() error {
+func Save() error {
 	data, _ := json.MarshalIndent(templates, "", "  ")
 	dir := filepath.Dir(*TemplatesPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -57,12 +61,21 @@ func saveTemplates() error {
 	return os.Rename(tmp, *TemplatesPath)
 }
 
-func genHostnameFromPattern(pattern string, index int) string {
-	padded := fmt.Sprintf("%03d", index)
-	return strings.ReplaceAll(pattern, "{NNN}", padded)
+func All() []models.Template {
+	result := []models.Template{}
+	for _, t := range templates {
+		result = append(result, t)
+	}
+	return result
 }
 
-func countHostsInFile(file string) int {
+func Get(id string) (models.Template, bool) { t, ok := templates[id]; return t, ok }
+func Set(id string, t models.Template)      { templates[id] = t }
+func Delete(id string)                      { delete(templates, id) }
+func GenHostnameFromPattern(pattern string, index int) string {
+	return strings.ReplaceAll(pattern, "{NNN}", fmt.Sprintf("%03d", index))
+}
+func CountHostsInFile(file string) int {
 	content, err := os.ReadFile(file)
 	if err != nil {
 		return 0

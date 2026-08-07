@@ -35,9 +35,11 @@ import (
 	"github.com/swaggo/files"
 	"github.com/swaggo/gin-swagger"
 	_ "intermask/docs"
+	"intermask/internal/audit"
 	"intermask/internal/bins"
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
+	templatepkg "intermask/internal/templates"
 )
 
 //go:embed frontend/dist/*
@@ -46,8 +48,6 @@ var staticFiles embed.FS
 var (
 	Port         = flag.String("port", "8081", "Port to listen on")
 	DBPath       = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
-	LeasesPath   = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
-	ArpPath      = flag.String("arp-file", "/proc/net/arp", "Path to ARP table file")
 	InitSystem   = flag.String("init-system", "auto", "Init system: auto, systemd, systemd-user, openrc, runit, sysvinit, none")
 	SystemdScope = flag.String("systemd-scope", "", "Legacy flag: auto, system, user, none (overrides -init-system if set)")
 	CiMode       = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
@@ -58,11 +58,9 @@ var (
 	// means: resolve via $PATH, then fall back to well-known absolute paths.
 	// ConfigDir is the registered -conf-dir flag in internal/dnsmasq;
 	// HistoryDir / HistoryDepth are also registered there.
-	AuditLogPath  = flag.String("audit-log", "/etc/intermasq/audit.log", "Path to audit log file")
-	TemplatesPath = flag.String("templates", "/etc/intermasq/templates.json", "Path to templates file")
-	PluginsDir    = "/etc/intermasq/plugins"
-	SocketsDir    = "/run/intermasq/sockets"
-	SecretKey     = []byte(os.Getenv("INTERMASQ_SECRET"))
+	PluginsDir = "/etc/intermasq/plugins"
+	SocketsDir = "/run/intermasq/sockets"
+	SecretKey  = []byte(os.Getenv("INTERMASQ_SECRET"))
 )
 
 var (
@@ -190,7 +188,7 @@ func main() {
 func setupServer() (*gin.Engine, error) {
 	bins.Resolve()
 	loadUsers()
-	loadTemplates()
+	templatepkg.Load()
 	if err := dnsmasq.EnsureHistoryDir(); err != nil {
 		fmt.Printf("[HISTORY] Failed to create dir %s: %v\n", *dnsmasq.HistoryDir, err)
 	}
@@ -245,7 +243,7 @@ func setupServer() (*gin.Engine, error) {
 			auth.POST("/hosts/apply-template", applyTemplateHandler)
 			auth.GET("/leases", getLeasesHandler)
 			auth.GET("/arp", getArpHandler)
-			auth.GET("/audit", auditHandler)
+			auth.GET("/audit", audit.Handler)
 			auth.GET("/hosts/csv", exportCSVHandler)
 			auth.POST("/hosts/csv", importCSVHandler)
 			auth.POST("/hosts", addHostHandler)

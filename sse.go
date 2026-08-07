@@ -23,6 +23,8 @@
 
 package main
 
+import "intermask/internal/netstate"
+
 import (
 	"encoding/json"
 	"fmt"
@@ -98,7 +100,7 @@ func startSSEBroadcaster() {
 // per-iteration logic is unit-testable without sleeping or spawning a
 // goroutine. Returns the JSON-marshalled ARP map and the dnsmasq-active flag.
 func ssePollOnce() (arpJSON string, status bool) {
-	arp := getArpTable()
+	arp := netstate.GetArpTable()
 	arpJSON = arpToJSON(arp)
 	status = checkDnsmasqStatus()
 	return arpJSON, status

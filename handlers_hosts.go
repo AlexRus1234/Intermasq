@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"intermask/internal/dnsmasq"
+	templatepkg "intermask/internal/templates"
 	"intermask/internal/validate"
 )
 
@@ -649,10 +650,7 @@ func getTemplatesHandler(c *gin.Context) {
 	dnsmasq.Mu.Lock()
 	defer dnsmasq.Mu.Unlock()
 
-	result := []Template{}
-	for _, t := range templates {
-		result = append(result, t)
-	}
+	result := templatepkg.All()
 	c.JSON(200, result)
 }
 
@@ -674,12 +672,12 @@ func createTemplateHandler(c *gin.Context) {
 	defer dnsmasq.Mu.Unlock()
 
 	req.ID = strings.ToLower(strings.ReplaceAll(req.Name, " ", "-"))
-	if _, exists := templates[req.ID]; exists {
+	if _, exists := templatepkg.Get(req.ID); exists {
 		c.JSON(409, gin.H{"error": "template_exists"})
 		return
 	}
-	templates[req.ID] = req
-	saveTemplates()
+	templatepkg.Set(req.ID, req)
+	templatepkg.Save()
 	c.JSON(200, req)
 }
 
@@ -689,12 +687,12 @@ func deleteTemplateHandler(c *gin.Context) {
 	dnsmasq.Mu.Lock()
 	defer dnsmasq.Mu.Unlock()
 
-	if _, exists := templates[id]; !exists {
+	if _, exists := templatepkg.Get(id); !exists {
 		c.JSON(404, gin.H{"error": "template_not_found"})
 		return
 	}
-	delete(templates, id)
-	saveTemplates()
+	templatepkg.Delete(id)
+	templatepkg.Save()
 	c.JSON(200, gin.H{"status": "deleted"})
 }
 
@@ -709,7 +707,7 @@ func applyTemplateHandler(c *gin.Context) {
 	}
 
 	dnsmasq.Mu.Lock()
-	tpl, exists := templates[req.TemplateID]
+	tpl, exists := templatepkg.Get(req.TemplateID)
 	dnsmasq.Mu.Unlock()
 	if !exists {
 		c.JSON(404, gin.H{"error": "template_not_found"})
@@ -722,8 +720,8 @@ func applyTemplateHandler(c *gin.Context) {
 		return
 	}
 
-	index := countHostsInFile(tpl.TargetFile) + 1
-	hostname := genHostnameFromPattern(tpl.HostnamePattern, index)
+	index := templatepkg.CountHostsInFile(tpl.TargetFile) + 1
+	hostname := templatepkg.GenHostnameFromPattern(tpl.HostnamePattern, index)
 
 	c.JSON(200, gin.H{
 		"mac":      req.Mac,

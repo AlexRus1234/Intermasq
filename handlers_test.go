@@ -624,7 +624,7 @@ func TestRollbackHandler_UnsafePath(t *testing.T) {
 func TestCreateTemplateHandler_Success(t *testing.T) {
 	dir := newTestDir(t)
 	*TemplatesPath = filepath.Join(dir, "templates.json")
-	templates = make(map[string]Template)
+	resetTemplates()
 
 	body := `{"name":"Test Template","hostname_pattern":"device-{NNN}","ip_range":"10.0.0.0/24","target_file":"` + jsonPath(filepath.Join(dir, "hosts.conf")) + `"}`
 	w, c := newJSONContext("POST", "/api/templates", body)
@@ -633,7 +633,7 @@ func TestCreateTemplateHandler_Success(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	if _, ok := templates["test-template"]; !ok {
+	if !hasTemplate("test-template") {
 		t.Error("template should be stored with derived ID 'test-template'")
 	}
 }
@@ -641,7 +641,8 @@ func TestCreateTemplateHandler_Success(t *testing.T) {
 func TestCreateTemplateHandler_Duplicate(t *testing.T) {
 	dir := newTestDir(t)
 	*TemplatesPath = filepath.Join(dir, "templates.json")
-	templates = map[string]Template{"test-template": {ID: "test-template", Name: "Test Template"}}
+	resetTemplates()
+	setTemplate("test-template", Template{ID: "test-template", Name: "Test Template"})
 
 	body := `{"name":"Test Template","hostname_pattern":"device-{NNN}","ip_range":"10.0.0.0/24","target_file":"` + jsonPath(filepath.Join(dir, "hosts.conf")) + `"}`
 	w, c := newJSONContext("POST", "/api/templates", body)
@@ -655,7 +656,7 @@ func TestCreateTemplateHandler_Duplicate(t *testing.T) {
 func TestCreateTemplateHandler_MissingFields(t *testing.T) {
 	dir := newTestDir(t)
 	*TemplatesPath = filepath.Join(dir, "templates.json")
-	templates = make(map[string]Template)
+	resetTemplates()
 
 	body := `{"name":"Empty"}`
 	w, c := newJSONContext("POST", "/api/templates", body)
@@ -669,7 +670,8 @@ func TestCreateTemplateHandler_MissingFields(t *testing.T) {
 func TestDeleteTemplateHandler_Success(t *testing.T) {
 	dir := newTestDir(t)
 	*TemplatesPath = filepath.Join(dir, "templates.json")
-	templates = map[string]Template{"test-template": {ID: "test-template", Name: "Test"}}
+	resetTemplates()
+	setTemplate("test-template", Template{ID: "test-template", Name: "Test"})
 
 	w, c := newJSONContext("DELETE", "/api/templates/test-template", "")
 	c.Params = gin.Params{{Key: "id", Value: "test-template"}}
@@ -678,7 +680,7 @@ func TestDeleteTemplateHandler_Success(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	if _, ok := templates["test-template"]; ok {
+	if hasTemplate("test-template") {
 		t.Error("template should be deleted")
 	}
 }
@@ -686,7 +688,7 @@ func TestDeleteTemplateHandler_Success(t *testing.T) {
 func TestDeleteTemplateHandler_NotFound(t *testing.T) {
 	dir := newTestDir(t)
 	*TemplatesPath = filepath.Join(dir, "templates.json")
-	templates = make(map[string]Template)
+	resetTemplates()
 
 	w, c := newJSONContext("DELETE", "/api/templates/missing", "")
 	c.Params = gin.Params{{Key: "id", Value: "missing"}}
@@ -931,7 +933,7 @@ func TestGetDhcpRangesHandler(t *testing.T) {
 }
 
 func TestGetTemplatesHandler_Empty(t *testing.T) {
-	templates = make(map[string]Template)
+	resetTemplates()
 
 	w, c := newJSONContext("GET", "/api/templates", "")
 	getTemplatesHandler(c)
@@ -1324,9 +1326,8 @@ func TestApplyTemplateHandler_Success(t *testing.T) {
 	targetFile := filepath.Join(dir, "hosts.conf")
 	os.WriteFile(targetFile, []byte(""), 0644)
 
-	templates = map[string]Template{
-		"test-tpl": {ID: "test-tpl", Name: "Test", IPRange: "10.99.0.0/24", HostnamePattern: "dev-{NNN}", TargetFile: targetFile},
-	}
+	resetTemplates()
+	setTemplate("test-tpl", Template{ID: "test-tpl", Name: "Test", IPRange: "10.99.0.0/24", HostnamePattern: "dev-{NNN}", TargetFile: targetFile})
 
 	w, c := newJSONContext("POST", "/api/hosts/apply-template", `{"mac":"aa:bb:cc:dd:ee:ff","template_id":"test-tpl"}`)
 	applyTemplateHandler(c)
@@ -1341,7 +1342,7 @@ func TestApplyTemplateHandler_Success(t *testing.T) {
 
 func TestApplyTemplateHandler_NotFound(t *testing.T) {
 	newTestDir(t)
-	templates = make(map[string]Template)
+	resetTemplates()
 
 	w, c := newJSONContext("POST", "/api/hosts/apply-template", `{"mac":"aa:bb:cc:dd:ee:ff","template_id":"missing"}`)
 	applyTemplateHandler(c)
@@ -1353,7 +1354,8 @@ func TestApplyTemplateHandler_NotFound(t *testing.T) {
 
 func TestApplyTemplateHandler_BadMAC(t *testing.T) {
 	newTestDir(t)
-	templates = map[string]Template{"test-tpl": {ID: "test-tpl"}}
+	resetTemplates()
+	setTemplate("test-tpl", Template{ID: "test-tpl"})
 
 	w, c := newJSONContext("POST", "/api/hosts/apply-template", `{"mac":"bad","template_id":"test-tpl"}`)
 	applyTemplateHandler(c)

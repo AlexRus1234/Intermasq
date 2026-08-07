@@ -20,7 +20,13 @@
 // packages reference intermask/internal/models directly (stage 11).
 package main
 
-import "intermask/internal/models"
+import (
+	"github.com/gin-gonic/gin"
+	"intermask/internal/audit"
+	"intermask/internal/models"
+	"intermask/internal/netstate"
+	templatepkg "intermask/internal/templates"
+)
 
 type (
 	HostEntry             = models.HostEntry
@@ -46,4 +52,22 @@ type (
 	UserPasswordReq       = models.UserPasswordReq
 	NewDeviceInfo         = models.NewDeviceInfo
 	BulkLeaseToStaticReq  = models.BulkLeaseToStaticReq
+	AuditEntry            = audit.AuditEntry
 )
+
+var (
+	ArpPath       = netstate.ArpPath
+	LeasesPath    = netstate.LeasesPath
+	AuditLogPath  = audit.AuditLogPath
+	TemplatesPath = templatepkg.TemplatesPath
+)
+
+func getArpTable() map[string]bool                   { return netstate.GetArpTable() }
+func parseArpContent(content string) map[string]bool { return netstate.ParseArpContent(content) }
+func parseLeases() []LeaseEntry                      { return netstate.ParseLeases() }
+func getNewDevices() []NewDeviceInfo                 { return netstate.GetNewDevices() }
+func writeAudit(entry AuditEntry)                    { audit.WriteAudit(entry) }
+func auditHandler(c *gin.Context)                    { audit.Handler(c) }
+func resetTemplates()                                { templatepkg.Reset() }
+func setTemplate(id string, t Template)              { templatepkg.Set(id, t) }
+func hasTemplate(id string) bool                     { _, ok := templatepkg.Get(id); return ok }

@@ -149,11 +149,10 @@ jobs:
         #
         # Stage 4 of the modularization moved the dhcp-host= and address=/
         # cname= parsers (and their fuzz targets FuzzParseDhcpHostLine /
-        # FuzzParseAliasLine) out of the main package and into
-        # internal/dnsmasq. The ARP / leases parsers (and
-        # FuzzParseArpContent / FuzzParseLeasesContent) stay in the main
-        # package until stage 6. Each target is therefore run against the
-        # single package that owns it; the map below pins target→package.
+        # FuzzParseAliasLine) out of the root package and into
+        # internal/dnsmasq. The ARP / leases parsers now live in
+        # internal/netstate. Each target is run against its owning package;
+        # the map below pins target→package.
         if: success() && github.event.inputs.run_fuzz_tests == 'true'
         env:
           CGO_ENABLED: "1"
@@ -165,8 +164,8 @@ jobs:
           declare -A FUZZ_PKG=(
             [FuzzParseDhcpHostLine]="./internal/dnsmasq"
             [FuzzParseAliasLine]="./internal/dnsmasq"
-            [FuzzParseArpContent]="."
-            [FuzzParseLeasesContent]="."
+            [FuzzParseArpContent]="./internal/netstate"
+            [FuzzParseLeasesContent]="./internal/netstate"
           )
           FUZZ_RC=0
           for target in FuzzParseDhcpHostLine FuzzParseArpContent FuzzParseAliasLine FuzzParseLeasesContent; do
