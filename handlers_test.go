@@ -37,6 +37,7 @@ import (
 	"sync"
 	"testing"
 
+	"intermask/internal/auth"
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
 
@@ -707,9 +708,7 @@ func TestDeleteTemplateHandler_NotFound(t *testing.T) {
 func setupMetricsGlobals(t *testing.T) {
 	t.Helper()
 	newTestDir(t)
-	origKey := SecretKey
-	SecretKey = []byte("test-secret-key-32-bytes-long!!")
-	t.Cleanup(func() { SecretKey = origKey })
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 	initd.SetCurrentForTest(t, &initd.NoneCaller{})
 }
 
@@ -946,7 +945,7 @@ func TestGetTemplatesHandler_Empty(t *testing.T) {
 func TestGetUsersHandler_ReturnsUsers(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = map[string]string{"admin": "hash", "alice": "hash2"}
+	setUsers(map[string]string{"admin": "hash", "alice": "hash2"})
 
 	w, c := newJSONContext("GET", "/api/users", "")
 	getUsersHandler(c)
@@ -1151,10 +1150,8 @@ func TestBackupHandler_ReturnsZip(t *testing.T) {
 func TestSetupHandler_Success(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = make(map[string]string)
-	origKey := SecretKey
-	SecretKey = []byte("test-secret-key-32-bytes-long!!")
-	t.Cleanup(func() { SecretKey = origKey })
+	auth.ClearUsers()
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
 	w, c := newJSONContext("POST", "/api/setup", `{"username":"admin","password":"secret123"}`)
 	setupHandler(c)
@@ -1165,7 +1162,7 @@ func TestSetupHandler_Success(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "token") {
 		t.Error("response should contain a token")
 	}
-	if _, ok := users["admin"]; !ok {
+	if !auth.HasUser("admin") {
 		t.Error("admin user should be created")
 	}
 }
@@ -1173,7 +1170,7 @@ func TestSetupHandler_Success(t *testing.T) {
 func TestSetupHandler_AlreadySetup(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = map[string]string{"admin": "hash"}
+	setUsers(map[string]string{"admin": "hash"})
 
 	w, c := newJSONContext("POST", "/api/setup", `{"username":"admin","password":"secret123"}`)
 	setupHandler(c)
@@ -1574,7 +1571,7 @@ func TestChangePasswordHandler_Success(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	users = map[string]string{"admin": string(hash)}
+	setUsers(map[string]string{"admin": string(hash)})
 
 	w, c := newJSONContext("POST", "/api/users/password", `{"old_password":"old-secret","new_password":"new-secret"}`)
 	changePasswordHandler(c)
@@ -1582,7 +1579,7 @@ func TestChangePasswordHandler_Success(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	newHash, ok := users["admin"]
+	newHash, ok := auth.GetUser("admin")
 	if !ok {
 		t.Fatal("admin user vanished after password change")
 	}
@@ -1603,7 +1600,7 @@ func TestChangePasswordHandler_Success(t *testing.T) {
 func TestChangePasswordHandler_EmptyNewPassword(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = map[string]string{"admin": "$2a$10$irrelevant"}
+	setUsers(map[string]string{"admin": "$2a$10$irrelevant"})
 
 	w, c := newJSONContext("POST", "/api/users/password", `{"old_password":"x","new_password":""}`)
 	changePasswordHandler(c)

@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"intermask/internal/auth"
 	"intermask/internal/initd"
 
 	"github.com/gin-gonic/gin"
@@ -106,9 +107,7 @@ func newMetricsContext(method, target string) (*httptest.ResponseRecorder, *gin.
 
 // TestCheckMetricsAuth_APIKey covers the X-API-Key success path.
 func TestCheckMetricsAuth_APIKey(t *testing.T) {
-	orig := SecretKey
-	SecretKey = []byte("test-secret-key-32-bytes-long!!")
-	t.Cleanup(func() { SecretKey = orig })
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
 	_, c := newMetricsContext("GET", "/metrics")
 	c.Request.Header.Set("X-API-Key", "test-secret-key-32-bytes-long!!")
@@ -119,9 +118,7 @@ func TestCheckMetricsAuth_APIKey(t *testing.T) {
 
 // TestCheckMetricsAuth_APIKeyWrong covers the X-API-Key mismatch fall-through.
 func TestCheckMetricsAuth_APIKeyWrong(t *testing.T) {
-	orig := SecretKey
-	SecretKey = []byte("test-secret-key-32-bytes-long!!")
-	t.Cleanup(func() { SecretKey = orig })
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
 	_, c := newMetricsContext("GET", "/metrics")
 	c.Request.Header.Set("X-API-Key", "wrong")
@@ -132,9 +129,7 @@ func TestCheckMetricsAuth_APIKeyWrong(t *testing.T) {
 
 // TestCheckMetricsAuth_TokenQuerySecret covers ?token=<secret> success.
 func TestCheckMetricsAuth_TokenQuerySecret(t *testing.T) {
-	orig := SecretKey
-	SecretKey = []byte("test-secret-key-32-bytes-long!!")
-	t.Cleanup(func() { SecretKey = orig })
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
 	_, c := newMetricsContext("GET", "/metrics?token=test-secret-key-32-bytes-long!!")
 	if !checkMetricsAuth(c) {
@@ -144,11 +139,9 @@ func TestCheckMetricsAuth_TokenQuerySecret(t *testing.T) {
 
 // TestCheckMetricsAuth_TokenQueryJWT covers ?token=<jwt> success.
 func TestCheckMetricsAuth_TokenQueryJWT(t *testing.T) {
-	orig := SecretKey
-	SecretKey = []byte("test-secret-key-32-bytes-long!!")
-	t.Cleanup(func() { SecretKey = orig })
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
-	jwtStr := signTestJWT(t, SecretKey)
+	jwtStr := signTestJWT(t, auth.SecretKey)
 	_, c := newMetricsContext("GET", "/metrics?token="+jwtStr)
 	if !checkMetricsAuth(c) {
 		t.Error("expected true for ?token=<valid jwt>")
@@ -158,9 +151,7 @@ func TestCheckMetricsAuth_TokenQueryJWT(t *testing.T) {
 // TestCheckMetricsAuth_TokenQueryInvalid covers the malformed-?token= path:
 // not equal to SecretKey AND jwt.Parse returns no valid token.
 func TestCheckMetricsAuth_TokenQueryInvalid(t *testing.T) {
-	orig := SecretKey
-	SecretKey = []byte("test-secret-key-32-bytes-long!!")
-	t.Cleanup(func() { SecretKey = orig })
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
 	_, c := newMetricsContext("GET", "/metrics?token=garbage")
 	if checkMetricsAuth(c) {
@@ -171,11 +162,9 @@ func TestCheckMetricsAuth_TokenQueryInvalid(t *testing.T) {
 // TestCheckMetricsAuth_BearerValid covers the Authorization: Bearer <jwt>
 // success path.
 func TestCheckMetricsAuth_BearerValid(t *testing.T) {
-	orig := SecretKey
-	SecretKey = []byte("test-secret-key-32-bytes-long!!")
-	t.Cleanup(func() { SecretKey = orig })
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
-	jwtStr := signTestJWT(t, SecretKey)
+	jwtStr := signTestJWT(t, auth.SecretKey)
 	_, c := newMetricsContext("GET", "/metrics")
 	c.Request.Header.Set("Authorization", "Bearer "+jwtStr)
 	if !checkMetricsAuth(c) {
@@ -186,9 +175,7 @@ func TestCheckMetricsAuth_BearerValid(t *testing.T) {
 // TestCheckMetricsAuth_BearerInvalid covers the Bearer-failure path
 // (prefix matches, but token not valid).
 func TestCheckMetricsAuth_BearerInvalid(t *testing.T) {
-	orig := SecretKey
-	SecretKey = []byte("test-secret-key-32-bytes-long!!")
-	t.Cleanup(func() { SecretKey = orig })
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
 	_, c := newMetricsContext("GET", "/metrics")
 	c.Request.Header.Set("Authorization", "Bearer not-a-real-token")
@@ -199,9 +186,7 @@ func TestCheckMetricsAuth_BearerInvalid(t *testing.T) {
 
 // TestCheckMetricsAuth_NoAuth covers the all-empty fall-through to false.
 func TestCheckMetricsAuth_NoAuth(t *testing.T) {
-	orig := SecretKey
-	SecretKey = []byte("test-secret-key-32-bytes-long!!")
-	t.Cleanup(func() { SecretKey = orig })
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
 	_, c := newMetricsContext("GET", "/metrics")
 	if checkMetricsAuth(c) {
@@ -216,9 +201,7 @@ func TestCheckMetricsAuth_NoAuth(t *testing.T) {
 // intermasq_domain_* labeled series are only emitted inside the dnsHealth
 // loop (metrics.go:80-87), so we seed one entry to guarantee they appear.
 func TestMetricsHandler_AllMetricNames(t *testing.T) {
-	orig := SecretKey
-	SecretKey = []byte("test-secret-key-32-bytes-long!!")
-	t.Cleanup(func() { SecretKey = orig })
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
 	// metricsHandler -> checkDnsmasqStatus -> initd.Current().IsActive.
 	// Without setupServer the package-level sysCaller is a nil interface and
@@ -236,7 +219,7 @@ func TestMetricsHandler_AllMetricNames(t *testing.T) {
 		dnsHealthMu.Unlock()
 	})
 
-	jwtStr := signTestJWT(t, SecretKey)
+	jwtStr := signTestJWT(t, auth.SecretKey)
 	w, c := newMetricsContext("GET", "/metrics")
 	c.Request.Header.Set("Authorization", "Bearer "+jwtStr)
 

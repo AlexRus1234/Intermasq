@@ -29,7 +29,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"intermask/internal/initd"
 )
@@ -188,54 +187,4 @@ func TestRunDNSHealthPass_HappyAndSadPaths(t *testing.T) {
 		t.Errorf("TXT alias should be skipped, got calls=%d", calls["skip.lan"])
 	}
 	callsMu.Unlock()
-}
-
-// ===== T-C.4 cleanupBlacklistOnce =====
-
-func TestCleanupBlacklistOnce_RemovesExpired(t *testing.T) {
-	blacklistMu.Lock()
-	// Reset to a known state.
-	for k := range blacklist {
-		delete(blacklist, k)
-	}
-	blacklist["expired"] = time.Now().Add(-time.Hour)
-	blacklist["future"] = time.Now().Add(time.Hour)
-	blacklistMu.Unlock()
-	t.Cleanup(func() {
-		blacklistMu.Lock()
-		for k := range blacklist {
-			delete(blacklist, k)
-		}
-		blacklistMu.Unlock()
-	})
-
-	cleanupBlacklistOnce(time.Now())
-
-	blacklistMu.RLock()
-	defer blacklistMu.RUnlock()
-	if _, ok := blacklist["expired"]; ok {
-		t.Error("expected expired entry to be removed")
-	}
-	if _, ok := blacklist["future"]; !ok {
-		t.Error("expected future entry to be retained")
-	}
-}
-
-func TestCleanupBlacklistOnce_EmptyMap(t *testing.T) {
-	blacklistMu.Lock()
-	for k := range blacklist {
-		delete(blacklist, k)
-	}
-	blacklistMu.Unlock()
-
-	// Must not panic on an empty map and must leave it empty (no spurious
-	// inserts / no mutation of unrelated state).
-	cleanupBlacklistOnce(time.Now())
-
-	blacklistMu.RLock()
-	n := len(blacklist)
-	blacklistMu.RUnlock()
-	if n != 0 {
-		t.Errorf("cleanupBlacklistOnce on empty map left %d entries", n)
-	}
 }

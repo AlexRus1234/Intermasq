@@ -36,6 +36,7 @@ import (
 	"github.com/swaggo/gin-swagger"
 	_ "intermask/docs"
 	"intermask/internal/audit"
+	authpkg "intermask/internal/auth"
 	"intermask/internal/bins"
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
@@ -47,7 +48,6 @@ var staticFiles embed.FS
 
 var (
 	Port         = flag.String("port", "8081", "Port to listen on")
-	DBPath       = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
 	InitSystem   = flag.String("init-system", "auto", "Init system: auto, systemd, systemd-user, openrc, runit, sysvinit, none")
 	SystemdScope = flag.String("systemd-scope", "", "Legacy flag: auto, system, user, none (overrides -init-system if set)")
 	CiMode       = flag.Bool("ci-mode", false, "CI mode: disables self-restart")
@@ -60,7 +60,6 @@ var (
 	// HistoryDir / HistoryDepth are also registered there.
 	PluginsDir = "/etc/intermasq/plugins"
 	SocketsDir = "/run/intermasq/sockets"
-	SecretKey  = []byte(os.Getenv("INTERMASQ_SECRET"))
 )
 
 var (
@@ -77,7 +76,7 @@ func init() {
 	// SECURITY: refuse to start with the default/well-known signing key.
 	// Without this, an attacker who reads the source can forge any JWT.
 	// Operator MUST set INTERMASQ_SECRET (e.g. `openssl rand -hex 32`).
-	if len(SecretKey) == 0 {
+	if len(authpkg.SecretKey) == 0 {
 		fmt.Fprintln(os.Stderr, "[FATAL] INTERMASQ_SECRET environment variable is not set.")
 		fmt.Fprintln(os.Stderr, "        Generate one with:  openssl rand -hex 32")
 		fmt.Fprintln(os.Stderr, "        and export it before starting intermasq.")
@@ -187,7 +186,7 @@ func main() {
 // uncovered (see логи/Coverage_sweep.md §6).
 func setupServer() (*gin.Engine, error) {
 	bins.Resolve()
-	loadUsers()
+	authpkg.LoadUsers()
 	templatepkg.Load()
 	if err := dnsmasq.EnsureHistoryDir(); err != nil {
 		fmt.Printf("[HISTORY] Failed to create dir %s: %v\n", *dnsmasq.HistoryDir, err)
@@ -222,13 +221,14 @@ func setupServer() (*gin.Engine, error) {
 	{
 		api.GET("/status", statusHandler)
 		api.POST("/setup", setupHandler)
-		api.POST("/login", rateLimitMiddleware(10, time.Minute), loginHandler)
+		api.POST("/login", authpkg.RateLimitMiddleware(10, time.Minute), loginHandler)
 
-		auth := api.Group("/")
-		auth.Use(authMiddleware)
+		protected := api.Group("/")
+		protected.Use(authpkg.Middleware)
+		auth := protected
 		{
-			auth.GET("/plugins", func(c *gin.Context) { c.JSON(200, loadedPlugins) })
-			auth.POST("/restart-self", func(c *gin.Context) {
+			protected.GET("/plugins", func(c *gin.Context) { c.JSON(200, loadedPlugins) })
+			protected.POST("/restart-self", func(c *gin.Context) {
 				c.JSON(200, gin.H{"status": "restarting"})
 				if !*CiMode {
 					go func() {
@@ -238,7 +238,7 @@ func setupServer() (*gin.Engine, error) {
 					}()
 				}
 			})
-			auth.GET("/hosts", getHostsHandler)
+			protected.GET("/hosts", getHostsHandler)
 			auth.GET("/hosts/next-ip", nextIPHandler)
 			auth.POST("/hosts/apply-template", applyTemplateHandler)
 			auth.GET("/leases", getLeasesHandler)

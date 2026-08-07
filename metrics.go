@@ -27,6 +27,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 
+	"intermask/internal/auth"
 	"intermask/internal/dnsmasq"
 	"intermask/internal/stats"
 )
@@ -88,20 +89,20 @@ func metricsHandler(c *gin.Context) {
 // accepts the ?token= query value equal to SecretKey (API key), so a
 // Prometheus scrape_url can be `http://host/metrics?token=<secret>`.
 func checkMetricsAuth(c *gin.Context) bool {
-	if apiKey := c.GetHeader("X-API-Key"); apiKey != "" && apiKey == string(SecretKey) {
+	if apiKey := c.GetHeader("X-API-Key"); apiKey != "" && apiKey == string(auth.SecretKey) {
 		return true
 	}
 	if tok := c.Query("token"); tok != "" {
-		if tok == string(SecretKey) {
+		if tok == string(auth.SecretKey) {
 			return true
 		}
-		if token, _ := jwt.Parse(tok, func(t *jwt.Token) (interface{}, error) { return SecretKey, nil }); token != nil && token.Valid {
+		if token, _ := jwt.Parse(tok, func(t *jwt.Token) (interface{}, error) { return auth.SecretKey, nil }); token != nil && token.Valid {
 			return true
 		}
 	}
 	if authHeader := c.GetHeader("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
 		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-		token, _ := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) { return SecretKey, nil })
+		token, _ := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) { return auth.SecretKey, nil })
 		if token != nil && token.Valid {
 			return true
 		}

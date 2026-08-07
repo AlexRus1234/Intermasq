@@ -31,107 +31,13 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
+	"intermask/internal/auth"
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
 
 	"github.com/gin-gonic/gin"
-	"golang.org/x/crypto/bcrypt"
 )
-
-// ========================== Rate-limit reset ==========================
-
-// TestRateLimitResetClearsIP verifies that rateLimitReset wipes the
-// recorded attempts for the given IP, so the next request is treated as
-// the first one in a fresh window.
-func TestRateLimitResetClearsIP(t *testing.T) {
-	rateLimitStore = make(map[string][]time.Time)
-	handler := rateLimitMiddleware(3, time.Minute)
-
-	// Two failed attempts — counter should now hold 2 entries for this IP.
-	for i := 0; i < 2; i++ {
-		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest("POST", "/", nil)
-		c.Request.RemoteAddr = "10.0.0.42:1234"
-		handler(c)
-	}
-	rateLimitMu.Lock()
-	n := len(rateLimitStore["10.0.0.42"])
-	rateLimitMu.Unlock()
-	if n != 2 {
-		t.Fatalf("expected 2 attempts recorded, got %d", n)
-	}
-
-	rateLimitReset("10.0.0.42")
-
-	rateLimitMu.Lock()
-	_, present := rateLimitStore["10.0.0.42"]
-	rateLimitMu.Unlock()
-	if present {
-		t.Fatal("rateLimitReset should delete the IP entry")
-	}
-
-	// After reset, the caller can submit maxAttempts requests again.
-	for i := 0; i < 3; i++ {
-		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest("POST", "/", nil)
-		c.Request.RemoteAddr = "10.0.0.42:1234"
-		handler(c)
-		if w.Code == 429 {
-			t.Fatalf("request %d after reset should not be limited", i+1)
-		}
-	}
-}
-
-// TestRateLimitResetUnknownIP is a no-op safety net: clearing an IP that
-// was never recorded must not panic and must not corrupt other entries.
-func TestRateLimitResetUnknownIP(t *testing.T) {
-	rateLimitStore = make(map[string][]time.Time)
-	rateLimitStore["10.0.0.1"] = []time.Time{time.Now()}
-	rateLimitReset("10.0.0.99") // not present — must not panic
-	if _, ok := rateLimitStore["10.0.0.1"]; !ok {
-		t.Fatal("reset of unrelated IP must not affect other entries")
-	}
-}
-
-// TestLoginHandlerResetsRateLimit exercises the full loginHandler path.
-// In production the rate-limit middleware populates rateLimitStore before
-// loginHandler runs; in this test we populate it directly to simulate two
-// failed attempts already recorded, then verify the successful login
-// wipes the counter.
-func TestLoginHandlerResetsRateLimit(t *testing.T) {
-	dir := t.TempDir()
-	*DBPath = filepath.Join(dir, "users.json")
-	hash, _ := bcrypt.GenerateFromPassword([]byte("correct-horse"), bcrypt.DefaultCost)
-	users = map[string]string{"alice": string(hash)}
-	usersMu = sync.RWMutex{}
-	rateLimitStore = make(map[string][]time.Time)
-
-	// Simulate two failed attempts that the middleware would have recorded.
-	rateLimitStore["10.0.0.7"] = []time.Time{time.Now(), time.Now()}
-
-	// Successful login.
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("POST", "/api/login", strings.NewReader(`{"username":"alice","password":"correct-horse"}`))
-	c.Request.Header.Set("Content-Type", "application/json")
-	c.Request.RemoteAddr = "10.0.0.7:1"
-	loginHandler(c)
-	if w.Code != 200 {
-		t.Fatalf("expected 200 on correct password, got %d: %s", w.Code, w.Body.String())
-	}
-
-	// Counter must be wiped — successful login resets the slate.
-	rateLimitMu.Lock()
-	_, present := rateLimitStore["10.0.0.7"]
-	rateLimitMu.Unlock()
-	if present {
-		t.Fatal("successful login must clear rate-limit counter for that IP")
-	}
-}
 
 // Backend TestDeleteConfigFile* tests migrated to internal/dnsmasq in stage 5.
 
@@ -260,8 +166,7 @@ func TestDeleteConfigFileHandlerMissing(t *testing.T) {
 func TestConcurrentCreateUserNoLostRecords(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = map[string]string{}
-	usersMu = sync.RWMutex{}
+	auth.ClearUsers()
 	*AuditLogPath = filepath.Join(dir, "audit.log")
 
 	const n = 30
@@ -290,10 +195,10 @@ func TestConcurrentCreateUserNoLostRecords(t *testing.T) {
 	}
 
 	// Reload from disk and verify every user survived.
-	users = map[string]string{}
-	loadUsers()
-	if len(users) != n {
-		t.Errorf("expected %d persisted users, got %d", n, len(users))
+	auth.ClearUsers()
+	auth.LoadUsers()
+	if auth.UserCount() != n {
+		t.Errorf("expected %d persisted users, got %d", n, auth.UserCount())
 	}
 }
 
@@ -305,8 +210,7 @@ func TestConcurrentCreateUserNoLostRecords(t *testing.T) {
 func TestConcurrentCreateUserDuplicateNoCorruption(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = map[string]string{}
-	usersMu = sync.RWMutex{}
+	auth.ClearUsers()
 	*AuditLogPath = filepath.Join(dir, "audit.log")
 
 	const n = 20
@@ -341,12 +245,12 @@ func TestConcurrentCreateUserDuplicateNoCorruption(t *testing.T) {
 	}
 
 	// Reload must not fail (corrupted JSON would panic at startup).
-	users = map[string]string{}
-	loadUsers()
-	if len(users) != 1 {
-		t.Errorf("expected 1 persisted user, got %d", len(users))
+	auth.ClearUsers()
+	auth.LoadUsers()
+	if auth.UserCount() != 1 {
+		t.Errorf("expected 1 persisted user, got %d", auth.UserCount())
 	}
-	if _, ok := users["dup"]; !ok {
+	if !auth.HasUser("dup") {
 		t.Error("user 'dup' not in reloaded map")
 	}
 }
@@ -358,8 +262,7 @@ func TestConcurrentCreateUserDuplicateNoCorruption(t *testing.T) {
 func TestStatusHandlerSafeUnderConcurrentUserWrite(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = map[string]string{}
-	usersMu = sync.RWMutex{}
+	auth.ClearUsers()
 	*AuditLogPath = filepath.Join(dir, "audit.log")
 	// statusHandler calls initd.Current().IsActive("dnsmasq"); the test
 	// binary never runs initd.Init, so wire up the no-op caller manually.

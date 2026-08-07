@@ -7,22 +7,18 @@ package main
 // cannot interleave and lose a record.
 
 import (
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+	"intermask/internal/auth"
 )
 
 func getUsersHandler(c *gin.Context) {
-	usersMu.RLock()
-	defer usersMu.RUnlock()
-	names := make([]string, 0, len(users))
-	for u := range users {
-		names = append(names, u)
-	}
-	c.JSON(200, gin.H{"users": names})
+	c.JSON(200, gin.H{"users": auth.UserNames()})
 }
 
 func createUserHandler(c *gin.Context) {
@@ -38,18 +34,16 @@ func createUserHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "username_too_long"})
 		return
 	}
-	usersMu.Lock()
-	defer usersMu.Unlock()
-	if _, exists := users[req.Username]; exists {
+	if auth.HasUser(req.Username) {
 		c.JSON(409, gin.H{"error": "user_exists"})
 		return
 	}
 	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	users[req.Username] = string(hash)
-	if err := saveUsers(); err != nil {
-		// Roll back the in-memory change so the next save attempt does
-		// not silently resurrect a user that never made it to disk.
-		delete(users, req.Username)
+	if err := auth.AddUser(req.Username, string(hash)); err != nil {
+		if errors.Is(err, auth.ErrUserExists) {
+			c.JSON(409, gin.H{"error": "user_exists"})
+			return
+		}
 		c.JSON(500, gin.H{"error": "save_error"})
 		return
 	}
@@ -68,14 +62,11 @@ func deleteUserHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "cannot_delete_self"})
 		return
 	}
-	usersMu.Lock()
-	defer usersMu.Unlock()
-	if _, exists := users[name]; !exists {
+	if !auth.HasUser(name) {
 		c.JSON(404, gin.H{"error": "user_not_found"})
 		return
 	}
-	delete(users, name)
-	if err := saveUsers(); err != nil {
+	if err := auth.DeleteUser(name); err != nil {
 		c.JSON(500, gin.H{"error": "save_error"})
 		return
 	}
@@ -97,16 +88,13 @@ func changePasswordHandler(c *gin.Context) {
 		return
 	}
 	currentUser := getUser(c)
-	usersMu.Lock()
-	defer usersMu.Unlock()
-	hash, ok := users[currentUser]
+	hash, ok := auth.GetUser(currentUser)
 	if !ok || bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.OldPassword)) != nil {
 		c.JSON(401, gin.H{"error": "invalid_credentials"})
 		return
 	}
 	newHash, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-	users[currentUser] = string(newHash)
-	if err := saveUsers(); err != nil {
+	if err := auth.UpdateUser(currentUser, string(newHash)); err != nil {
 		c.JSON(500, gin.H{"error": "save_error"})
 		return
 	}
@@ -124,12 +112,12 @@ func logoutHandler(c *gin.Context) {
 	authHeader := c.GetHeader("Authorization")
 	if strings.HasPrefix(authHeader, "Bearer ") {
 		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-		token, _ := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) { return SecretKey, nil })
+		token, _ := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) { return auth.SecretKey, nil })
 		if token != nil {
 			if claims, ok := token.Claims.(jwt.MapClaims); ok {
 				if jti, ok := claims["jti"].(string); ok {
 					if exp, ok := claims["exp"].(float64); ok {
-						revokeToken(jti, time.Unix(int64(exp), 0))
+						auth.RevokeToken(jti, time.Unix(int64(exp), 0))
 					}
 				}
 			}

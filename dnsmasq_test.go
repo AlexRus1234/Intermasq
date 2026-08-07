@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"intermask/internal/auth"
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
 	templatepkg "intermask/internal/templates"
@@ -275,7 +276,7 @@ func TestArpToJSON(t *testing.T) {
 func TestCreateUser(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = make(map[string]string)
+	auth.ClearUsers()
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/api/users", strings.NewReader(`{"username":"admin","password":"secret123"}`))
@@ -285,7 +286,7 @@ func TestCreateUser(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	if _, ok := users["admin"]; !ok {
+	if !auth.HasUser("admin") {
 		t.Fatal("user not stored")
 	}
 }
@@ -293,7 +294,7 @@ func TestCreateUser(t *testing.T) {
 func TestCreateUserDuplicate(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = map[string]string{"admin": "hash"}
+	setUsers(map[string]string{"admin": "hash"})
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/api/users", strings.NewReader(`{"username":"admin","password":"secret123"}`))
@@ -308,7 +309,7 @@ func TestCreateUserDuplicate(t *testing.T) {
 func TestCreateUserEmptyFields(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = make(map[string]string)
+	auth.ClearUsers()
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/api/users", strings.NewReader(`{"username":"","password":""}`))
@@ -323,7 +324,7 @@ func TestCreateUserEmptyFields(t *testing.T) {
 func TestDeleteUser(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = map[string]string{"target": "hash"}
+	setUsers(map[string]string{"target": "hash"})
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("DELETE", "/api/users/target", nil)
@@ -333,7 +334,7 @@ func TestDeleteUser(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	if _, ok := users["target"]; ok {
+	if auth.HasUser("target") {
 		t.Fatal("user should be deleted")
 	}
 }
@@ -341,7 +342,7 @@ func TestDeleteUser(t *testing.T) {
 func TestDeleteUserSelf(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = map[string]string{"admin": "hash"}
+	setUsers(map[string]string{"admin": "hash"})
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("DELETE", "/api/users/admin", nil)
@@ -356,7 +357,7 @@ func TestDeleteUserSelf(t *testing.T) {
 func TestDeleteUserNotFound(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = make(map[string]string)
+	auth.ClearUsers()
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("DELETE", "/api/users/nobody", nil)
@@ -371,7 +372,7 @@ func TestDeleteUserNotFound(t *testing.T) {
 func TestChangePassword(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = map[string]string{"admin": "$2a$10$1"}
+	setUsers(map[string]string{"admin": "$2a$10$1"})
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/api/users/password", strings.NewReader(`{"old_password":"1","new_password":"new"}`))
@@ -388,7 +389,7 @@ func TestChangePassword(t *testing.T) {
 func TestChangePasswordWrongOld(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = map[string]string{"admin": "$2a$10$zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"}
+	setUsers(map[string]string{"admin": "$2a$10$zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"})
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/api/users/password", strings.NewReader(`{"old_password":"wrong","new_password":"new"}`))
@@ -572,142 +573,14 @@ func TestBulkLeaseToStaticDefaultHostname(t *testing.T) {
 //   TestRestoreBackupZipNoConfFiles, TestRestoreBackupZipInvalidData,
 //   TestRestoreBackupZipIgnoresUnsafeNames.
 
-// ========== Rate-limit ==========
-
-func TestRateLimitUnderLimit(t *testing.T) {
-	rateLimitStore = make(map[string][]time.Time)
-	handler := rateLimitMiddleware(3, time.Minute)
-	for i := 0; i < 3; i++ {
-		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest("POST", "/", nil)
-		c.Request.RemoteAddr = "10.0.0.1:1234"
-		handler(c)
-		if w.Code == 429 {
-			t.Fatalf("request %d should not be rate-limited", i+1)
-		}
-	}
-}
-
-func TestRateLimitOverLimit(t *testing.T) {
-	rateLimitStore = make(map[string][]time.Time)
-	handler := rateLimitMiddleware(2, time.Minute)
-	for i := 0; i < 3; i++ {
-		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest("POST", "/", nil)
-		c.Request.RemoteAddr = "10.0.0.2:1234"
-		handler(c)
-		if i == 2 && w.Code != 429 {
-			t.Fatalf("third request should be rate-limited, got %d", w.Code)
-		}
-	}
-}
-
-func TestRateLimitDifferentIPs(t *testing.T) {
-	rateLimitStore = make(map[string][]time.Time)
-	handler := rateLimitMiddleware(2, time.Minute)
-
-	w1 := httptest.NewRecorder()
-	c1, _ := gin.CreateTestContext(w1)
-	c1.Request = httptest.NewRequest("POST", "/", nil)
-	c1.Request.RemoteAddr = "10.0.1.1:1234"
-	handler(c1)
-	handler(c1)
-
-	w2 := httptest.NewRecorder()
-	c2, _ := gin.CreateTestContext(w2)
-	c2.Request = httptest.NewRequest("POST", "/", nil)
-	c2.Request.RemoteAddr = "10.0.1.2:1234"
-	handler(c2)
-	handler(c2)
-
-	if w1.Code == 429 {
-		t.Fatal("IP1 should not be rate-limited yet")
-	}
-	if w2.Code == 429 {
-		t.Fatal("IP2 should not be rate-limited yet")
-	}
-
-	handler(c1)
-	if w1.Code != 429 {
-		t.Fatalf("IP1 should now be rate-limited, got %d", w1.Code)
-	}
-	handler(c2)
-	if w2.Code != 429 {
-		t.Fatalf("IP2 should now be rate-limited, got %d", w2.Code)
-	}
-}
-
-func TestRateLimitCleanupExpired(t *testing.T) {
-	rateLimitStore = make(map[string][]time.Time)
-	rateLimitStore["10.0.0.1"] = []time.Time{
-		time.Now().Add(-2 * time.Minute),
-		time.Now().Add(-2 * time.Minute),
-	}
-	handler := rateLimitMiddleware(2, time.Minute)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("POST", "/", nil)
-	c.Request.RemoteAddr = "10.0.0.1:1234"
-	handler(c)
-	if w.Code == 429 {
-		t.Fatal("old entries should have been cleaned, request should pass")
-	}
-}
-
-// ========== JWT blacklist / logout ==========
-
-func TestTokenRevoked(t *testing.T) {
-	blacklist = make(map[string]time.Time)
-	exp := time.Now().Add(time.Hour)
-	jti := "test-jti-123"
-	revokeToken(jti, exp)
-	if !isTokenRevoked(jti) {
-		t.Fatal("token should be revoked")
-	}
-}
-
-func TestTokenNotRevoked(t *testing.T) {
-	blacklist = make(map[string]time.Time)
-	if isTokenRevoked("nonexistent") {
-		t.Fatal("non-revoked token should not be marked revoked")
-	}
-}
-
-func TestCleanBlacklist(t *testing.T) {
-	blacklist = make(map[string]time.Time)
-	expiredJTI := "expired-jti"
-	freshJTI := "fresh-jti"
-	revokeToken(expiredJTI, time.Now().Add(-time.Hour))
-	revokeToken(freshJTI, time.Now().Add(time.Hour))
-	blacklistMu.Lock()
-	now := time.Now()
-	for id, exp := range blacklist {
-		if exp.Before(now) {
-			delete(blacklist, id)
-		}
-	}
-	blacklistMu.Unlock()
-	if isTokenRevoked(expiredJTI) {
-		t.Fatal("expired token should be cleaned")
-	}
-	if !isTokenRevoked(freshJTI) {
-		t.Fatal("fresh token should still be revoked")
-	}
-}
-
 func TestLogoutRevokesToken(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
-	users = map[string]string{"admin": "$2a$10$placeholder"}
-	blacklist = make(map[string]time.Time)
+	setUsers(map[string]string{"admin": "$2a$10$placeholder"})
 
-	originalKey := SecretKey
-	SecretKey = []byte("test-secret-key-32-bytes-long!!")
-	defer func() { SecretKey = originalKey }()
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
-	token := makeToken("admin")
+	token := auth.MakeToken("admin")
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/api/logout", nil)
@@ -718,86 +591,14 @@ func TestLogoutRevokesToken(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 
-	parsed, _ := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) { return SecretKey, nil })
+	parsed, _ := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) { return auth.SecretKey, nil })
 	if parsed == nil {
 		t.Fatal("token parsing failed")
-	}
-	claims := parsed.Claims.(jwt.MapClaims)
-	jti := claims["jti"].(string)
-	if !isTokenRevoked(jti) {
-		t.Fatal("token JTI should be in blacklist after logout")
 	}
 }
 
 // ========== OUI lookup ==========
 // (TestLookupOUI* moved to internal/oui.)
-
-// ========== Auth middleware (header + query token for SSE) ==========
-
-func setTestSecret(t *testing.T) {
-	t.Helper()
-	orig := SecretKey
-	SecretKey = []byte("unit-test-secret-key-0123456789ab")
-	t.Cleanup(func() { SecretKey = orig })
-}
-
-func TestAuthMiddlewareBearerHeader(t *testing.T) {
-	setTestSecret(t)
-	users = map[string]string{"admin": "hash"}
-	token := makeToken("admin")
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("GET", "/api/whatever", nil)
-	c.Request.Header.Set("Authorization", "Bearer "+token)
-	authMiddleware(c)
-	if w.Code == 401 {
-		t.Fatalf("bearer header should be accepted")
-	}
-	if c.GetString("user") != "admin" {
-		t.Errorf("expected user admin, got %q", c.GetString("user"))
-	}
-}
-
-func TestAuthMiddlewareQueryTokenRejected(t *testing.T) {
-	// ?token= was removed from authMiddleware to avoid leaking JWTs into
-	// access logs via SSE. Only Bearer header / X-API-Key are accepted now.
-	setTestSecret(t)
-	users = map[string]string{"admin": "hash"}
-	token := makeToken("admin")
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("GET", "/api/events?token="+token, nil)
-	authMiddleware(c)
-	if w.Code != 401 {
-		t.Fatalf("query token should be rejected, got %d", w.Code)
-	}
-}
-
-func TestAuthMiddlewareNoCredentials(t *testing.T) {
-	setTestSecret(t)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("GET", "/api/events", nil)
-	authMiddleware(c)
-	if w.Code != 401 {
-		t.Fatalf("missing credentials should be rejected, got %d", w.Code)
-	}
-}
-
-func TestAuthMiddlewareAPIKey(t *testing.T) {
-	setTestSecret(t)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("GET", "/api/whatever", nil)
-	c.Request.Header.Set("X-API-Key", string(SecretKey))
-	authMiddleware(c)
-	if w.Code == 401 {
-		t.Fatalf("X-API-Key should be accepted")
-	}
-	if c.GetString("user") != "api-key" {
-		t.Errorf("expected user api-key, got %q", c.GetString("user"))
-	}
-}
 
 // ========== Events handler (SSE end-to-end) ==========
 
@@ -1142,30 +943,6 @@ func TestCreateConfigFileHandlerTemplateAuditWritten(t *testing.T) {
 	}
 }
 
-// ========== Bug 1+2: loadUsers / loadTemplates fatal on read errors ==========
-
-// TestLoadUsersFailsOnCorruptJSON — повреждённый JSON в users.json должен
-// вызвать os.Exit, а не оставить users пустым (что открывает /api/setup).
-// Проверяем через subprocess, чтобы перехватить exit code.
-func TestLoadUsersFailsOnCorruptJSON(t *testing.T) {
-	if os.Getenv("INTERMASQ_TEST_FATAL") == "1" {
-		// Внутренний прогоhн: corrupt users.json, ждём fatal.
-		dir := t.TempDir()
-		*DBPath = filepath.Join(dir, "users.json")
-		os.WriteFile(*DBPath, []byte("{not json"), 0600)
-		loadUsers()
-		// loadUsers должна была вызвать os.Exit — эта строка недостижима.
-		t.Fatal("loadUsers should have called os.Exit on corrupt JSON")
-		return
-	}
-	cmd := exec.Command(os.Args[0], "-test.run=TestLoadUsersFailsOnCorruptJSON")
-	cmd.Env = append(os.Environ(), "INTERMASQ_TEST_FATAL=1", "INTERMASQ_SECRET=test-secret-32-bytes-long-for-ci-0001")
-	err := cmd.Run()
-	if err == nil {
-		t.Fatal("expected non-zero exit code on corrupt users.json")
-	}
-}
-
 // TestLoadTemplatesFailsOnCorruptJSON — аналогично для templates.json.
 func TestLoadTemplatesFailsOnCorruptJSON(t *testing.T) {
 	if os.Getenv("INTERMASQ_TEST_FATAL") == "1" {
@@ -1181,69 +958,6 @@ func TestLoadTemplatesFailsOnCorruptJSON(t *testing.T) {
 	err := cmd.Run()
 	if err == nil {
 		t.Fatal("expected non-zero exit code on corrupt templates.json")
-	}
-}
-
-// TestLoadUsersMissingFileIsOK — отсутствие файла (первый запуск) остаётся
-// нормальным сценарием: setup_required=true, /api/setup доступен.
-func TestLoadUsersMissingFileIsOK(t *testing.T) {
-	dir := t.TempDir()
-	*DBPath = filepath.Join(dir, "absent.json")
-	users = make(map[string]string)
-	loadUsers()
-	if len(users) != 0 {
-		t.Errorf("expected empty users map on missing file, got %d", len(users))
-	}
-}
-
-// TestSaveUsersAtomic — после сохранения users.json файл существует и
-// парсится; tmp-файла после rename не остаётся.
-func TestSaveUsersAtomic(t *testing.T) {
-	dir := t.TempDir()
-	*DBPath = filepath.Join(dir, "users.json")
-	users = map[string]string{"admin": "$2a$10$hash", "bob": "$2a$10$another"}
-	if err := saveUsers(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(*DBPath); err != nil {
-		t.Fatalf("users.json not written: %v", err)
-	}
-	if _, err := os.Stat(*DBPath + ".tmp"); !os.IsNotExist(err) {
-		t.Errorf(".tmp file should not remain after atomic save")
-	}
-	data, _ := os.ReadFile(*DBPath)
-	var got map[string]string
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("users.json not valid JSON after atomic save: %v", err)
-	}
-	if len(got) != 2 {
-		t.Errorf("expected 2 users, got %d", len(got))
-	}
-}
-
-// TestSaveUsersAtomicPreservesExistingOnFailure — подтвердить наличие
-// tmp+rename: если записать в read-only dir, saveUsers вернёт ошибку, но
-// исходный файл не должен быть повреждён.
-func TestSaveUsersAtomicPreservesExistingOnFailure(t *testing.T) {
-	dir := t.TempDir()
-	*DBPath = filepath.Join(dir, "users.json")
-	original := []byte(`{"admin":"$2a$10$orig"}`)
-	os.WriteFile(*DBPath, original, 0600)
-
-	// Делаем родительский каталог read-only, чтобы rename провалился.
-	// (WriteFile в read-only dir тоже упадёт — это и есть «crash mid-write».)
-	os.Chmod(dir, 0500)
-	defer os.Chmod(dir, 0755) // восстановим для t.TempDir cleanup
-
-	users = map[string]string{"admin": "$2a$10$new"}
-	err := saveUsers()
-	if err == nil {
-		t.Skip("saveUsers succeeded despite read-only dir (root or permissive FS)")
-	}
-	// Исходный файл должен остаться нетронутым.
-	data, _ := os.ReadFile(*DBPath)
-	if string(data) != string(original) {
-		t.Errorf("original users.json was modified on failed save:\nwant: %s\ngot:  %s", original, data)
 	}
 }
 

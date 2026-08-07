@@ -11,6 +11,7 @@ package main
 //   - handlers_users.go    user management, logout
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 
+	"intermask/internal/auth"
 	"intermask/internal/dnsmasq"
 	"intermask/internal/netstate"
 	"intermask/internal/validate"
@@ -25,9 +27,7 @@ import (
 
 func statusHandler(c *gin.Context) {
 	isActive := checkDnsmasqStatus()
-	usersMu.RLock()
-	setupRequired := len(users) == 0
-	usersMu.RUnlock()
+	setupRequired := auth.UserCount() == 0
 	dnsmasq.Mu.Lock()
 	defer dnsmasq.Mu.Unlock()
 	c.JSON(200, gin.H{
@@ -38,9 +38,7 @@ func statusHandler(c *gin.Context) {
 }
 
 func setupHandler(c *gin.Context) {
-	usersMu.Lock()
-	defer usersMu.Unlock()
-	if len(users) > 0 {
+	if auth.UserCount() > 0 {
 		c.JSON(403, gin.H{"error": "already_setup"})
 		return
 	}
@@ -49,13 +47,15 @@ func setupHandler(c *gin.Context) {
 		return
 	}
 	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	users[req.Username] = string(hash)
-	if err := saveUsers(); err != nil {
-		delete(users, req.Username)
+	if err := auth.AddUser(req.Username, string(hash)); err != nil {
+		if errors.Is(err, auth.ErrUserExists) {
+			c.JSON(403, gin.H{"error": "already_setup"})
+			return
+		}
 		c.JSON(500, gin.H{"error": "save_error"})
 		return
 	}
-	c.JSON(200, gin.H{"token": makeToken(req.Username)})
+	c.JSON(200, gin.H{"token": auth.MakeToken(req.Username)})
 }
 
 // loginHandler authenticates by username + bcrypt-hashed password and
@@ -67,15 +67,13 @@ func loginHandler(c *gin.Context) {
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
-	usersMu.RLock()
-	hash, ok := users[req.Username]
-	usersMu.RUnlock()
+	hash, ok := auth.GetUser(req.Username)
 	if !ok || bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil {
 		c.JSON(401, gin.H{"error": "invalid_credentials"})
 		return
 	}
-	rateLimitReset(c.ClientIP())
-	c.JSON(200, gin.H{"token": makeToken(req.Username)})
+	auth.RateLimitReset(c.ClientIP())
+	c.JSON(200, gin.H{"token": auth.MakeToken(req.Username)})
 }
 
 func getArpHandler(c *gin.Context) {
