@@ -12,10 +12,12 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"intermask/internal/dnsmasq"
 )
 
 func getConfigHandler(c *gin.Context) {
-	snap := readConfigSnapshot()
+	snap := dnsmasq.ReadConfigSnapshot()
 	c.JSON(200, snap)
 }
 
@@ -29,7 +31,7 @@ func updateConfigHandler(c *gin.Context) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
-	directiveKeyValidator := directiveKeyRegex
+	directiveKeyValidator := dnsmasq.DirectiveKeyRegex
 	for _, d := range req.Directives {
 		if !directiveKeyValidator.MatchString(d.Key) {
 			c.JSON(400, gin.H{"error": "invalid_directive_key", "key": d.Key})
@@ -44,7 +46,7 @@ func updateConfigHandler(c *gin.Context) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	content, err := serializeConfigFile(req.File, req.Directives)
+	content, err := dnsmasq.SerializeConfigFile(req.File, req.Directives)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "serialize_error"})
 		return
@@ -66,12 +68,12 @@ func updateConfigHandler(c *gin.Context) {
 		Mac:    fmt.Sprintf("%d directives", len(req.Directives)),
 	})
 
-	snap := readConfigSnapshot()
+	snap := dnsmasq.ReadConfigSnapshot()
 	c.JSON(200, snap)
 }
 
 func getDhcpRangesHandler(c *gin.Context) {
-	c.JSON(200, gin.H{"ranges": detectDhcpRangesCIDR()})
+	c.JSON(200, gin.H{"ranges": dnsmasq.DetectDhcpRangesCIDR()})
 }
 
 func createConfigFileHandler(c *gin.Context) {
@@ -89,12 +91,12 @@ func createConfigFileHandler(c *gin.Context) {
 	if template == "" {
 		template = "empty"
 	}
-	content, ok := configTemplates[template]
+	content, ok := dnsmasq.ConfigTemplates[template]
 	if !ok {
-		c.JSON(400, gin.H{"error": "unknown_template", "template": template, "available": knownConfigTemplateIDs()})
+		c.JSON(400, gin.H{"error": "unknown_template", "template": template, "available": dnsmasq.KnownConfigTemplateIDs()})
 		return
 	}
-	fullPath := filepath.Join(*ConfigDir, name)
+	fullPath := filepath.Join(*dnsmasq.ConfigDir, name)
 	if !isSafePath(fullPath) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
@@ -119,7 +121,7 @@ func createConfigFileHandler(c *gin.Context) {
 		Template: template,
 	})
 
-	snap := readConfigSnapshot()
+	snap := dnsmasq.ReadConfigSnapshot()
 	c.JSON(200, snap)
 }
 
@@ -174,19 +176,19 @@ func deleteConfigFileHandler(c *gin.Context) {
 		File:   req.File,
 	})
 
-	snap := readConfigSnapshot()
+	snap := dnsmasq.ReadConfigSnapshot()
 	c.JSON(200, snap)
 }
 
 // listConfigTemplatesHandler отдаёт каталог известных шаблонов для UI:
 // список ID + preview-содержимое.
 func listConfigTemplatesHandler(c *gin.Context) {
-	ids := knownConfigTemplateIDs()
+	ids := dnsmasq.KnownConfigTemplateIDs()
 	out := make([]gin.H, 0, len(ids))
 	for _, id := range ids {
 		out = append(out, gin.H{
 			"id":      id,
-			"preview": configTemplates[id],
+			"preview": dnsmasq.ConfigTemplates[id],
 		})
 	}
 	c.JSON(200, gin.H{"templates": out})
@@ -200,7 +202,7 @@ func getFileHandler(c *gin.Context) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
-	path := filepath.Join(*ConfigDir, name)
+	path := filepath.Join(*dnsmasq.ConfigDir, name)
 	// Defense in depth (A11): the substring filter above already blocks any
 	// separator-bearing name, so filepath.Join cannot escape ConfigDir today.
 	// Re-check via isSafePath so a future weakening of the substring filter
@@ -224,7 +226,7 @@ func putFileHandler(c *gin.Context) {
 		c.JSON(403, gin.H{"error": "access_denied"})
 		return
 	}
-	path := filepath.Join(*ConfigDir, name)
+	path := filepath.Join(*dnsmasq.ConfigDir, name)
 	// Defense in depth (A11): mirror getFileHandler — isSafePath after Join.
 	if !isSafePath(path) {
 		c.JSON(403, gin.H{"error": "access_denied"})

@@ -14,11 +14,11 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-package main
+package dnsmasq
 
 import "sort"
 
-// configTemplates — предзаполненные шаблоны для POST /api/config/file.
+// ConfigTemplates — предзаполненные шаблоны для POST /api/config/file.
 // Цель — дать админу стартовую точку вместо пустого листа при создании
 // нового конфига. Шаблоны консервативны:
 //   - активны только безопасные boolean-директивы (domain-needed, bogus-priv…)
@@ -32,7 +32,7 @@ import "sort"
 // Шаблоны не проходят dnsmasq --test при создании файла (это скелет), но при
 // последующем PUT /api/config валидация работает как обычно. Содержимое каждого
 // шаблона синтаксически валидно — см. TestConfigTemplatesValidForDnsmasqSyntax.
-var configTemplates = map[string]string{
+var ConfigTemplates = map[string]string{
 	"empty": "# === Managed by Intermasq ===\n",
 	"basic-dhcp": `# === Managed by Intermasq ===
 # Базовый DHCP/DNS сервер. Раскомментируй и поправь значения под свою сеть.
@@ -75,12 +75,12 @@ strict-order
 `,
 }
 
-// knownConfigTemplateIDs возвращает отсортированный список доступных ID шаблонов.
+// KnownConfigTemplateIDs возвращает отсортированный список доступных ID шаблонов.
 // Используется для ответа GET /api/config/templates и для подсказки в ошибке
 // при неизвестном template в POST /api/config/file.
-func knownConfigTemplateIDs() []string {
-	out := make([]string, 0, len(configTemplates))
-	for k := range configTemplates {
+func KnownConfigTemplateIDs() []string {
+	out := make([]string, 0, len(ConfigTemplates))
+	for k := range ConfigTemplates {
 		out = append(out, k)
 	}
 	sort.Strings(out)

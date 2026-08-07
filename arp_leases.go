@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strings"
 
+	"intermask/internal/dnsmasq"
 	"intermask/internal/oui"
 )
 
@@ -94,7 +95,7 @@ func parseLeases() []LeaseEntry {
 func getNewDevices() []NewDeviceInfo {
 	arp := getArpTable()
 	leases := parseLeases()
-	hosts := readAllHosts()
+	hosts := dnsmasq.ReadAllHosts()
 
 	knownMacs := make(map[string]bool)
 	for _, l := range leases {

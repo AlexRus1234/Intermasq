@@ -33,6 +33,7 @@ import (
 	"testing"
 	"time"
 
+	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
 
 	"github.com/gin-gonic/gin"
@@ -140,7 +141,7 @@ func TestLoginHandlerResetsRateLimit(t *testing.T) {
 // button" logic).
 func TestDeleteConfigFileRemovesFileAndBak(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	*HistoryDir = filepath.Join(dir, "history")
 	*HistoryDepth = 5
 	path := filepath.Join(dir, "old.conf")
@@ -163,7 +164,7 @@ func TestDeleteConfigFileRemovesFileAndBak(t *testing.T) {
 // operator can recover via the history modal.
 func TestDeleteConfigFileSavesHistory(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	*HistoryDir = filepath.Join(dir, "history")
 	*HistoryDepth = 5
 	path := filepath.Join(dir, "doomed.conf")
@@ -194,7 +195,7 @@ func TestDeleteConfigFileSavesHistory(t *testing.T) {
 // holds: a path outside ConfigDir must be refused with os.ErrPermission.
 func TestDeleteConfigFileRejectsUnsafePath(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	*HistoryDir = filepath.Join(dir, "history")
 	outside := filepath.Join(dir, "..", "escape.conf")
 	err := deleteConfigFile(outside)
@@ -208,7 +209,7 @@ func TestDeleteConfigFileRejectsUnsafePath(t *testing.T) {
 // produce a 404.
 func TestDeleteConfigFileMissingReturnsNotExist(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	*HistoryDir = filepath.Join(dir, "history")
 	path := filepath.Join(dir, "ghost.conf")
 	err := deleteConfigFile(path)
@@ -222,7 +223,7 @@ func TestDeleteConfigFileMissingReturnsNotExist(t *testing.T) {
 // deleted file.
 func TestDeleteConfigFileHandlerSuccess(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	*HistoryDir = filepath.Join(dir, "history")
 	*HistoryDepth = 5
 	*AuditLogPath = filepath.Join(dir, "audit.log")
@@ -269,7 +270,7 @@ func TestDeleteConfigFileHandlerSuccess(t *testing.T) {
 // even runs.
 func TestDeleteConfigFileHandlerUnsafePath(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	*HistoryDir = filepath.Join(dir, "history")
 
 	evilPath := filepath.Join(dir, "..", "escape.conf")
@@ -293,7 +294,7 @@ func TestDeleteConfigFileHandlerUnsafePath(t *testing.T) {
 // ConfigDir.
 func TestDeleteConfigFileHandlerNonConfExtension(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	*HistoryDir = filepath.Join(dir, "history")
 	path := filepath.Join(dir, "notes.txt")
 	os.WriteFile(path, []byte("hi"), 0644)
@@ -316,7 +317,7 @@ func TestDeleteConfigFileHandlerNonConfExtension(t *testing.T) {
 // TestDeleteConfigFileHandlerMissing returns 404.
 func TestDeleteConfigFileHandlerMissing(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	*HistoryDir = filepath.Join(dir, "history")
 	path := filepath.Join(dir, "ghost.conf")
 

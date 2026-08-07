@@ -141,28 +141,43 @@ jobs:
           go test ./... $RACE_FLAG -count=1
 
       - name: Fuzz parsers (opt-in, time-bounded)
-        # Runs the four native Go fuzz targets (fuzz_test.go) for 30s each in
-        # real -fuzz mode (not just the f.Add seed corpus that the default L1/L2
-        # step already exercises as unit subtests). Crash artefacts Go writes
+        # Runs the four native Go fuzz targets for 30s each in real -fuzz
+        # mode (not just the f.Add seed corpus that the default L1/L2 step
+        # already exercises as unit subtests). Crash artefacts Go writes
         # to testdata/fuzz/<FuzzName>/ — these become a regression corpus and
         # MUST be committed (the default `go test` then replays them as units).
+        #
+        # Stage 4 of the modularization moved the dhcp-host= and address=/
+        # cname= parsers (and their fuzz targets FuzzParseDhcpHostLine /
+        # FuzzParseAliasLine) out of the main package and into
+        # internal/dnsmasq. The ARP / leases parsers (and
+        # FuzzParseArpContent / FuzzParseLeasesContent) stay in the main
+        # package until stage 6. Each target is therefore run against the
+        # single package that owns it; the map below pins target→package.
         if: success() && github.event.inputs.run_fuzz_tests == 'true'
         env:
           CGO_ENABLED: "1"
         run: |
           # -fuzz requires a SINGLE package (./... expands to multiple pkgs
           # here, e.g. intermask/docs, which makes go test bail with
-          # "fuzz testing requires a single package"). Use '.' = the main
-          # package where fuzz_test.go lives.
+          # "fuzz testing requires a single package"). Use the package that
+          # owns the fuzz target.
+          declare -A FUZZ_PKG=(
+            [FuzzParseDhcpHostLine]="./internal/dnsmasq"
+            [FuzzParseAliasLine]="./internal/dnsmasq"
+            [FuzzParseArpContent]="."
+            [FuzzParseLeasesContent]="."
+          )
           FUZZ_RC=0
           for target in FuzzParseDhcpHostLine FuzzParseArpContent FuzzParseAliasLine FuzzParseLeasesContent; do
-            echo "::group::fuzz $target (30s)"
-            echo "-> go test -run='^\$' -fuzz=\"^${target}\$\" -fuzztime=30s ."
-            if go test -run='^$' -fuzz="^${target}$" -fuzztime=30s . 2>&1; then
+            pkg="${FUZZ_PKG[$target]}"
+            echo "::group::fuzz $target (30s, pkg=$pkg)"
+            echo "-> go test -run='^\$' -fuzz=\"^${target}\$\" -fuzztime=30s $pkg"
+            if go test -run='^$' -fuzz="^${target}$" -fuzztime=30s "$pkg" 2>&1; then
               echo "fuzz $target: PASS (no crash in 30s)"
             else
               rc=$?
-              echo "::warning::fuzz $target exited $rc — crash artefact (if any) is in testdata/fuzz/${target}/"
+              echo "::warning::fuzz $target exited $rc — crash artefact (if any) is in $pkg/testdata/fuzz/${target}/"
               FUZZ_RC=$rc
             fi
             echo "::endgroup::"

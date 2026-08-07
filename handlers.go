@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 
+	"intermask/internal/dnsmasq"
 	"intermask/internal/validate"
 )
 
@@ -86,7 +87,7 @@ func nextIPHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "range_required"})
 		return
 	}
-	ip, err := findFreeIP(cidr)
+	ip, err := dnsmasq.FindFreeIP(cidr)
 	if err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
@@ -148,7 +149,7 @@ func bulkLeaseToStaticHandler(c *gin.Context) {
 			c.JSON(400, gin.H{"error": "invalid_mac", "mac": l.Mac})
 			return
 		}
-		macConflicts := findHostsByMac(l.Mac)
+		macConflicts := dnsmasq.FindHostsByMac(l.Mac)
 		if len(macConflicts) > 0 {
 			c.JSON(409, gin.H{"error": "mac_duplicate", "conflicts": macConflicts})
 			return
@@ -203,7 +204,7 @@ func bulkLeaseToStaticHandler(c *gin.Context) {
 		if hostname == "*" || hostname == "" {
 			hostname = "device-" + strings.ReplaceAll(strings.ToLower(l.Mac), ":", "")[:8]
 		}
-		newLines = append(newLines, formatDhcpHostLine(HostEntry{
+		newLines = append(newLines, dnsmasq.FormatDhcpHostLine(HostEntry{
 			Mac: l.Mac, Hostname: hostname, Ip: l.Ip, File: req.File,
 		}))
 		count++

@@ -18,12 +18,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"intermask/internal/dnsmasq"
 	"intermask/internal/validate"
 )
 
 func getHostsHandler(c *gin.Context) {
 	hosts := []HostEntry{}
-	files, err := os.ReadDir(*ConfigDir)
+	files, err := os.ReadDir(*dnsmasq.ConfigDir)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "dir_read_error"})
 		return
@@ -33,7 +34,7 @@ func getHostsHandler(c *gin.Context) {
 		if filepath.Ext(f.Name()) != ".conf" {
 			continue
 		}
-		fullPath := filepath.Join(*ConfigDir, f.Name())
+		fullPath := filepath.Join(*dnsmasq.ConfigDir, f.Name())
 
 		hasBak := false
 		if _, err := os.Stat(fullPath + ".bak"); err == nil {
@@ -42,7 +43,7 @@ func getHostsHandler(c *gin.Context) {
 
 		content, _ := os.ReadFile(fullPath)
 		for _, raw := range strings.Split(string(content), "\n") {
-			entry, ok := parseDhcpHostLine(raw, fullPath)
+			entry, ok := dnsmasq.ParseDhcpHostLine(raw, fullPath)
 			if !ok {
 				continue
 			}
@@ -76,7 +77,7 @@ func addHostHandler(c *gin.Context) {
 	req.Tags = validate.NormalizeHostTags(req.Tags)
 
 	if req.Ip != "" {
-		conflicts := findHostsByIP(req.Ip, req.Mac)
+		conflicts := dnsmasq.FindHostsByIP(req.Ip, req.Mac)
 		if len(conflicts) > 0 {
 			fmt.Printf("[VALIDATION] IP duplicate detected: %d conflicts for IP %s\n", len(conflicts), req.Ip)
 			c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
@@ -84,7 +85,7 @@ func addHostHandler(c *gin.Context) {
 		}
 	}
 
-	macConflicts := findHostsByMac(req.Mac)
+	macConflicts := dnsmasq.FindHostsByMac(req.Mac)
 	if len(macConflicts) > 0 {
 		fmt.Printf("[VALIDATION] MAC duplicate detected: %d for MAC %s\n", len(macConflicts), req.Mac)
 		c.JSON(409, gin.H{"error": "mac_duplicate", "conflicts": macConflicts})
@@ -113,7 +114,7 @@ func addHostHandler(c *gin.Context) {
 			newLines = append(newLines, line)
 		}
 	}
-	newLines = append(newLines, formatDhcpHostLine(req))
+	newLines = append(newLines, dnsmasq.FormatDhcpHostLine(req))
 
 	if err := os.WriteFile(req.File, []byte(strings.Join(newLines, "\n")+"\n"), 0644); err != nil {
 		c.JSON(500, gin.H{"error": "file_write_error"})
@@ -174,13 +175,13 @@ func bulkAddHostsHandler(c *gin.Context) {
 
 	for _, h := range req.Hosts {
 		if h.Ip != "" {
-			conflicts := findHostsByIP(h.Ip, h.Mac)
+			conflicts := dnsmasq.FindHostsByIP(h.Ip, h.Mac)
 			if len(conflicts) > 0 {
 				c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
 				return
 			}
 		}
-		macConflicts := findHostsByMac(h.Mac)
+		macConflicts := dnsmasq.FindHostsByMac(h.Mac)
 		if len(macConflicts) > 0 {
 			c.JSON(409, gin.H{"error": "mac_duplicate", "conflicts": macConflicts})
 			return
@@ -229,7 +230,7 @@ func bulkAddHostsHandler(c *gin.Context) {
 
 	for _, h := range req.Hosts {
 		if newMacs[strings.ToLower(h.Mac)] {
-			newLines = append(newLines, formatDhcpHostLine(h))
+			newLines = append(newLines, dnsmasq.FormatDhcpHostLine(h))
 		}
 	}
 
@@ -316,8 +317,8 @@ func deleteHostHandler(c *gin.Context) {
 }
 
 func exportCSVHandler(c *gin.Context) {
-	hosts := readAllHosts()
-	csvData := hostsToCSV(hosts)
+	hosts := dnsmasq.ReadAllHosts()
+	csvData := dnsmasq.HostsToCSV(hosts)
 	c.Header("Content-Disposition", "attachment; filename=intermasq_hosts.csv")
 	c.Data(200, "text/csv", csvData)
 }
@@ -342,7 +343,7 @@ func importCSVHandler(c *gin.Context) {
 	}
 	defer f.Close()
 
-	hosts, err := parseCSVHosts(f, targetFile)
+	hosts, err := dnsmasq.ParseCSVHosts(f, targetFile)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "invalid_csv"})
 		return
@@ -363,12 +364,12 @@ func importCSVHandler(c *gin.Context) {
 	}
 
 	for _, h := range hosts {
-		conflicts := findHostsByIP(h.Ip, h.Mac)
+		conflicts := dnsmasq.FindHostsByIP(h.Ip, h.Mac)
 		if len(conflicts) > 0 {
 			c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
 			return
 		}
-		macConflicts := findHostsByMac(h.Mac)
+		macConflicts := dnsmasq.FindHostsByMac(h.Mac)
 		if len(macConflicts) > 0 {
 			c.JSON(409, gin.H{"error": "mac_duplicate", "conflicts": macConflicts})
 			return
@@ -414,7 +415,7 @@ func importCSVHandler(c *gin.Context) {
 	}
 
 	for _, h := range hosts {
-		newLines = append(newLines, formatDhcpHostLine(h))
+		newLines = append(newLines, dnsmasq.FormatDhcpHostLine(h))
 	}
 
 	if err := os.WriteFile(targetFile, []byte(strings.Join(newLines, "\n")+"\n"), 0644); err != nil {
@@ -465,13 +466,13 @@ func bulkMoveHandler(c *gin.Context) {
 	skipped := []string{}
 
 	for _, h := range req.Hosts {
-		existing := readHostByMac(h.File, h.Mac)
+		existing := dnsmasq.ReadHostByMac(h.File, h.Mac)
 		if existing == nil {
 			skipped = append(skipped, h.Mac)
 			continue
 		}
 
-		ipConflicts := findHostsByIP(existing.Ip, existing.Mac)
+		ipConflicts := dnsmasq.FindHostsByIP(existing.Ip, existing.Mac)
 		hasConflictInTarget := false
 		for _, cf := range ipConflicts {
 			if cf.File == req.Target {
@@ -484,7 +485,7 @@ func bulkMoveHandler(c *gin.Context) {
 			continue
 		}
 
-		macConflicts := findHostsByMac(existing.Mac)
+		macConflicts := dnsmasq.FindHostsByMac(existing.Mac)
 		hasMacInTarget := false
 		for _, cf := range macConflicts {
 			if cf.File == req.Target {
@@ -532,7 +533,7 @@ func bulkEditHandler(c *gin.Context) {
 		return
 	}
 
-	transform, err := parseIPTransform(req.IPTransform.OldPrefix, req.IPTransform.NewPrefix)
+	transform, err := dnsmasq.ParseIPTransform(req.IPTransform.OldPrefix, req.IPTransform.NewPrefix)
 	if err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
@@ -558,13 +559,13 @@ func bulkEditHandler(c *gin.Context) {
 	seenNewIPs := make(map[string]string)
 
 	for _, h := range req.Hosts {
-		existing := readHostByMac(h.File, h.Mac)
+		existing := dnsmasq.ReadHostByMac(h.File, h.Mac)
 		if existing == nil {
 			c.JSON(404, gin.H{"error": "host_not_found", "mac": h.Mac})
 			return
 		}
 
-		newIP, err := transform.apply(existing.Ip)
+		newIP, err := transform.Apply(existing.Ip)
 		if err != nil {
 			c.JSON(400, gin.H{"error": err.Error(), "mac": h.Mac, "old_ip": existing.Ip})
 			return
@@ -592,7 +593,7 @@ func bulkEditHandler(c *gin.Context) {
 		}
 		seenNewIPs[newIP] = existing.Mac
 
-		conflicts := findHostsByIP(newIP, existing.Mac)
+		conflicts := dnsmasq.FindHostsByIP(newIP, existing.Mac)
 		if len(conflicts) > 0 {
 			c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
 			return
@@ -715,7 +716,7 @@ func applyTemplateHandler(c *gin.Context) {
 		return
 	}
 
-	ip, err := findFreeIP(tpl.IPRange)
+	ip, err := dnsmasq.FindFreeIP(tpl.IPRange)
 	if err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return

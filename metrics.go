@@ -27,6 +27,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 
+	"intermask/internal/dnsmasq"
 	"intermask/internal/stats"
 )
 
@@ -56,7 +57,7 @@ func metricsHandler(c *gin.Context) {
 		return
 	}
 
-	hosts := readAllHosts()
+	hosts := dnsmasq.ReadAllHosts()
 	leases := parseLeases()
 	arp := getArpTable()
 	active := checkDnsmasqStatus()
@@ -155,7 +156,7 @@ var dnsResolver = func(ctx context.Context, domain string) ([]string, error) {
 }
 
 func runDNSHealthPass() {
-	aliases := readAllAliases()
+	aliases := dnsmasq.ReadAllAliases()
 	if len(aliases) == 0 {
 		return
 	}

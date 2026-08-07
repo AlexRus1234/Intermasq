@@ -22,17 +22,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 	"time"
 
-	"intermask/internal/bins"
+	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
 
 	"github.com/gin-gonic/gin"
@@ -108,7 +106,7 @@ func TestParseArpContentUppercaseMac(t *testing.T) {
 // which would let a sibling directory whose name shares a prefix with ConfigDir
 // pass as "inside". Mutate isSafePath that way and this case fails.
 func TestIsSafePath(t *testing.T) {
-	*ConfigDir = "/etc/dnsmasq.d"
+	*dnsmasq.ConfigDir = "/etc/dnsmasq.d"
 	tests := []struct {
 		path     string
 		expected bool
@@ -226,325 +224,16 @@ func TestSysVinitCaller(t *testing.T) {
 	}
 }
 
-func TestParseDhcpRangeClassic(t *testing.T) {
-	r := parseDhcpRange("192.168.1.50,192.168.1.150,255.255.255.0,12h", "/etc/dnsmasq.d/x.conf", 1)
-	if r.Start != "192.168.1.50" || r.End != "192.168.1.150" || r.Mask != "255.255.255.0" || r.LeaseTime != "12h" {
-		t.Errorf("unexpected range: %+v", r)
-	}
-	if r.CIDR != "192.168.1.0/24" {
-		t.Errorf("CIDR = %q, want 192.168.1.0/24", r.CIDR)
-	}
-}
-
-func TestParseDhcpRangeCIDRForm(t *testing.T) {
-	r := parseDhcpRange("192.168.0.0/24,1h", "/etc/dnsmasq.d/x.conf", 1)
-	if r.Mask != "192.168.0.0/24" || r.LeaseTime != "1h" {
-		t.Errorf("unexpected range: %+v", r)
-	}
-	if r.CIDR != "192.168.0.0/24" {
-		t.Errorf("CIDR = %q, want 192.168.0.0/24", r.CIDR)
-	}
-}
-
-func TestParseDhcpRangeTagged(t *testing.T) {
-	r := parseDhcpRange("set:corp,192.168.1.10,192.168.1.100,255.255.255.0,2h", "/etc/dnsmasq.d/x.conf", 1)
-	if r.Tag != "corp" || r.Start != "192.168.1.10" || r.End != "192.168.1.100" {
-		t.Errorf("unexpected range: %+v", r)
-	}
-	if r.CIDR != "192.168.1.0/24" {
-		t.Errorf("CIDR = %q, want 192.168.1.0/24", r.CIDR)
-	}
-}
-
-func TestParseDhcpRangeNoMask(t *testing.T) {
-	r := parseDhcpRange("10.0.0.5,10.0.0.20,6h", "/etc/dnsmasq.d/x.conf", 1)
-	if r.Start != "10.0.0.5" || r.End != "10.0.0.20" || r.LeaseTime != "6h" {
-		t.Errorf("unexpected range: %+v", r)
-	}
-	if r.Mask != "" {
-		t.Errorf("Mask should be empty, got %q", r.Mask)
-	}
-	if r.CIDR != "" {
-		t.Errorf("CIDR should be empty when mask missing, got %q", r.CIDR)
-	}
-}
-
-func TestDhcpRangeToCIDRIPv6Rejected(t *testing.T) {
-	r := DhcpRange{Start: "::1", Mask: "ffff:ffff::"}
-	if c := dhcpRangeToCIDR(r); c != "" {
-		t.Errorf("ipv6 should yield empty CIDR, got %q", c)
-	}
-}
-
-func TestSerializeConfigFilePreservesDhcpHosts(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "x.conf")
-	initial := []byte("# header comment\n\ndhcp-host=aa:bb:cc:dd:ee:ff,host1,192.168.1.10\nserver=8.8.8.8\n")
-	if err := os.WriteFile(path, initial, 0644); err != nil {
-		t.Fatal(err)
-	}
-	out, err := serializeConfigFile(path, []Directive{
-		{Key: "domain", Value: "lan", Active: true},
-		{Key: "server", Value: "1.1.1.1", Active: true},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := string(out)
-	if !strings.Contains(s, "dhcp-host=aa:bb:cc:dd:ee:ff,host1,192.168.1.10") {
-		t.Errorf("dhcp-host line lost:\n%s", s)
-	}
-	if !strings.Contains(s, "# header comment") {
-		t.Errorf("header comment lost:\n%s", s)
-	}
-	if !strings.Contains(s, "domain=lan") {
-		t.Errorf("new directive missing:\n%s", s)
-	}
-	if !strings.Contains(s, "server=1.1.1.1") {
-		t.Errorf("server override missing:\n%s", s)
-	}
-	if strings.Contains(s, "server=8.8.8.8") {
-		t.Errorf("old server should be replaced:\n%s", s)
-	}
-}
-
-func TestSerializeConfigFileInactiveDirective(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "x.conf")
-	if err := os.WriteFile(path, []byte(""), 0644); err != nil {
-		t.Fatal(err)
-	}
-	out, err := serializeConfigFile(path, []Directive{
-		{Key: "no-resolv", Value: "", Active: false},
-		{Key: "domain", Value: "lan", Active: true},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := string(out)
-	if !strings.Contains(s, "#no-resolv") {
-		t.Errorf("inactive directive should be prefixed with #:\n%s", s)
-	}
-	if strings.Contains(s, "\nno-resolv\n") {
-		t.Errorf("inactive directive should not be active:\n%s", s)
-	}
-	if !strings.Contains(s, "domain=lan") {
-		t.Errorf("active directive missing:\n%s", s)
-	}
-}
-
-func TestReadConfigSnapshotFiltersDhcpHost(t *testing.T) {
-	dir := t.TempDir()
-	*ConfigDir = dir
-	path := filepath.Join(dir, "net.conf")
-	content := []byte("dhcp-host=11:22:33:44:55:66,h,10.0.0.1\nserver=8.8.8.8\nno-resolv\n#domain-needed\n# plain comment\n")
-	if err := os.WriteFile(path, content, 0644); err != nil {
-		t.Fatal(err)
-	}
-	snap := readConfigSnapshot()
-	if len(snap.Files) != 1 {
-		t.Fatalf("expected 1 file, got %d", len(snap.Files))
-	}
-	for _, d := range snap.Files[0].Directives {
-		if d.Key == "dhcp-host" {
-			t.Errorf("dhcp-host should be filtered out: %+v", d)
-		}
-	}
-	hasServer := false
-	hasNoResolv := false
-	hasDomainNeededInactive := false
-	for _, d := range snap.Files[0].Directives {
-		if d.Key == "server" && d.Value == "8.8.8.8" && d.Active {
-			hasServer = true
-		}
-		if d.Key == "no-resolv" && d.Active {
-			hasNoResolv = true
-		}
-		if d.Key == "domain-needed" && !d.Active {
-			hasDomainNeededInactive = true
-		}
-	}
-	if !hasServer {
-		t.Error("active server directive missing")
-	}
-	if !hasNoResolv {
-		t.Error("active no-resolv directive missing")
-	}
-	if !hasDomainNeededInactive {
-		t.Error("inactive domain-needed directive missing")
-	}
-}
-
-func TestReadConfigSnapshotDhcpRanges(t *testing.T) {
-	dir := t.TempDir()
-	*ConfigDir = dir
-	path := filepath.Join(dir, "net.conf")
-	content := []byte("dhcp-range=192.168.1.50,192.168.1.150,255.255.255.0,12h\ndhcp-range=set:guest,10.0.0.10,10.0.0.50,255.255.255.0,2h\n")
-	if err := os.WriteFile(path, content, 0644); err != nil {
-		t.Fatal(err)
-	}
-	snap := readConfigSnapshot()
-	if len(snap.DhcpRanges) != 2 {
-		t.Fatalf("expected 2 dhcp ranges, got %d", len(snap.DhcpRanges))
-	}
-	if snap.DhcpRanges[0].CIDR != "192.168.1.0/24" {
-		t.Errorf("first CIDR = %q", snap.DhcpRanges[0].CIDR)
-	}
-	if snap.DhcpRanges[1].Tag != "guest" || snap.DhcpRanges[1].CIDR != "10.0.0.0/24" {
-		t.Errorf("second range wrong: %+v", snap.DhcpRanges[1])
-	}
-}
-
-func TestDetectDhcpRangesCIDRDedup(t *testing.T) {
-	dir := t.TempDir()
-	*ConfigDir = dir
-	path := filepath.Join(dir, "net.conf")
-	content := []byte("dhcp-range=192.168.1.50,192.168.1.150,255.255.255.0,12h\ndhcp-range=192.168.1.200,192.168.1.250,255.255.255.0,1h\n")
-	if err := os.WriteFile(path, content, 0644); err != nil {
-		t.Fatal(err)
-	}
-	cidrs := detectDhcpRangesCIDR()
-	if len(cidrs) != 1 || cidrs[0] != "192.168.1.0/24" {
-		t.Errorf("expected deduped [192.168.1.0/24], got %v", cidrs)
-	}
-}
-
-func TestSerializeConfigFileGroupOrder(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "x.conf")
-	if err := os.WriteFile(path, []byte(""), 0644); err != nil {
-		t.Fatal(err)
-	}
-	out, err := serializeConfigFile(path, []Directive{
-		{Key: "log-queries", Value: "", Active: true},
-		{Key: "dhcp-option", Value: "3,192.168.1.1", Active: true},
-		{Key: "domain", Value: "lan", Active: true},
-		{Key: "server", Value: "8.8.8.8", Active: true},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := string(out)
-	domainIdx := strings.Index(s, "domain=lan")
-	serverIdx := strings.Index(s, "server=8.8.8.8")
-	dhcpOptIdx := strings.Index(s, "dhcp-option=3,192.168.1.1")
-	logIdx := strings.Index(s, "log-queries")
-	if !(domainIdx < serverIdx && serverIdx < dhcpOptIdx && dhcpOptIdx < logIdx) {
-		t.Errorf("directives not grouped in dns<dhcp<log order:\n%s", s)
-	}
-}
-
-func TestParseAliasLineA(t *testing.T) {
-	e, ok := parseAliasLine("address=/nas.lan/192.168.1.10", "/etc/dnsmasq.d/x.conf", false)
-	if !ok {
-		t.Fatal("expected parse success")
-	}
-	if e.Type != "A" || e.Domain != "nas.lan" || e.Target != "192.168.1.10" {
-		t.Errorf("unexpected entry: %+v", e)
-	}
-}
-
-func TestParseAliasLineCNAME(t *testing.T) {
-	e, ok := parseAliasLine("cname=wiki,nas.lan", "/etc/dnsmasq.d/x.conf", false)
-	if !ok {
-		t.Fatal("expected parse success")
-	}
-	if e.Type != "CNAME" || e.Domain != "wiki" || e.Target != "nas.lan" {
-		t.Errorf("unexpected entry: %+v", e)
-	}
-}
-
-func TestParseAliasLineCNAMEWithTag(t *testing.T) {
-	e, ok := parseAliasLine("cname=wiki,nas.lan,tag:lan", "/etc/dnsmasq.d/x.conf", false)
-	if !ok {
-		t.Fatal("expected parse success for tagged cname")
-	}
-	if e.Type != "CNAME" || e.Domain != "wiki" || e.Target != "nas.lan" {
-		t.Errorf("unexpected entry: %+v", e)
-	}
-}
-
-func TestParseAliasLineRejectsWildcard(t *testing.T) {
-	if _, ok := parseAliasLine("address=/#/10.0.0.1", "", false); ok {
-		t.Error("wildcard # should be rejected")
-	}
-	if _, ok := parseAliasLine("address=/*.evil/10.0.0.1", "", false); ok {
-		t.Error("wildcard *.evil should be rejected")
-	}
-}
-
-func TestParseAliasLineRejectsMalformed(t *testing.T) {
-	if _, ok := parseAliasLine("address=/nas.lan", "", false); ok {
-		t.Error("missing closing slash should fail")
-	}
-	if _, ok := parseAliasLine("address=/nas.lan/", "", false); ok {
-		t.Error("empty target should fail")
-	}
-	if _, ok := parseAliasLine("cname=onlyalias", "", false); ok {
-		t.Error("cname without target should fail")
-	}
-}
-
-func TestAliasToLineRoundTrip(t *testing.T) {
-	cases := []DnsAliasEntry{
-		{Type: "A", Domain: "nas.lan", Target: "192.168.1.10"},
-		{Type: "CNAME", Domain: "wiki", Target: "nas.lan"},
-	}
-	for _, in := range cases {
-		line := aliasToLine(in)
-		out, ok := parseAliasLine(line, "", false)
-		if !ok {
-			t.Errorf("round-trip failed for %+v: line=%q", in, line)
-			continue
-		}
-		out.File = in.File
-		if out != in {
-			t.Errorf("round-trip mismatch:\n in=%+v\nout=%+v", in, out)
-		}
-	}
-}
-
-func TestReadAllAliases(t *testing.T) {
-	dir := t.TempDir()
-	*ConfigDir = dir
-	path := filepath.Join(dir, "dns.conf")
-	content := []byte("address=/nas.lan/192.168.1.10\ncname=wiki,nas.lan\nserver=8.8.8.8\n")
-	if err := os.WriteFile(path, content, 0644); err != nil {
-		t.Fatal(err)
-	}
-	aliases := readAllAliases()
-	if len(aliases) != 2 {
-		t.Fatalf("expected 2 aliases, got %d: %+v", len(aliases), aliases)
-	}
-	if aliases[0].Type != "A" || aliases[0].Domain != "nas.lan" {
-		t.Errorf("first alias wrong: %+v", aliases[0])
-	}
-	if aliases[1].Type != "CNAME" || aliases[1].Domain != "wiki" {
-		t.Errorf("second alias wrong: %+v", aliases[1])
-	}
-}
-
-func TestReadAllAliasesHasBakMarker(t *testing.T) {
-	dir := t.TempDir()
-	*ConfigDir = dir
-	path := filepath.Join(dir, "dns.conf")
-	if err := os.WriteFile(path, []byte("address=/a.b/1.2.3.4\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path+".bak", []byte("old\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	aliases := readAllAliases()
-	if len(aliases) != 1 {
-		t.Fatalf("expected 1 alias, got %d", len(aliases))
-	}
-	if !strings.HasSuffix(aliases[0].File, "|has_bak") {
-		t.Errorf("expected |has_bak marker, got %q", aliases[0].File)
-	}
-	if cleanAliasFile(aliases[0].File) != path {
-		t.Errorf("cleanAliasFile wrong: got %q want %q", cleanAliasFile(aliases[0].File), path)
-	}
-}
+// Migrated to internal/dnsmasq:
+//   TestParseDhcpRangeClassic, TestParseDhcpRangeCIDRForm,
+//   TestParseDhcpRangeTagged, TestParseDhcpRangeNoMask,
+//   TestDhcpRangeToCIDRIPv6Rejected, TestSerializeConfigFilePreservesDhcpHosts,
+//   TestSerializeConfigFileInactiveDirective, TestReadConfigSnapshotFiltersDhcpHost,
+//   TestReadConfigSnapshotDhcpRanges, TestDetectDhcpRangesCIDRDedup,
+//   TestSerializeConfigFileGroupOrder, TestParseAliasLineA, TestParseAliasLineCNAME,
+//   TestParseAliasLineCNAMEWithTag, TestParseAliasLineRejectsWildcard,
+//   TestParseAliasLineRejectsMalformed, TestAliasToLineRoundTrip,
+//   TestReadAllAliases, TestReadAllAliasesHasBakMarker.
 
 func TestRemoveAliasLine(t *testing.T) {
 	dir := t.TempDir()
@@ -588,56 +277,15 @@ func TestRemoveAliasLineNotFound(t *testing.T) {
 	}
 }
 
-func TestSerializeConfigFilePreservesAliases(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "x.conf")
-	initial := []byte("# header\n\naddress=/nas.lan/192.168.1.10\ncname=wiki,nas.lan\nserver=8.8.8.8\n")
-	if err := os.WriteFile(path, initial, 0644); err != nil {
-		t.Fatal(err)
-	}
-	out, err := serializeConfigFile(path, []Directive{
-		{Key: "domain", Value: "lan", Active: true},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := string(out)
-	if !strings.Contains(s, "address=/nas.lan/192.168.1.10") {
-		t.Errorf("alias A lost:\n%s", s)
-	}
-	if !strings.Contains(s, "cname=wiki,nas.lan") {
-		t.Errorf("cname lost:\n%s", s)
-	}
-	if !strings.Contains(s, "domain=lan") {
-		t.Errorf("new directive missing:\n%s", s)
-	}
-}
-
-func TestReadConfigSnapshotFiltersAliases(t *testing.T) {
-	dir := t.TempDir()
-	*ConfigDir = dir
-	path := filepath.Join(dir, "net.conf")
-	content := []byte("address=/nas.lan/192.168.1.10\ncname=wiki,nas.lan\nserver=8.8.8.8\n")
-	if err := os.WriteFile(path, content, 0644); err != nil {
-		t.Fatal(err)
-	}
-	snap := readConfigSnapshot()
-	if len(snap.Files) != 1 {
-		t.Fatalf("expected 1 file, got %d", len(snap.Files))
-	}
-	for _, d := range snap.Files[0].Directives {
-		if d.Key == "address" || d.Key == "cname" {
-			t.Errorf("alias directive should be filtered out: %+v", d)
-		}
-	}
-}
+// Migrated to internal/dnsmasq:
+//   TestSerializeConfigFilePreservesAliases, TestReadConfigSnapshotFiltersAliases.
 
 // setupHistoryEnv prepares temp ConfigDir and HistoryDir for history tests.
 func setupHistoryEnv(t *testing.T) (confDir, histDir string) {
 	t.Helper()
 	confDir = t.TempDir()
 	histDir = t.TempDir()
-	*ConfigDir = confDir
+	*dnsmasq.ConfigDir = confDir
 	*HistoryDir = histDir
 	*HistoryDepth = 10
 	return confDir, histDir
@@ -781,7 +429,7 @@ func TestUnifiedDiffEmptyA(t *testing.T) {
 
 func TestReadFileRaw(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	path := filepath.Join(dir, "raw.conf")
 	os.WriteFile(path, []byte("server=1.2.3.4\n"), 0644)
 	content, err := readFileRaw(path)
@@ -795,7 +443,7 @@ func TestReadFileRaw(t *testing.T) {
 
 func TestReadFileRawUnsafePath(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	_, err := readFileRaw("/etc/passwd")
 	if err != os.ErrPermission {
 		t.Errorf("expected ErrPermission, got %v", err)
@@ -804,7 +452,7 @@ func TestReadFileRawUnsafePath(t *testing.T) {
 
 func TestReadFileRawNotExist(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	path := filepath.Join(dir, "nope.conf")
 	_, err := readFileRaw(path)
 	if err == nil {
@@ -814,7 +462,7 @@ func TestReadFileRawNotExist(t *testing.T) {
 
 func TestWriteFileRaw(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	*HistoryDir = t.TempDir()
 	*HistoryDepth = 5
 	path := filepath.Join(dir, "writetest.conf")
@@ -828,7 +476,7 @@ func TestWriteFileRaw(t *testing.T) {
 
 func TestWriteFileRawUnsafePath(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	err := writeFileRaw("/etc/passwd", []byte("x"))
 	if err != os.ErrPermission {
 		t.Errorf("expected ErrPermission, got %v", err)
@@ -1028,7 +676,7 @@ func TestChangePasswordWrongOld(t *testing.T) {
 
 func TestGetNewDevicesAllInStatic(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	*ArpPath = filepath.Join(dir, "arp")
 	*LeasesPath = filepath.Join(dir, "leases")
 	os.WriteFile(*ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
@@ -1041,7 +689,7 @@ func TestGetNewDevicesAllInStatic(t *testing.T) {
 
 func TestGetNewDevicesAllInHosts(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	*ArpPath = filepath.Join(dir, "arp")
 	*LeasesPath = filepath.Join(dir, "leases")
 	os.WriteFile(*ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
@@ -1055,7 +703,7 @@ func TestGetNewDevicesAllInHosts(t *testing.T) {
 
 func TestGetNewDevicesUnknown(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	*ArpPath = filepath.Join(dir, "arp")
 	*LeasesPath = filepath.Join(dir, "leases")
 	os.WriteFile(*ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
@@ -1071,7 +719,7 @@ func TestGetNewDevicesUnknown(t *testing.T) {
 
 func TestGetNewDevicesEmpty(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	*ArpPath = filepath.Join(dir, "arp")
 	*LeasesPath = filepath.Join(dir, "leases")
 	os.WriteFile(*ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n"), 0644)
@@ -1086,7 +734,7 @@ func TestGetNewDevicesEmpty(t *testing.T) {
 
 func TestBulkLeaseToStatic(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "hosts.conf")
 	os.WriteFile(file, []byte(""), 0644)
 	body := `{"leases":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"192.168.1.1","hostname":"testhost"}],"file":"` + strings.ReplaceAll(file, "\\", "\\\\") + `"}`
@@ -1107,7 +755,7 @@ func TestBulkLeaseToStatic(t *testing.T) {
 
 func TestBulkLeaseToStaticMacConflict(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "hosts.conf")
 	os.WriteFile(file, []byte("dhcp-host=aa:bb:cc:dd:ee:ff,existing,1.2.3.4\n"), 0644)
 	body := `{"leases":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"192.168.1.1","hostname":"new"}],"file":"` + strings.ReplaceAll(file, "\\", "\\\\") + `"}`
@@ -1124,7 +772,7 @@ func TestBulkLeaseToStaticMacConflict(t *testing.T) {
 
 func TestBulkLeaseToStaticInvalidMac(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "hosts.conf")
 	os.WriteFile(file, []byte(""), 0644)
 	body := `{"leases":[{"mac":"bad","ip":"192.168.1.1"}],"file":"` + strings.ReplaceAll(file, "\\", "\\\\") + `"}`
@@ -1141,7 +789,7 @@ func TestBulkLeaseToStaticInvalidMac(t *testing.T) {
 
 func TestBulkLeaseToStaticEmpty(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "hosts.conf")
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -1156,7 +804,7 @@ func TestBulkLeaseToStaticEmpty(t *testing.T) {
 
 func TestBulkLeaseToStaticUnsafePath(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/api/leases/to-static", strings.NewReader(`{"leases":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"192.168.1.1"}],"file":"/etc/passwd"}`))
@@ -1170,7 +818,7 @@ func TestBulkLeaseToStaticUnsafePath(t *testing.T) {
 
 func TestBulkLeaseToStaticDefaultHostname(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "hosts.conf")
 	os.WriteFile(file, []byte(""), 0644)
 	body := `{"leases":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"192.168.1.1","hostname":"*"}],"file":"` + strings.ReplaceAll(file, "\\", "\\\\") + `"}`
@@ -1204,7 +852,7 @@ func makeTestZip(entries map[string]string) []byte {
 
 func TestRestoreBackupZipValid(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	zipData := makeTestZip(map[string]string{
 		"hosts.conf": "dhcp-host=aa:bb:cc:dd:ee:ff,host1,1.2.3.4\n",
 	})
@@ -1217,7 +865,7 @@ func TestRestoreBackupZipValid(t *testing.T) {
 
 func TestRestoreBackupZipCreatesRestoreBak(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	os.WriteFile(filepath.Join(dir, "hosts.conf"), []byte("old content\n"), 0644)
 	zipData := makeTestZip(map[string]string{
 		"hosts.conf": "new content\n",
@@ -1231,7 +879,7 @@ func TestRestoreBackupZipCreatesRestoreBak(t *testing.T) {
 
 func TestRestoreBackupZipNoConfFiles(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	zipData := makeTestZip(map[string]string{
 		"notes.txt": "hello\n",
 	})
@@ -1243,7 +891,7 @@ func TestRestoreBackupZipNoConfFiles(t *testing.T) {
 
 func TestRestoreBackupZipInvalidData(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	err := restoreBackupZip([]byte("not a zip file"))
 	if err == nil || !strings.Contains(err.Error(), "invalid_zip") {
 		t.Errorf("expected invalid_zip error, got %v", err)
@@ -1252,7 +900,7 @@ func TestRestoreBackupZipInvalidData(t *testing.T) {
 
 func TestRestoreBackupZipIgnoresUnsafeNames(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	zipData := makeTestZip(map[string]string{
 		"../evil.conf": "bad\n",
 		"hosts.conf":   "good\n",
@@ -1521,7 +1169,7 @@ func TestEventsHandlerStreamsSSE(t *testing.T) {
 
 func TestGetFileHandlerRejectsNonConf(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hi"), 0644)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -1535,7 +1183,7 @@ func TestGetFileHandlerRejectsNonConf(t *testing.T) {
 
 func TestGetFileHandlerRejectsPathSeparator(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/api/files/sub/x.conf", nil)
@@ -1548,7 +1196,7 @@ func TestGetFileHandlerRejectsPathSeparator(t *testing.T) {
 
 func TestGetFileHandlerSuccess(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	os.WriteFile(filepath.Join(dir, "x.conf"), []byte("server=1.2.3.4\n"), 0644)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -1565,7 +1213,7 @@ func TestGetFileHandlerSuccess(t *testing.T) {
 
 func TestGetFileHandlerMissing(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("GET", "/api/files/missing.conf", nil)
@@ -1592,7 +1240,7 @@ func TestGetFileHandlerRejectsUnsafePath(t *testing.T) {
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			*ConfigDir = dir
+			*dnsmasq.ConfigDir = dir
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
 			c.Request = httptest.NewRequest("GET", "/api/files/x.conf", nil)
@@ -1613,10 +1261,10 @@ func TestGetFileHandlerRejectsUnsafePath(t *testing.T) {
 // TestCreateConfigFileHandlerEachTemplate проверяет, что каждый зарегистрированный
 // шаблон корректно записывается в файл при выборе через POST /api/config/file.
 func TestCreateConfigFileHandlerEachTemplate(t *testing.T) {
-	for _, tpl := range knownConfigTemplateIDs() {
+	for _, tpl := range dnsmasq.KnownConfigTemplateIDs() {
 		t.Run(tpl, func(t *testing.T) {
 			dir := t.TempDir()
-			*ConfigDir = dir
+			*dnsmasq.ConfigDir = dir
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
 			body := fmt.Sprintf(`{"name":"test_%s.conf","template":"%s"}`, tpl, tpl)
@@ -1631,8 +1279,8 @@ func TestCreateConfigFileHandlerEachTemplate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(content) != configTemplates[tpl] {
-				t.Errorf("content mismatch for template %q:\nwant:\n%s\ngot:\n%s", tpl, configTemplates[tpl], string(content))
+			if string(content) != dnsmasq.ConfigTemplates[tpl] {
+				t.Errorf("content mismatch for template %q:\nwant:\n%s\ngot:\n%s", tpl, dnsmasq.ConfigTemplates[tpl], string(content))
 			}
 		})
 	}
@@ -1642,7 +1290,7 @@ func TestCreateConfigFileHandlerEachTemplate(t *testing.T) {
 // запроса эквивалентно template="empty" (обратная совместимость).
 func TestCreateConfigFileHandlerEmptyTemplateDefault(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/api/config/file", strings.NewReader(`{"name":"x.conf"}`))
@@ -1653,7 +1301,7 @@ func TestCreateConfigFileHandlerEmptyTemplateDefault(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	content, _ := os.ReadFile(filepath.Join(dir, "x.conf"))
-	if string(content) != configTemplates["empty"] {
+	if string(content) != dnsmasq.ConfigTemplates["empty"] {
 		t.Errorf("default template not 'empty':\n%s", string(content))
 	}
 }
@@ -1662,7 +1310,7 @@ func TestCreateConfigFileHandlerEmptyTemplateDefault(t *testing.T) {
 // 400 + список доступных в поле available (нужно для подсказки в UI).
 func TestCreateConfigFileHandlerUnknownTemplate(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/api/config/file", strings.NewReader(`{"name":"x.conf","template":"nonexistent"}`))
@@ -1680,8 +1328,8 @@ func TestCreateConfigFileHandlerUnknownTemplate(t *testing.T) {
 		t.Errorf("expected error=unknown_template, got %v", resp["error"])
 	}
 	avail, _ := resp["available"].([]interface{})
-	if len(avail) != len(configTemplates) {
-		t.Errorf("expected %d available templates, got %v", len(configTemplates), avail)
+	if len(avail) != len(dnsmasq.ConfigTemplates) {
+		t.Errorf("expected %d available templates, got %v", len(dnsmasq.ConfigTemplates), avail)
 	}
 	// файл не должен быть создан при ошибке
 	if _, err := os.Stat(filepath.Join(dir, "x.conf")); !os.IsNotExist(err) {
@@ -1693,7 +1341,7 @@ func TestCreateConfigFileHandlerUnknownTemplate(t *testing.T) {
 // "basic-dhcp" дают одинаковый результат (нормализация через ToLower).
 func TestCreateConfigFileHandlerTemplateCaseInsensitive(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/api/config/file", strings.NewReader(`{"name":"x.conf","template":"Basic-DHCP"}`))
@@ -1704,7 +1352,7 @@ func TestCreateConfigFileHandlerTemplateCaseInsensitive(t *testing.T) {
 		t.Fatalf("expected 200 for uppercase template, got %d: %s", w.Code, w.Body.String())
 	}
 	content, _ := os.ReadFile(filepath.Join(dir, "x.conf"))
-	if string(content) != configTemplates["basic-dhcp"] {
+	if string(content) != dnsmasq.ConfigTemplates["basic-dhcp"] {
 		t.Errorf("case-insensitive lookup failed:\n%s", string(content))
 	}
 }
@@ -1713,7 +1361,7 @@ func TestCreateConfigFileHandlerTemplateCaseInsensitive(t *testing.T) {
 // должны молча обрезаться (защита от копипаста " basic-dhcp ").
 func TestCreateConfigFileHandlerTemplateWhitespace(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest("POST", "/api/config/file", strings.NewReader(`{"name":"x.conf","template":"  forwarder  "}`))
@@ -1724,7 +1372,7 @@ func TestCreateConfigFileHandlerTemplateWhitespace(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	content, _ := os.ReadFile(filepath.Join(dir, "x.conf"))
-	if string(content) != configTemplates["forwarder"] {
+	if string(content) != dnsmasq.ConfigTemplates["forwarder"] {
 		t.Errorf("whitespace trim failed:\n%s", string(content))
 	}
 }
@@ -1733,7 +1381,7 @@ func TestCreateConfigFileHandlerTemplateWhitespace(t *testing.T) {
 // попытка перезаписать существующий файл остаётся 409 (поведение не изменилось).
 func TestCreateConfigFileHandlerExistingFileStill409(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	existing := filepath.Join(dir, "x.conf")
 	if err := os.WriteFile(existing, []byte("old\n"), 0644); err != nil {
 		t.Fatal(err)
@@ -1754,7 +1402,7 @@ func TestCreateConfigFileHandlerExistingFileStill409(t *testing.T) {
 	}
 }
 
-// TestListConfigTemplatesHandler — каталог отдаёт все ID из configTemplates,
+// TestListConfigTemplatesHandler — каталог отдаёт все ID из dnsmasq.ConfigTemplates,
 // у каждого есть непустой preview.
 func TestListConfigTemplatesHandler(t *testing.T) {
 	w := httptest.NewRecorder()
@@ -1774,8 +1422,8 @@ func TestListConfigTemplatesHandler(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Templates) != len(configTemplates) {
-		t.Errorf("expected %d templates, got %d", len(configTemplates), len(resp.Templates))
+	if len(resp.Templates) != len(dnsmasq.ConfigTemplates) {
+		t.Errorf("expected %d templates, got %d", len(dnsmasq.ConfigTemplates), len(resp.Templates))
 	}
 	seen := make(map[string]bool)
 	for _, tpl := range resp.Templates {
@@ -1787,83 +1435,23 @@ func TestListConfigTemplatesHandler(t *testing.T) {
 			t.Errorf("template %q preview missing managed header", tpl.ID)
 		}
 	}
-	for id := range configTemplates {
+	for id := range dnsmasq.ConfigTemplates {
 		if !seen[id] {
 			t.Errorf("template %q missing from response", id)
 		}
 	}
 }
 
-// TestKnownConfigTemplateIDsSorted — контракт: список отсортирован, чтобы
-// UI и проверочные тесты могли полагаться на стабильный порядок.
-func TestKnownConfigTemplateIDsSorted(t *testing.T) {
-	ids := knownConfigTemplateIDs()
-	if !sort.StringsAreSorted(ids) {
-		t.Errorf("knownConfigTemplateIDs() must be sorted: %v", ids)
-	}
-	if len(ids) != len(configTemplates) {
-		t.Errorf("len mismatch: ids=%d map=%d", len(ids), len(configTemplates))
-	}
-}
-
-// TestKnownConfigTemplateIDsContainsEmpty — "empty" обязан всегда быть в
-// списке: это дефолтный template при отсутствии поля в запросе.
-func TestKnownConfigTemplateIDsContainsEmpty(t *testing.T) {
-	if _, ok := configTemplates["empty"]; !ok {
-		t.Fatal(`"empty" template must always exist in configTemplates`)
-	}
-	ids := knownConfigTemplateIDs()
-	found := false
-	for _, id := range ids {
-		if id == "empty" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatal(`"empty" missing from knownConfigTemplateIDs()`)
-	}
-}
-
-// TestConfigTemplatesAllStartWithManagedHeader — каждый шаблон должен
-// начинаться с маркера "# === Managed by Intermasq ===", чтобы было видно
-// при чтении raw-файла, что он был создан через панель.
-func TestConfigTemplatesAllStartWithManagedHeader(t *testing.T) {
-	const marker = "# === Managed by Intermasq ==="
-	for id, content := range configTemplates {
-		if !strings.HasPrefix(content, marker) {
-			t.Errorf("template %q must start with %q", id, marker)
-		}
-	}
-}
-
-// TestConfigTemplatesValidForDnsmasqSyntax — каждый шаблон должен проходить
-// `dnsmasq --test`, чтобы последующий PUT /api/config не падал на первой
-// операции. Если dnsmasq не установлен — тест пропускается (CI без dnsmasq).
-func TestConfigTemplatesValidForDnsmasqSyntax(t *testing.T) {
-	if bins.Dnsmasq() == "" {
-		t.Skip("dnsmasq binary not installed — skipping syntax validation")
-	}
-	for id, content := range configTemplates {
-		t.Run(id, func(t *testing.T) {
-			tmp := filepath.Join(t.TempDir(), "x.conf")
-			if err := os.WriteFile(tmp, []byte(content), 0644); err != nil {
-				t.Fatal(err)
-			}
-			cmd := exec.Command(bins.Dnsmasq(), "--test", "--conf-file="+tmp)
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Errorf("template %q failed dnsmasq --test:\n%s\noutput:\n%s", id, err, out)
-			}
-		})
-	}
-}
+// Migrated to internal/dnsmasq:
+//   TestKnownConfigTemplateIDsSorted, TestKnownConfigTemplateIDsContainsEmpty,
+//   TestConfigTemplatesAllStartWithManagedHeader, TestConfigTemplatesValidForDnsmasqSyntax.
 
 // TestCreateConfigFileHandlerTemplateAuditWritten — при создании файла с
 // шаблоном в audit-лог попадает запись с полем template = выбранный ID.
 // Проверяет, что поле не теряется по пути от request до audit entry.
 func TestCreateConfigFileHandlerTemplateAuditWritten(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	auditDir := t.TempDir()
 	auditPath := filepath.Join(auditDir, "audit.log")
 	*AuditLogPath = auditPath
@@ -2009,7 +1597,7 @@ func TestSaveUsersAtomicPreservesExistingOnFailure(t *testing.T) {
 // dhcp-host=<mac> (infinite lease без имени и IP).
 func TestAddHostHandlerMacOnly(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "hosts.conf")
 	os.WriteFile(file, []byte(""), 0644)
 
@@ -2035,7 +1623,7 @@ func TestAddHostHandlerMacOnly(t *testing.T) {
 // TestAddHostHandlerMacPlusHostname — DHCP-выданный IP + DNS-имя.
 func TestAddHostHandlerMacPlusHostname(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "hosts.conf")
 	os.WriteFile(file, []byte(""), 0644)
 
@@ -2058,7 +1646,7 @@ func TestAddHostHandlerMacPlusHostname(t *testing.T) {
 // TestAddHostHandlerMacPlusIP — статический IP без DNS-имени.
 func TestAddHostHandlerMacPlusIP(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "hosts.conf")
 	os.WriteFile(file, []byte(""), 0644)
 
@@ -2082,7 +1670,7 @@ func TestAddHostHandlerMacPlusIP(t *testing.T) {
 // мусор»: невалидный IP всё ещё отвергается.
 func TestAddHostHandlerRejectsBadIP(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "hosts.conf")
 	os.WriteFile(file, []byte(""), 0644)
 
@@ -2102,7 +1690,7 @@ func TestAddHostHandlerRejectsBadIP(t *testing.T) {
 // работает как раньше.
 func TestAddHostHandlerIPDuplicateStillChecked(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "hosts.conf")
 	os.WriteFile(file, []byte("dhcp-host=11:22:33:44:55:66,existing,192.168.1.10\n"), 0644)
 
@@ -2123,7 +1711,7 @@ func TestAddHostHandlerIPDuplicateStillChecked(t *testing.T) {
 // ConfigDir with 400 invalid_data, before any field validation runs.
 func TestAddHostHandlerRejectsUnsafeFile(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 
 	cases := []struct{ name, file string }{
 		{"absolute_outside", "/etc/passwd"},
@@ -2152,7 +1740,7 @@ func TestAddHostHandlerRejectsUnsafeFile(t *testing.T) {
 // omitted so the IP-duplicate branch cannot mask the MAC check.
 func TestAddHostHandlerMACDuplicateRejected(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "hosts.conf")
 	os.WriteFile(file, []byte("dhcp-host=aa:bb:cc:dd:ee:ff,existing\n"), 0644)
 
@@ -2181,7 +1769,7 @@ func TestAddHostHandlerMACDuplicateRejected(t *testing.T) {
 func TestAddHostHandlerRejectsZeroBroadcastMAC(t *testing.T) {
 	for _, mac := range []string{"00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff"} {
 		dir := t.TempDir()
-		*ConfigDir = dir
+		*dnsmasq.ConfigDir = dir
 		file := filepath.Join(dir, "hosts.conf")
 		os.WriteFile(file, []byte(""), 0644)
 
@@ -2207,7 +1795,7 @@ func TestAddHostHandlerRejectsZeroBroadcastMAC(t *testing.T) {
 // --test passes on reload.
 func TestAddHostHandlerDashMACNormalized(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "hosts.conf")
 	os.WriteFile(file, []byte(""), 0644)
 
@@ -2232,154 +1820,12 @@ func TestAddHostHandlerDashMACNormalized(t *testing.T) {
 
 // TestParseCSVHostsNormalizesDashMAC (A4 regression) — CSV import normalises
 // dash-MACs the same way the JSON add path does.
-func TestParseCSVHostsNormalizesDashMAC(t *testing.T) {
-	csv := "mac,ip,hostname\naa-bb-cc-dd-ee-ff,10.0.0.5,x\n"
-	hosts, err := parseCSVHosts(strings.NewReader(csv), "/tmp/x.conf")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(hosts) != 1 {
-		t.Fatalf("expected 1 host, got %d", len(hosts))
-	}
-	if hosts[0].Mac != "aa:bb:cc:dd:ee:ff" {
-		t.Errorf("expected normalised MAC aa:bb:cc:dd:ee:ff, got %q", hosts[0].Mac)
-	}
-}
-
-// TestParseCSVHostsAcceptsMACOnly — CSV import тоже ослаблен: строки без IP
-// и/или без hostname принимаются.
-func TestParseCSVHostsAcceptsMACOnly(t *testing.T) {
-	csv := "mac,ip,hostname\naa:bb:cc:dd:ee:ff,,\n"
-	hosts, err := parseCSVHosts(strings.NewReader(csv), "/tmp/x.conf")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(hosts) != 1 {
-		t.Fatalf("expected 1 host (MAC only), got %d", len(hosts))
-	}
-	if hosts[0].Mac != "aa:bb:cc:dd:ee:ff" || hosts[0].Ip != "" || hosts[0].Hostname != "" {
-		t.Errorf("unexpected host: %+v", hosts[0])
-	}
-}
-
-func TestParseCSVHostsMACPlusHostname(t *testing.T) {
-	csv := "mac,ip,hostname\naa:bb:cc:dd:ee:ff,,phone\n"
-	hosts, err := parseCSVHosts(strings.NewReader(csv), "/tmp/x.conf")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(hosts) != 1 {
-		t.Fatalf("expected 1 host, got %d", len(hosts))
-	}
-	if hosts[0].Hostname != "phone" || hosts[0].Ip != "" {
-		t.Errorf("unexpected host: %+v", hosts[0])
-	}
-}
-
-// ========== Feature 4+5: PTR and TXT aliases ==========
-
-func TestParseAliasLinePTR(t *testing.T) {
-	e, ok := parseAliasLine("ptr-record=10.1.168.192.in-addr.arpa,nas.lan", "/etc/dnsmasq.d/x.conf", false)
-	if !ok {
-		t.Fatal("expected parse success for PTR")
-	}
-	if e.Type != "PTR" || e.Domain != "10.1.168.192.in-addr.arpa" || e.Target != "nas.lan" {
-		t.Errorf("unexpected PTR entry: %+v", e)
-	}
-}
-
-func TestParseAliasLineTXT(t *testing.T) {
-	e, ok := parseAliasLine("txt-record=wiki.lan,v=spf1 -all", "/etc/dnsmasq.d/x.conf", false)
-	if !ok {
-		t.Fatal("expected parse success for TXT")
-	}
-	if e.Type != "TXT" || e.Domain != "wiki.lan" || e.Target != "v=spf1 -all" {
-		t.Errorf("unexpected TXT entry: %+v", e)
-	}
-}
-
-// TestParseAliasLineTXTMultiComma — TXT-значение может содержать запятые
-// (например, DKIM с k=rsa; p=…), сплит должен быть только по первой.
-func TestParseAliasLineTXTMultiComma(t *testing.T) {
-	e, ok := parseAliasLine("txt-record=dkim._domainkey,k=rsa; p=MIGfMA0,a=test", "/etc/dnsmasq.d/x.conf", false)
-	if !ok {
-		t.Fatal("expected parse success for TXT with multiple commas")
-	}
-	if e.Target != "k=rsa; p=MIGfMA0,a=test" {
-		t.Errorf("TXT value split on wrong comma: %q", e.Target)
-	}
-}
-
-func TestAliasToLinePTR(t *testing.T) {
-	got := aliasToLine(DnsAliasEntry{Type: "PTR", Domain: "10.1.168.192.in-addr.arpa", Target: "nas.lan"})
-	if got != "ptr-record=10.1.168.192.in-addr.arpa,nas.lan" {
-		t.Errorf("PTR serialization wrong: %q", got)
-	}
-}
-
-func TestAliasToLineTXT(t *testing.T) {
-	got := aliasToLine(DnsAliasEntry{Type: "TXT", Domain: "wiki.lan", Target: "v=spf1 -all"})
-	if got != "txt-record=wiki.lan,v=spf1 -all" {
-		t.Errorf("TXT serialization wrong: %q", got)
-	}
-}
-
-func TestAliasRoundTripPTR(t *testing.T) {
-	in := DnsAliasEntry{Type: "PTR", Domain: "5.0.168.192.in-addr.arpa", Target: "host.lan"}
-	out, ok := parseAliasLine(aliasToLine(in), "", false)
-	if !ok {
-		t.Fatal("PTR round-trip failed")
-	}
-	out.File = in.File
-	if out != in {
-		t.Errorf("PTR round-trip mismatch:\n in=%+v\nout=%+v", in, out)
-	}
-}
-
-func TestAliasRoundTripTXT(t *testing.T) {
-	in := DnsAliasEntry{Type: "TXT", Domain: "host.lan", Target: "some text value"}
-	out, ok := parseAliasLine(aliasToLine(in), "", false)
-	if !ok {
-		t.Fatal("TXT round-trip failed")
-	}
-	out.File = in.File
-	if out != in {
-		t.Errorf("TXT round-trip mismatch:\n in=%+v\nout=%+v", in, out)
-	}
-}
-
-func TestIsAliasDirectiveRecognizesNewTypes(t *testing.T) {
-	if !isAliasDirective("ptr-record=foo,bar") {
-		t.Error("ptr-record= not recognized as alias directive")
-	}
-	if !isAliasDirective("txt-record=foo,bar") {
-		t.Error("txt-record= not recognized as alias directive")
-	}
-}
-
-func TestReadAllAliasesIncludesPTRAndTXT(t *testing.T) {
-	dir := t.TempDir()
-	*ConfigDir = dir
-	content := []byte("address=/nas.lan/192.168.1.10\n" +
-		"cname=wiki,nas.lan\n" +
-		"ptr-record=10.1.168.192.in-addr.arpa,nas.lan\n" +
-		"txt-record=nas.lan,v=spf1 -all\n" +
-		"server=8.8.8.8\n")
-	if err := os.WriteFile(filepath.Join(dir, "dns.conf"), content, 0644); err != nil {
-		t.Fatal(err)
-	}
-	aliases := readAllAliases()
-	if len(aliases) != 4 {
-		t.Fatalf("expected 4 aliases (A, CNAME, PTR, TXT), got %d: %+v", len(aliases), aliases)
-	}
-	types := map[string]bool{}
-	for _, a := range aliases {
-		types[a.Type] = true
-	}
-	if !types["A"] || !types["CNAME"] || !types["PTR"] || !types["TXT"] {
-		t.Errorf("missing types in readAllAliases result: %+v", types)
-	}
-}
+// Migrated to internal/dnsmasq:
+//   TestParseCSVHostsNormalizesDashMAC, TestParseCSVHostsAcceptsMACOnly,
+//   TestParseCSVHostsMACPlusHostname,
+//   TestParseAliasLinePTR, TestParseAliasLineTXT, TestParseAliasLineTXTMultiComma,
+//   TestAliasToLinePTR, TestAliasToLineTXT, TestAliasRoundTripPTR, TestAliasRoundTripTXT,
+//   TestIsAliasDirectiveRecognizesNewTypes, TestReadAllAliasesIncludesPTRAndTXT.
 
 func TestValidateAliasEntryPTRAndTXT(t *testing.T) {
 	cases := []struct {
@@ -2454,7 +1900,7 @@ func TestRemoveAliasLineTXT(t *testing.T) {
 // создаёт ptr-record= строку в файле.
 func TestAddAliasHandlerPTR(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "dns.conf")
 	os.WriteFile(file, []byte(""), 0644)
 
@@ -2478,7 +1924,7 @@ func TestAddAliasHandlerPTR(t *testing.T) {
 // создаёт txt-record= строку.
 func TestAddAliasHandlerTXT(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "dns.conf")
 	os.WriteFile(file, []byte(""), 0644)
 
@@ -2504,7 +1950,7 @@ func TestAddAliasHandlerTXT(t *testing.T) {
 // matching type+file combo, so the duplicate check saw zero conflicts.
 func TestAddAliasHandlerDuplicateRejected(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "dns.conf")
 	os.WriteFile(file, []byte("address=/nas.local/10.0.0.5\n"), 0644)
 
@@ -2532,7 +1978,7 @@ func TestAddAliasHandlerDuplicateRejected(t *testing.T) {
 // return 404 (previously it found the duplicate copy and returned 200).
 func TestDeleteAliasHandlerSecondDeleteNotFound(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	file := filepath.Join(dir, "dns.conf")
 	os.WriteFile(file, []byte("address=/nas.local/10.0.0.5\n"), 0644)
 
@@ -2554,165 +2000,12 @@ func TestDeleteAliasHandlerSecondDeleteNotFound(t *testing.T) {
 	}
 }
 
-func TestParseCSVAliasesIncludesPTRAndTXT(t *testing.T) {
-	csv := "type,domain,target\n" +
-		"A,nas.lan,192.168.1.10\n" +
-		"PTR,10.in-addr.arpa,nas.lan\n" +
-		"TXT,nas.lan,v=spf1 -all\n"
-	aliases, err := parseCSVAliases(strings.NewReader(csv), "/tmp/x.conf")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(aliases) != 3 {
-		t.Fatalf("expected 3 aliases, got %d: %+v", len(aliases), aliases)
-	}
-	if aliases[1].Type != "PTR" {
-		t.Errorf("second row should be PTR, got %s", aliases[1].Type)
-	}
-	if aliases[2].Type != "TXT" {
-		t.Errorf("third row should be TXT, got %s", aliases[2].Type)
-	}
-}
-
-// ===== Coverage sweep T-A: pure unit functions =====
-
-// TestParseIPTransform covers every error branch and the two success modes
-// (octet-prefix / CIDR / none) of parseIPTransform.
-func TestParseIPTransform(t *testing.T) {
-	cases := []struct {
-		name    string
-		old, nw string
-		wantErr string // empty => no error expected
-	}{
-		{"none", "", "", ""},
-		{"only_old_set", "10.0.0", "", "both_prefixes_required"},
-		{"only_new_set", "", "10.0.0", "both_prefixes_required"},
-		{"cidr_mismatch_only_old", "10.0.0.0/24", "10.0.0", "prefix_format_mismatch"},
-		{"cidr_mismatch_only_new", "10.0.0", "10.0.0.0/24", "prefix_format_mismatch"},
-		{"cidr_invalid_old", "nope/x", "10.0.0.0/24", "invalid_cidr"},
-		{"cidr_invalid_new", "10.0.0.0/24", "nope/x", "invalid_cidr"},
-		{"cidr_mask_mismatch", "10.0.0.0/24", "10.0.0.0/16", "prefix_mismatch"},
-		{"cidr_ipv6_old", "::1/24", "10.0.0.0/24", "ipv6_not_supported"},
-		{"cidr_ipv6_new", "10.0.0.0/24", "::1/24", "ipv6_not_supported"},
-		{"cidr_ok", "10.0.0.0/24", "10.0.1.0/24", ""},
-		{"octet_mismatched_dots", "10.0.0", "10.0", "prefix_format_mismatch"},
-		{"octet_invalid_old", "9999.0.0", "10.0.0", "invalid_prefix_format"},
-		{"octet_invalid_new", "10.0.0", "9999.0.0", "invalid_prefix_format"},
-		{"octet_ok_3octets", "10.0.0", "192.168.1", ""},
-		{"octet_ok_2octets", "10.0", "192.168", ""},
-		{"octet_ok_1octet", "10", "192", ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseIPTransform(tc.old, tc.nw)
-			if tc.wantErr == "" {
-				if err != nil {
-					t.Fatalf("parseIPTransform(%q,%q) unexpected err: %v", tc.old, tc.nw, err)
-				}
-				if got == nil {
-					t.Fatal("expected non-nil transform")
-				}
-				return
-			}
-			if err == nil {
-				t.Fatalf("expected error %q, got nil", tc.wantErr)
-			}
-			if err.Error() != tc.wantErr {
-				t.Fatalf("expected err %q, got %q", tc.wantErr, err.Error())
-			}
-		})
-	}
-}
-
-// TestIPTransform_Apply_None checks that the zero transform returns the IP
-// untouched.
-func TestIPTransform_Apply_None(t *testing.T) {
-	tr := &ipTransform{mode: ipTransformNone}
-	got, err := tr.apply("10.0.0.55")
-	if err != nil || got != "10.0.0.55" {
-		t.Fatalf("apply(none) = %q, %v; want 10.0.0.55, nil", got, err)
-	}
-}
-
-// TestIPTransform_Apply_InvalidIP covers net.ParseIP returning nil.
-func TestIPTransform_Apply_InvalidIP(t *testing.T) {
-	tr := &ipTransform{mode: ipTransformOctets, oldPref: "10.0.0", newPref: "10.0.1"}
-	if _, err := tr.apply("not-an-ip"); err == nil {
-		t.Fatal("expected invalid_ip error")
-	}
-}
-
-// TestIPTransform_Apply_Octets exercises octet-prefix substitution incl. the
-// prefix_not_matched boundary checks.
-func TestIPTransform_Apply_Octets(t *testing.T) {
-	tr := &ipTransform{mode: ipTransformOctets, oldPref: "10.0.0", newPref: "10.0.1"}
-	cases := []struct {
-		name string
-		ip   string
-		want string // "" => expect prefix_not_matched error
-	}{
-		{"basic", "10.0.0.55", "10.0.1.55"},
-		{"prefix_no_dot", "10.0.0255", ""}, // boundary char is not '.', should fail
-		{"wrong_prefix", "10.0.1.55", ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := tr.apply(tc.ip)
-			if tc.want == "" {
-				if err == nil {
-					t.Fatalf("apply(%q) expected error, got %q", tc.ip, got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("apply(%q) unexpected err: %v", tc.ip, err)
-			}
-			if got != tc.want {
-				t.Errorf("apply(%q) = %q, want %q", tc.ip, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestIPTransform_Apply_CIDR exercises the CIDR substitution path.
-func TestIPTransform_Apply_CIDR(t *testing.T) {
-	_, oldNet, _ := net.ParseCIDR("10.0.0.0/24")
-	_, newNet, _ := net.ParseCIDR("10.0.1.0/24")
-	tr := &ipTransform{mode: ipTransformCIDR, oldNet: oldNet, newNet: newNet}
-
-	got, err := tr.apply("10.0.0.55")
-	if err != nil {
-		t.Fatalf("apply CIDR err: %v", err)
-	}
-	if got != "10.0.1.55" {
-		t.Errorf("apply CIDR = %q, want 10.0.1.55", got)
-	}
-
-	// prefix_not_matched
-	if _, err := tr.apply("192.168.0.55"); err == nil {
-		t.Error("expected prefix_not_matched error for non-matching IP")
-	}
-	// ipv6_to4 returns nil
-	if _, err := tr.apply("::1"); err == nil {
-		t.Error("expected invalid_ipv4 error for IPv6 under CIDR transform")
-	}
-}
-
-// TestIPTransform_Apply_CIDRRoundTrip confirms a parse→apply happy path on a
-// 16-bit prefix swap.
-func TestIPTransform_Apply_CIDRRoundTrip(t *testing.T) {
-	tr, err := parseIPTransform("10.0.0.0/16", "172.16.0.0/16")
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := tr.apply("10.0.20.50")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "172.16.20.50" {
-		t.Errorf("got %q, want 172.16.20.50", got)
-	}
-}
+// Migrated to internal/dnsmasq:
+//   TestParseCSVAliasesIncludesPTRAndTXT,
+//   TestParseIPTransform, TestIPTransform_Apply_None,
+//   TestIPTransform_Apply_InvalidIP, TestIPTransform_Apply_Octets,
+//   TestIPTransform_Apply_CIDR, TestIPTransform_Apply_CIDRRoundTrip,
+//   TestIsLeaseTime, TestDirectiveGroup.
 
 // TestEnsureAliasesFile covers all three branches.
 func TestEnsureAliasesFile(t *testing.T) {
@@ -2751,61 +2044,8 @@ func TestEnsureAliasesFile(t *testing.T) {
 	}
 }
 
-// TestIsLeaseTime covers the dnsmasq lease-time acceptor.
-func TestIsLeaseTime(t *testing.T) {
-	cases := []struct {
-		s    string
-		want bool
-	}{
-		{"infinite", true},
-		{"12", true},
-		{"12s", true},
-		{"12m", true},
-		{"12h", true},
-		{"12d", true},
-		{"12w", true},
-		{"1s", true},   // single digit + unit
-		{"x", false},   // non-digit
-		{"", false},    // too short
-		{"a", false},   // too short + non-digit
-		{"1", false},   // too short (len<2)
-		{"12y", false}, // wrong unit
-		{"12x", false}, // wrong unit
-	}
-	for _, tc := range cases {
-		if got := isLeaseTime(tc.s); got != tc.want {
-			t.Errorf("isLeaseTime(%q) = %v, want %v", tc.s, got, tc.want)
-		}
-	}
-}
-
-// TestDirectiveGroup covers every group id returned by directiveGroup.
-func TestDirectiveGroup(t *testing.T) {
-	cases := []struct {
-		key  string
-		want int
-	}{
-		// Group 0 — dns.
-		{"domain", 0}, {"domain-needed", 0}, {"bogus-priv", 0}, {"no-resolv", 0},
-		{"no-hosts", 0}, {"listen-address", 0}, {"bind-interfaces", 0},
-		{"except-interface", 0}, {"interface", 0}, {"server", 0}, {"address", 0},
-		{"local", 0}, {"expand-hosts", 0}, {"no-poll", 0}, {"resolv-file", 0},
-		{"strict-order", 0}, {"all-servers", 0}, {"clear-on-reload", 0},
-		// Group 1 — dhcp.
-		{"dhcp-range", 1}, {"dhcp-option", 1}, {"dhcp-lease-max", 1},
-		{"dhcp-authoritative", 1}, {"dhcp-no-override", 1}, {"dhcp-hostsfile", 1},
-		{"dhcp-leasefile", 1}, {"no-dhcp-interface", 1},
-		// Group 2 — log.
-		{"log-queries", 2}, {"log-dhcp", 2}, {"log-facility", 2}, {"log-async", 2},
-		// Group 3 — unknown.
-		{"something-else", 3}, {"", 3}, {"conf-file", 3},
-	}
-	for _, tc := range cases {
-		if got := directiveGroup(tc.key); got != tc.want {
-			t.Errorf("directiveGroup(%q) = %d, want %d", tc.key, got, tc.want)
-		}
-	}
-}
+// Migrated to internal/dnsmasq:
+//   TestIsLeaseTime, TestDirectiveGroup.
 
 // ========== Coverage sweep §3 (Этап 3): resolveAliasesTargetFile ==========
 
@@ -2816,7 +2056,7 @@ func TestDirectiveGroup(t *testing.T) {
 // explicit target file.
 func TestResolveAliasesTargetFile_EmptyCreatesDefault(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 
 	path, ok := resolveAliasesTargetFile("")
 	if !ok {
@@ -2835,7 +2075,7 @@ func TestResolveAliasesTargetFile_EmptyCreatesDefault(t *testing.T) {
 // path: a pre-existing safe file inside ConfigDir is returned verbatim.
 func TestResolveAliasesTargetFile_ExplicitSafe(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	given := filepath.Join(dir, "custom.conf")
 	if err := os.WriteFile(given, []byte("address=/x/1.2.3.4\n"), 0644); err != nil {
 		t.Fatal(err)
@@ -2854,7 +2094,7 @@ func TestResolveAliasesTargetFile_ExplicitSafe(t *testing.T) {
 // (returns ok=false for a path outside ConfigDir).
 func TestResolveAliasesTargetFile_Unsafe(t *testing.T) {
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 
 	if _, ok := resolveAliasesTargetFile("/etc/passwd"); ok {
 		t.Error("expected ok=false for unsafe path")

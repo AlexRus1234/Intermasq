@@ -46,7 +46,6 @@ var staticFiles embed.FS
 var (
 	Port         = flag.String("port", "8081", "Port to listen on")
 	DBPath       = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
-	ConfigDir    = flag.String("conf-dir", "/etc/dnsmasq.d", "Directory with dnsmasq configs")
 	LeasesPath   = flag.String("leases", "/var/lib/misc/dnsmasq.leases", "Path to dnsmasq.leases")
 	ArpPath      = flag.String("arp-file", "/proc/net/arp", "Path to ARP table file")
 	InitSystem   = flag.String("init-system", "auto", "Init system: auto, systemd, systemd-user, openrc, runit, sysvinit, none")
@@ -57,6 +56,7 @@ var (
 	// default flag set at package init): -dnsmasq-bin / -sudo-bin /
 	// -systemctl-bin / -service-bin / -rc-service-bin / -sv-bin. Empty value
 	// means: resolve via $PATH, then fall back to well-known absolute paths.
+	// ConfigDir is the registered -conf-dir flag in internal/dnsmasq.
 	AuditLogPath  = flag.String("audit-log", "/etc/intermasq/audit.log", "Path to audit log file")
 	TemplatesPath = flag.String("templates", "/etc/intermasq/templates.json", "Path to templates file")
 	HistoryDir    = flag.String("history-dir", "/etc/intermasq/history", "Directory for versioned config history")

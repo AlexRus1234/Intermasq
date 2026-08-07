@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"intermask/internal/bins"
+	"intermask/internal/dnsmasq"
 	"intermask/internal/stats"
 )
 
@@ -42,7 +43,7 @@ func createBackupZip() ([]byte, string, error) {
 	buf := new(bytes.Buffer)
 	zipWriter := zip.NewWriter(buf)
 
-	files, err := os.ReadDir(*ConfigDir)
+	files, err := os.ReadDir(*dnsmasq.ConfigDir)
 	if err != nil {
 		return nil, "", err
 	}
@@ -51,7 +52,7 @@ func createBackupZip() ([]byte, string, error) {
 		if f.IsDir() || filepath.Ext(f.Name()) != ".conf" {
 			continue
 		}
-		fullPath := filepath.Join(*ConfigDir, f.Name())
+		fullPath := filepath.Join(*dnsmasq.ConfigDir, f.Name())
 		content, err := os.ReadFile(fullPath)
 		if err != nil {
 			continue
@@ -90,7 +91,7 @@ func restoreBackupZip(zipData []byte) error {
 		if filepath.Ext(name) != ".conf" {
 			continue
 		}
-		fullPath := filepath.Join(*ConfigDir, name)
+		fullPath := filepath.Join(*dnsmasq.ConfigDir, name)
 		if !isSafePath(fullPath) {
 			continue
 		}
@@ -121,13 +122,13 @@ func restoreBackupZip(zipData []byte) error {
 	}
 
 	for _, name := range restoredFiles {
-		fullPath := filepath.Join(*ConfigDir, name)
+		fullPath := filepath.Join(*dnsmasq.ConfigDir, name)
 		testCmd := exec.Command(bins.Dnsmasq(), "--test", "--conf-file="+fullPath)
 		testOut, testErr := testCmd.CombinedOutput()
 		if testErr != nil {
 			stats.Counters.TestFailures.Add(1)
 			for _, rb := range restoredFiles {
-				rbPath := filepath.Join(*ConfigDir, rb)
+				rbPath := filepath.Join(*dnsmasq.ConfigDir, rb)
 				bakPath := rbPath + ".restore.bak"
 				if bakContent, err := os.ReadFile(bakPath); err == nil {
 					os.WriteFile(rbPath, bakContent, 0644)

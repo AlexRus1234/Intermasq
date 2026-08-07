@@ -17,11 +17,11 @@
 // config_snapshot.go — structured reading/writing of dnsmasq directives
 // (everything except dhcp-host= and alias directives, which have their own
 // subsystems). Implements the visual "dnsmasq config" tab's backend:
-// readConfigSnapshot, parseDhcpRange, serializeConfigFile, directive
+// ReadConfigSnapshot, ParseDhcpRange, SerializeConfigFile, directive
 // grouping/sorting. dhcp-range directives are also surfaced in a structured
 // form so the UI can build dropdowns of CIDRs.
 
-package main
+package dnsmasq
 
 import (
 	"fmt"
@@ -31,7 +31,16 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"intermask/internal/models"
 )
+
+// DirectiveKeyRegex matches a dnsmasq directive name: lowercase letters,
+// digits and hyphens. Used to distinguish "real" comments from commented-out
+// directives (e.g. "#no-resolv"). Exported so the main package's PUT /api/config
+// handler can re-use the same compiled pattern when validating user-supplied
+// directive keys.
+var DirectiveKeyRegex = directiveKeyRegex
 
 // directiveKeyRegex matches a dnsmasq directive name: lowercase letters,
 // digits and hyphens. Used to distinguish "real" comments from commented-out
@@ -42,10 +51,10 @@ var directiveKeyRegex = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 // optionally followed by s/m/h/d/w, or the literal "infinite".
 var leaseTimeRegex = regexp.MustCompile(`^\d+[smhdw]?$`)
 
-// directiveValueSeparator splits "key=value" into key and value. dnsmasq conf
+// SplitDirective splits "key=value" into key and value. dnsmasq conf
 // files use '=' as the canonical separator. Keys may contain hyphens
 // (e.g. "no-resolv", "domain-needed"), so '-' is NOT treated as a separator.
-func splitDirective(line string) (key, value string, ok bool) {
+func SplitDirective(line string) (key, value string, ok bool) {
 	if idx := strings.Index(line, "="); idx > 0 {
 		k := strings.TrimSpace(line[:idx])
 		v := strings.TrimSpace(line[idx+1:])
@@ -60,12 +69,12 @@ func splitDirective(line string) (key, value string, ok bool) {
 	return "", "", false
 }
 
-// readConfigSnapshot walks all .conf files in ConfigDir and extracts every
+// ReadConfigSnapshot walks all .conf files in ConfigDir and extracts every
 // directive except dhcp-host and alias directives. Commented-out directives
 // (e.g. "#no-resolv") are returned with Active=false. dhcp-range directives
 // are additionally returned in a structured form via DhcpRanges slice.
-func readConfigSnapshot() ConfigSnapshot {
-	snap := ConfigSnapshot{Files: []ConfigFile{}, DhcpRanges: []DhcpRange{}}
+func ReadConfigSnapshot() models.ConfigSnapshot {
+	snap := models.ConfigSnapshot{Files: []models.ConfigFile{}, DhcpRanges: []models.DhcpRange{}}
 
 	files, err := os.ReadDir(*ConfigDir)
 	if err != nil {
@@ -82,10 +91,10 @@ func readConfigSnapshot() ConfigSnapshot {
 			continue
 		}
 
-		cf := ConfigFile{
+		cf := models.ConfigFile{
 			Path:       fullPath,
 			Name:       f.Name(),
-			Directives: []Directive{},
+			Directives: []models.Directive{},
 		}
 		if _, err := os.Stat(fullPath + ".bak"); err == nil {
 			cf.HasBak = true
@@ -110,16 +119,16 @@ func readConfigSnapshot() ConfigSnapshot {
 			if strings.HasPrefix(line, "dhcp-host=") || strings.HasPrefix(line, "dhcp-host:") {
 				continue
 			}
-			if isAliasDirective(line) {
+			if IsAliasDirective(line) {
 				continue
 			}
 
-			key, value, ok := splitDirective(line)
+			key, value, ok := SplitDirective(line)
 			if !ok {
 				continue
 			}
 
-			d := Directive{
+			d := models.Directive{
 				Key:    key,
 				Value:  value,
 				Active: active,
@@ -129,7 +138,7 @@ func readConfigSnapshot() ConfigSnapshot {
 			cf.Directives = append(cf.Directives, d)
 
 			if key == "dhcp-range" && active {
-				r := parseDhcpRange(value, fullPath, i+1)
+				r := ParseDhcpRange(value, fullPath, i+1)
 				snap.DhcpRanges = append(snap.DhcpRanges, r)
 			}
 		}
@@ -140,9 +149,9 @@ func readConfigSnapshot() ConfigSnapshot {
 	return snap
 }
 
-// parseDhcpRange parses a dhcp-range value into a structured form.
-func parseDhcpRange(raw, file string, lineNo int) DhcpRange {
-	r := DhcpRange{Raw: raw, File: file, LineNo: lineNo}
+// ParseDhcpRange parses a dhcp-range value into a structured form.
+func ParseDhcpRange(raw, file string, lineNo int) models.DhcpRange {
+	r := models.DhcpRange{Raw: raw, File: file, LineNo: lineNo}
 	parts := strings.Split(raw, ",")
 	for i := range parts {
 		parts[i] = strings.TrimSpace(parts[i])
@@ -182,7 +191,7 @@ func parseDhcpRange(raw, file string, lineNo int) DhcpRange {
 	}
 	if len(rest) > 2 {
 		third := rest[2]
-		if isLeaseTime(third) {
+		if IsLeaseTime(third) {
 			r.LeaseTime = third
 		} else {
 			r.Mask = third
@@ -192,12 +201,12 @@ func parseDhcpRange(raw, file string, lineNo int) DhcpRange {
 		}
 	}
 
-	r.CIDR = dhcpRangeToCIDR(r)
+	r.CIDR = DhcpRangeToCIDR(r)
 	return r
 }
 
-// isLeaseTime reports whether s looks like a dnsmasq lease duration.
-func isLeaseTime(s string) bool {
+// IsLeaseTime reports whether s looks like a dnsmasq lease duration.
+func IsLeaseTime(s string) bool {
 	if s == "infinite" {
 		return true
 	}
@@ -207,9 +216,9 @@ func isLeaseTime(s string) bool {
 	return leaseTimeRegex.MatchString(s)
 }
 
-// dhcpRangeToCIDR computes a CIDR string (network/prefix) from a DhcpRange
+// DhcpRangeToCIDR computes a CIDR string (network/prefix) from a DhcpRange
 // using start address and netmask. Returns "" if it cannot be determined.
-func dhcpRangeToCIDR(r DhcpRange) string {
+func DhcpRangeToCIDR(r models.DhcpRange) string {
 	if r.Mask == "" || r.Start == "" {
 		return ""
 	}
@@ -235,10 +244,10 @@ func dhcpRangeToCIDR(r DhcpRange) string {
 	return fmt.Sprintf("%s/%d", network.String(), ones)
 }
 
-// detectDhcpRangesCIDR returns the list of CIDR strings derived from all
+// DetectDhcpRangesCIDR returns the list of CIDR strings derived from all
 // active dhcp-range directives. Used to populate the IP-range dropdown.
-func detectDhcpRangesCIDR() []string {
-	snap := readConfigSnapshot()
+func DetectDhcpRangesCIDR() []string {
+	snap := ReadConfigSnapshot()
 	out := []string{}
 	seen := make(map[string]bool)
 	for _, r := range snap.DhcpRanges {
@@ -250,14 +259,14 @@ func detectDhcpRangesCIDR() []string {
 	return out
 }
 
-// serializeConfigFile rebuilds a .conf file preserving:
+// SerializeConfigFile rebuilds a .conf file preserving:
 //   - leading plain comments (lines starting with # that are not directives)
 //   - all dhcp-host= lines in their original order
 //   - the supplied directives, sorted by group then key for readability
 //
 // Inactive directives are written with a "#" prefix. Boolean directives
 // (empty Value) are written as bare "key"; valued directives as "key=value".
-func serializeConfigFile(path string, directives []Directive) ([]byte, error) {
+func SerializeConfigFile(path string, directives []models.Directive) ([]byte, error) {
 	content, err := os.ReadFile(path)
 	existing := ""
 	if err == nil {
@@ -277,7 +286,7 @@ func serializeConfigFile(path string, directives []Directive) ([]byte, error) {
 				dhcpHostLines = append(dhcpHostLines, raw)
 				continue
 			}
-			if isAliasDirective(line) {
+			if IsAliasDirective(line) {
 				aliasLines = append(aliasLines, raw)
 				continue
 			}
@@ -287,7 +296,7 @@ func serializeConfigFile(path string, directives []Directive) ([]byte, error) {
 					headerComments = append(headerComments, raw)
 					continue
 				}
-				if _, _, ok := splitDirective(stripped); ok {
+				if _, _, ok := SplitDirective(stripped); ok {
 					continue
 				}
 				headerComments = append(headerComments, raw)
@@ -296,10 +305,10 @@ func serializeConfigFile(path string, directives []Directive) ([]byte, error) {
 		}
 	}
 
-	sorted := make([]Directive, len(directives))
+	sorted := make([]models.Directive, len(directives))
 	copy(sorted, directives)
 	sort.SliceStable(sorted, func(i, j int) bool {
-		gi, gj := directiveGroup(sorted[i].Key), directiveGroup(sorted[j].Key)
+		gi, gj := DirectiveGroup(sorted[i].Key), DirectiveGroup(sorted[j].Key)
 		if gi != gj {
 			return gi < gj
 		}
@@ -349,9 +358,9 @@ func serializeConfigFile(path string, directives []Directive) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
-// directiveGroup returns a numeric group id for sorting directives in the
+// DirectiveGroup returns a numeric group id for sorting directives in the
 // serialized file. Lower id = earlier in file. Order: dns, dhcp, log, other.
-func directiveGroup(key string) int {
+func DirectiveGroup(key string) int {
 	switch key {
 	case "domain", "domain-needed", "bogus-priv", "no-resolv", "no-hosts",
 		"listen-address", "bind-interfaces", "except-interface", "interface",

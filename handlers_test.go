@@ -39,6 +39,7 @@ import (
 	"testing"
 
 	"intermask/internal/bins"
+	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
 
 	"github.com/gin-gonic/gin"
@@ -47,12 +48,12 @@ import (
 
 // ===== Test helpers =====
 
-// newTestDir creates a temp dir, points *ConfigDir at it, and returns the dir.
+// newTestDir creates a temp dir, points *dnsmasq.ConfigDir at it, and returns the dir.
 // t.TempDir auto-cleans on test completion.
 func newTestDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	*ConfigDir = dir
+	*dnsmasq.ConfigDir = dir
 	return dir
 }
 
@@ -777,61 +778,9 @@ func TestMetricsHandler_TokenQuery_200(t *testing.T) {
 // ===== Gap 3: Edge cases =====
 
 // TestValidateHostFields_IPv6 and TestValidHostname_Unicode moved to
-// internal/validate (white-box).
-
-// TestReadAllHosts_EmptyFile confirms that an empty .conf file yields zero
-// hosts without errors. This covers the "fresh install" scenario where the
-// panel has just created a new config file but no hosts have been added.
-func TestReadAllHosts_EmptyFile(t *testing.T) {
-	dir := newTestDir(t)
-	os.WriteFile(filepath.Join(dir, "empty.conf"), []byte(""), 0644)
-	hosts := readAllHosts()
-	if len(hosts) != 0 {
-		t.Errorf("expected 0 hosts from empty file, got %d", len(hosts))
-	}
-}
-
-// TestReadAllHosts_CommentsOnly verifies that a .conf file containing only
-// comments (including commented-out dhcp-host lines) yields zero hosts.
-func TestReadAllHosts_CommentsOnly(t *testing.T) {
-	dir := newTestDir(t)
-	content := "# header comment\n# another comment\n#dhcp-host=aa:bb:cc:dd:ee:ff,host,1.2.3.4\n"
-	os.WriteFile(filepath.Join(dir, "comments.conf"), []byte(content), 0644)
-	hosts := readAllHosts()
-	if len(hosts) != 0 {
-		t.Errorf("expected 0 hosts from comments-only file, got %d: %+v", len(hosts), hosts)
-	}
-}
-
-// TestReadAllHosts_MultipleFiles confirms that hosts from multiple .conf
-// files are aggregated correctly, and non-.conf files are ignored.
-func TestReadAllHosts_MultipleFiles(t *testing.T) {
-	dir := newTestDir(t)
-	os.WriteFile(filepath.Join(dir, "10-hosts.conf"), []byte("dhcp-host=aa:bb:cc:dd:ee:01,h1,10.0.0.1\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "20-more.conf"), []byte("dhcp-host=aa:bb:cc:dd:ee:02,h2,10.0.0.2\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "ignore.txt"), []byte("dhcp-host=aa:bb:cc:dd:ee:03,h3,10.0.0.3\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "ignore.bak"), []byte("dhcp-host=aa:bb:cc:dd:ee:04,h4,10.0.0.4\n"), 0644)
-
-	hosts := readAllHosts()
-	if len(hosts) != 2 {
-		t.Errorf("expected 2 hosts (only .conf files), got %d: %+v", len(hosts), hosts)
-	}
-}
-
-// TestParseDhcpHostLine_TrailingNewline confirms that a line with trailing
-// \r\n (Windows CRLF) doesn't produce a phantom empty-field hostname.
-func TestParseDhcpHostLine_TrailingNewline(t *testing.T) {
-	dir := newTestDir(t)
-	file := filepath.Join(dir, "test.conf")
-
-	entry, ok := parseDhcpHostLine("dhcp-host=aa:bb:cc:dd:ee:ff,host1,192.168.1.10\r", file)
-	if !ok {
-		t.Fatal("expected parse success")
-	}
-	if entry.Hostname != "host1" {
-		t.Errorf("hostname should be 'host1', got %q (CR contamination?)", entry.Hostname)
-	}
-}
+// internal/validate (white-box). TestReadAllHosts_EmptyFile,
+// TestReadAllHosts_CommentsOnly, TestReadAllHosts_MultipleFiles and
+// TestParseDhcpHostLine_TrailingNewline moved to internal/dnsmasq (stage 4).
 
 // TestConcurrentAddHost_NoCorruption races 10 goroutines adding distinct
 // hosts to the same file. The global mutex serialises the read+write

@@ -34,6 +34,7 @@ import (
 	"strings"
 	"testing"
 
+	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
 
 	"github.com/gin-gonic/gin"
@@ -61,15 +62,16 @@ func withSandboxFlags(t *testing.T) string {
 	// that sysCaller lives in internal/initd.
 	initd.SetCurrentForTest(t, initd.Current())
 	orig := struct {
-		DBPath, TemplatesPath, HistoryDir, ConfigDir, ArpPath, LeasesPath *string
-		InitSystem, SystemdScope                                          *string
-		PluginsDir, SocketsDir                                            string
-		loadedPlugins                                                     []PluginManifest
+		DBPath, TemplatesPath, HistoryDir, ArpPath, LeasesPath *string
+		ConfigDir                                              *string
+		InitSystem, SystemdScope                               *string
+		PluginsDir, SocketsDir                                 string
+		loadedPlugins                                          []PluginManifest
 	}{
 		DBPath:        DBPath,
 		TemplatesPath: TemplatesPath,
 		HistoryDir:    HistoryDir,
-		ConfigDir:     ConfigDir,
+		ConfigDir:     dnsmasq.ConfigDir,
 		ArpPath:       ArpPath,
 		LeasesPath:    LeasesPath,
 		InitSystem:    InitSystem,
@@ -81,7 +83,7 @@ func withSandboxFlags(t *testing.T) string {
 	*DBPath = filepath.Join(tmp, "users.json")
 	*TemplatesPath = filepath.Join(tmp, "templates.json")
 	*HistoryDir = filepath.Join(tmp, "history")
-	*ConfigDir = filepath.Join(tmp, "conf")
+	*dnsmasq.ConfigDir = filepath.Join(tmp, "conf")
 	*ArpPath = filepath.Join(tmp, "arp")
 	*LeasesPath = filepath.Join(tmp, "leases")
 	PluginsDir = filepath.Join(tmp, "plugins")
@@ -95,7 +97,7 @@ func withSandboxFlags(t *testing.T) string {
 		*DBPath = *orig.DBPath
 		*TemplatesPath = *orig.TemplatesPath
 		*HistoryDir = *orig.HistoryDir
-		*ConfigDir = *orig.ConfigDir
+		*dnsmasq.ConfigDir = *orig.ConfigDir
 		*ArpPath = *orig.ArpPath
 		*LeasesPath = *orig.LeasesPath
 		*InitSystem = *orig.InitSystem

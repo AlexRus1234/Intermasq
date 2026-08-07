@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"intermask/internal/dnsmasq"
 	"intermask/internal/validate"
 )
 
@@ -23,7 +24,7 @@ import (
 // supplied path is unsafe.
 func resolveAliasesTargetFile(reqFile string) (string, bool) {
 	if reqFile == "" {
-		path := filepath.Join(*ConfigDir, DefaultAliasesFileName)
+		path := filepath.Join(*dnsmasq.ConfigDir, DefaultAliasesFileName)
 		if err := ensureAliasesFile(path); err != nil {
 			return "", false
 		}
@@ -56,7 +57,7 @@ func validateAliasEntry(a DnsAliasEntry) bool {
 }
 
 func getAliasesHandler(c *gin.Context) {
-	c.JSON(200, readAllAliases())
+	c.JSON(200, dnsmasq.ReadAllAliases())
 }
 
 func addAliasHandler(c *gin.Context) {
@@ -75,7 +76,7 @@ func addAliasHandler(c *gin.Context) {
 		return
 	}
 
-	conflicts := findAliasesByDomain(req.Domain, "", "")
+	conflicts := dnsmasq.FindAliasesByDomain(req.Domain, "", "")
 	if len(conflicts) > 0 {
 		c.JSON(409, gin.H{"error": "alias_duplicate", "conflicts": conflicts})
 		return
@@ -138,7 +139,7 @@ func bulkAddAliasesHandler(c *gin.Context) {
 	}
 
 	for _, a := range valid {
-		conflicts := findAliasesByDomain(a.Domain, "", "")
+		conflicts := dnsmasq.FindAliasesByDomain(a.Domain, "", "")
 		if len(conflicts) > 0 {
 			c.JSON(409, gin.H{"error": "alias_duplicate", "conflicts": conflicts})
 			return
@@ -166,8 +167,8 @@ func bulkAddAliasesHandler(c *gin.Context) {
 
 	for _, line := range lines {
 		clean := strings.TrimSpace(line)
-		if isAliasDirective(clean) {
-			if entry, ok := parseAliasLine(clean, "", false); ok {
+		if dnsmasq.IsAliasDirective(clean) {
+			if entry, ok := dnsmasq.ParseAliasLine(clean, "", false); ok {
 				if newDomains[strings.ToLower(entry.Type+":"+entry.Domain)] {
 					continue
 				}
@@ -179,7 +180,7 @@ func bulkAddAliasesHandler(c *gin.Context) {
 	}
 
 	for _, a := range valid {
-		newLines = append(newLines, aliasToLine(a))
+		newLines = append(newLines, dnsmasq.AliasToLine(a))
 	}
 
 	if err := os.WriteFile(req.File, []byte(strings.Join(newLines, "\n")+"\n"), 0644); err != nil {
@@ -237,11 +238,11 @@ func deleteAliasHandler(c *gin.Context) {
 }
 
 func exportAliasesCSVHandler(c *gin.Context) {
-	aliases := readAllAliases()
+	aliases := dnsmasq.ReadAllAliases()
 	for i := range aliases {
-		aliases[i].File = cleanAliasFile(aliases[i].File)
+		aliases[i].File = dnsmasq.CleanAliasFile(aliases[i].File)
 	}
-	csvData := aliasesToCSV(aliases)
+	csvData := dnsmasq.AliasesToCSV(aliases)
 	c.Header("Content-Disposition", "attachment; filename=intermasq_aliases.csv")
 	c.Data(200, "text/csv", csvData)
 }
@@ -267,7 +268,7 @@ func importAliasesCSVHandler(c *gin.Context) {
 	}
 	defer f.Close()
 
-	aliases, err := parseCSVAliases(f, targetFile)
+	aliases, err := dnsmasq.ParseCSVAliases(f, targetFile)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "invalid_csv"})
 		return
@@ -286,7 +287,7 @@ func importAliasesCSVHandler(c *gin.Context) {
 		}
 	}
 	for _, a := range aliases {
-		conflicts := findAliasesByDomain(a.Domain, "", "")
+		conflicts := dnsmasq.FindAliasesByDomain(a.Domain, "", "")
 		if len(conflicts) > 0 {
 			c.JSON(409, gin.H{"error": "alias_duplicate", "conflicts": conflicts})
 			return
@@ -314,8 +315,8 @@ func importAliasesCSVHandler(c *gin.Context) {
 
 	for _, line := range lines {
 		clean := strings.TrimSpace(line)
-		if isAliasDirective(clean) {
-			if entry, ok := parseAliasLine(clean, "", false); ok {
+		if dnsmasq.IsAliasDirective(clean) {
+			if entry, ok := dnsmasq.ParseAliasLine(clean, "", false); ok {
 				if newKeys[strings.ToLower(entry.Type+":"+entry.Domain)] {
 					continue
 				}
@@ -327,7 +328,7 @@ func importAliasesCSVHandler(c *gin.Context) {
 	}
 
 	for _, a := range aliases {
-		newLines = append(newLines, aliasToLine(a))
+		newLines = append(newLines, dnsmasq.AliasToLine(a))
 	}
 
 	if err := os.WriteFile(targetFile, []byte(strings.Join(newLines, "\n")+"\n"), 0644); err != nil {
