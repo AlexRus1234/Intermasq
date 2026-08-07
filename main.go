@@ -17,18 +17,12 @@
 package main
 
 import (
-	"context"
 	"embed"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io/fs"
-	"net"
 	"net/http"
-	"net/http/httputil"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -42,6 +36,7 @@ import (
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
 	"intermask/internal/metrics"
+	"intermask/internal/plugins"
 	templatepkg "intermask/internal/templates"
 )
 
@@ -60,19 +55,8 @@ var (
 	// means: resolve via $PATH, then fall back to well-known absolute paths.
 	// ConfigDir is the registered -conf-dir flag in internal/dnsmasq;
 	// HistoryDir / HistoryDepth are also registered there.
-	PluginsDir = "/etc/intermasq/plugins"
-	SocketsDir = "/run/intermasq/sockets"
+	// Plugin discovery dirs (PluginsDir/SocketsDir) live in internal/plugins.
 )
-
-var (
-	loadedPlugins []PluginManifest
-)
-
-type PluginManifest struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Bin  string `json:"bin"`
-}
 
 func init() {
 	// SECURITY: refuse to start with the default/well-known signing key.
@@ -97,70 +81,6 @@ var (
 	startSSEBroadcasterFn   = control.StartBroadcaster
 	startDNSHealthCheckerFn = metrics.StartDNSHealthChecker
 )
-
-func loadPlugins(r *gin.Engine) {
-	os.MkdirAll(SocketsDir, 0770)
-
-	entries, err := os.ReadDir(PluginsDir)
-	if err != nil {
-		return
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		path := filepath.Join(PluginsDir, entry.Name())
-		manifestPath := filepath.Join(path, "manifest.json")
-		data, err := os.ReadFile(manifestPath)
-		if err != nil {
-			continue
-		}
-
-		var p PluginManifest
-		if err := json.Unmarshal(data, &p); err != nil {
-			continue
-		}
-
-		binPath := filepath.Join(path, p.Bin)
-		sockPath := filepath.Join(SocketsDir, p.ID+".sock")
-
-		if _, err := os.Stat(binPath); err == nil {
-			cmd := exec.Command(binPath)
-			cmd.Dir = path
-			cmd.Env = append(os.Environ(),
-				fmt.Sprintf("INTERMASQ_KEY=%s", os.Getenv("INTERMASQ_SECRET")),
-				fmt.Sprintf("PLUGIN_SOCKET=%s", sockPath),
-			)
-
-			if err := cmd.Start(); err != nil {
-				fmt.Printf("[PLUGINS] Error starting %s: %v\n", p.Name, err)
-				continue
-			}
-			fmt.Printf("[PLUGINS] Started %s on socket %s\n", p.Name, sockPath)
-		}
-
-		proxy := &httputil.ReverseProxy{
-			Director: func(req *http.Request) {
-				req.URL.Scheme = "http"
-				req.URL.Host = "dummy"
-			},
-			Transport: &http.Transport{
-				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					return net.Dial("unix", sockPath)
-				},
-			},
-		}
-
-		r.Any("/plugins/"+p.ID+"/*any", func(c *gin.Context) {
-			c.Request.URL.Path = c.Param("any")
-			proxy.ServeHTTP(c.Writer, c.Request)
-		})
-
-		loadedPlugins = append(loadedPlugins, p)
-	}
-}
 
 func main() {
 	flag.Parse()
@@ -210,7 +130,7 @@ func setupServer() (*gin.Engine, error) {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
-	loadPlugins(r)
+	plugins.Load(r)
 	startSSEBroadcasterFn()
 	startDNSHealthCheckerFn()
 
@@ -229,7 +149,7 @@ func setupServer() (*gin.Engine, error) {
 		protected.Use(authpkg.Middleware)
 		auth := protected
 		{
-			protected.GET("/plugins", func(c *gin.Context) { c.JSON(200, loadedPlugins) })
+			protected.GET("/plugins", func(c *gin.Context) { c.JSON(200, plugins.Loaded()) })
 			protected.POST("/restart-self", func(c *gin.Context) {
 				c.JSON(200, gin.H{"status": "restarting"})
 				if !*CiMode {

@@ -1,6 +1,6 @@
 // Mock plugin for Intermasq's plugin contract (tests/fixtures/plugins/hello).
 //
-// Honours the existing runtime contract defined in main.go::loadPlugins():
+// Honours the existing runtime contract defined in internal/plugins.Load():
 // the host process exports PLUGIN_SOCKET=<unix socket path> and then
 // reverse-proxies requests onto that socket. A real plugin therefore just
 // has to bind the socket it is given and answer requests — no TCP, no

@@ -36,6 +36,7 @@ import (
 
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
+	"intermask/internal/plugins"
 
 	"github.com/gin-gonic/gin"
 )
@@ -66,8 +67,6 @@ func withSandboxFlags(t *testing.T) string {
 		HistoryDir                                 *string
 		ConfigDir                                  *string
 		InitSystem, SystemdScope                   *string
-		PluginsDir, SocketsDir                     string
-		loadedPlugins                              []PluginManifest
 	}{
 		DBPath:        DBPath,
 		TemplatesPath: TemplatesPath,
@@ -77,9 +76,6 @@ func withSandboxFlags(t *testing.T) string {
 		LeasesPath:    LeasesPath,
 		InitSystem:    InitSystem,
 		SystemdScope:  SystemdScope,
-		PluginsDir:    PluginsDir,
-		SocketsDir:    SocketsDir,
-		loadedPlugins: loadedPlugins,
 	}
 	*DBPath = filepath.Join(tmp, "users.json")
 	*TemplatesPath = filepath.Join(tmp, "templates.json")
@@ -87,11 +83,12 @@ func withSandboxFlags(t *testing.T) string {
 	*dnsmasq.ConfigDir = filepath.Join(tmp, "conf")
 	*ArpPath = filepath.Join(tmp, "arp")
 	*LeasesPath = filepath.Join(tmp, "leases")
-	PluginsDir = filepath.Join(tmp, "plugins")
-	SocketsDir = filepath.Join(tmp, "sockets")
+	// Plugin discovery dirs (and the parsed loadedPlugins slice) are
+	// rerouted/reset/restored via the cross-package seam in internal/plugins,
+	// since those package vars moved there during stage 10.
+	plugins.SetDirsForTest(t, filepath.Join(tmp, "plugins"), filepath.Join(tmp, "sockets"))
 	*InitSystem = "none"
 	*SystemdScope = ""
-	loadedPlugins = nil
 	t.Cleanup(func() {
 		startSSEBroadcasterFn = origSSE
 		startDNSHealthCheckerFn = origDNS
@@ -103,9 +100,6 @@ func withSandboxFlags(t *testing.T) string {
 		*LeasesPath = *orig.LeasesPath
 		*InitSystem = *orig.InitSystem
 		*SystemdScope = *orig.SystemdScope
-		PluginsDir = orig.PluginsDir
-		SocketsDir = orig.SocketsDir
-		loadedPlugins = orig.loadedPlugins
 	})
 	return tmp
 }
