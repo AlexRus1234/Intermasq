@@ -39,7 +39,6 @@ import (
 
 	"intermask/internal/auth"
 	"intermask/internal/dnsmasq"
-	"intermask/internal/initd"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -697,80 +696,6 @@ func TestDeleteTemplateHandler_NotFound(t *testing.T) {
 
 	if w.Code != 404 {
 		t.Fatalf("expected 404 for missing template, got %d", w.Code)
-	}
-}
-
-// ===== Metrics handler (L2) =====
-
-// setupMetricsGlobals wires up the globals metricsHandler touches: SecretKey
-// for auth, sysCaller for checkDnsmasqStatus, and ConfigDir for readAllHosts.
-// All originals are restored on test completion.
-func setupMetricsGlobals(t *testing.T) {
-	t.Helper()
-	newTestDir(t)
-	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
-	initd.SetCurrentForTest(t, &initd.NoneCaller{})
-}
-
-func TestMetricsHandler_NoAuth_401(t *testing.T) {
-	setupMetricsGlobals(t)
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("GET", "/metrics", nil)
-	metricsHandler(c)
-
-	if w.Code != 401 {
-		t.Fatalf("expected 401 without auth, got %d", w.Code)
-	}
-	// A8 regression: 401 must carry a JSON body so curl/Prometheus show a
-	// meaningful error instead of an empty reply.
-	if w.Body.Len() == 0 {
-		t.Errorf("expected non-empty body on 401, got empty")
-	}
-	if !strings.Contains(w.Body.String(), "auth_required") {
-		t.Errorf("expected body to contain \"auth_required\", got: %s", w.Body.String())
-	}
-}
-
-func TestMetricsHandler_APIKey_200(t *testing.T) {
-	setupMetricsGlobals(t)
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("GET", "/metrics", nil)
-	c.Request.Header.Set("X-API-Key", "test-secret-key-32-bytes-long!!")
-	metricsHandler(c)
-
-	if w.Code != 200 {
-		t.Fatalf("expected 200 with valid API key, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestMetricsHandler_WrongAPIKey_401(t *testing.T) {
-	setupMetricsGlobals(t)
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("GET", "/metrics", nil)
-	c.Request.Header.Set("X-API-Key", "wrong-key")
-	metricsHandler(c)
-
-	if w.Code != 401 {
-		t.Fatalf("expected 401 with wrong API key, got %d", w.Code)
-	}
-}
-
-func TestMetricsHandler_TokenQuery_200(t *testing.T) {
-	setupMetricsGlobals(t)
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("GET", "/metrics?token=test-secret-key-32-bytes-long!!", nil)
-	metricsHandler(c)
-
-	if w.Code != 200 {
-		t.Fatalf("expected 200 with ?token= query param, got %d", w.Code)
 	}
 }
 

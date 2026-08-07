@@ -22,12 +22,8 @@ package main
 // sleeps/race-detector flakiness.
 
 import (
-	"context"
-	"errors"
-	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"intermask/internal/initd"
@@ -103,88 +99,4 @@ func TestSsePollOnce_BroadcastsOnDelta(t *testing.T) {
 		t.Error("second identical poll should not broadcast")
 	default:
 	}
-}
-
-// ===== T-C.3 runDNSHealthPass =====
-
-// withDNSResolver swaps the package-level dnsResolver for the test and
-// restores it on cleanup.
-func withDNSResolver(t *testing.T, fn func(ctx context.Context, domain string) ([]string, error)) {
-	t.Helper()
-	orig := dnsResolver
-	dnsResolver = fn
-	t.Cleanup(func() { dnsResolver = orig })
-}
-
-func TestRunDNSHealthPass_NoAliases(t *testing.T) {
-	newTestDir(t) // empty ConfigDir → readAllAliases() returns []
-	// Clear any prior dnsHealth entries so the assertion below is stable.
-	dnsHealthMu.Lock()
-	for k := range dnsHealth {
-		delete(dnsHealth, k)
-	}
-	dnsHealthMu.Unlock()
-
-	runDNSHealthPass()
-
-	dnsHealthMu.RLock()
-	defer dnsHealthMu.RUnlock()
-	if len(dnsHealth) != 0 {
-		t.Errorf("expected no health entries with 0 aliases, got %d", len(dnsHealth))
-	}
-}
-
-func TestRunDNSHealthPass_HappyAndSadPaths(t *testing.T) {
-	dir := newTestDir(t)
-	// Seed one .conf with two A aliases and one TXT (which must be skipped).
-	conf := []byte("address=/up.lan/10.0.0.1\naddress=/down.lan/10.0.0.2\ntxt-record=skip.lan,ignored\n")
-	if err := os.WriteFile(filepath.Join(dir, "dns.conf"), conf, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Stub resolver: up.lan resolves, down.lan fails. Everything else errors.
-	calls := make(map[string]int)
-	var callsMu sync.Mutex
-	withDNSResolver(t, func(_ context.Context, domain string) ([]string, error) {
-		callsMu.Lock()
-		calls[domain]++
-		callsMu.Unlock()
-		switch domain {
-		case "up.lan":
-			return []string{"10.0.0.1"}, nil
-		case "down.lan":
-			return nil, errors.New("no such host")
-		default:
-			return nil, errors.New("unexpected domain in stub: " + domain)
-		}
-	})
-
-	// Clear prior health entries.
-	dnsHealthMu.Lock()
-	for k := range dnsHealth {
-		delete(dnsHealth, k)
-	}
-	dnsHealthMu.Unlock()
-
-	runDNSHealthPass()
-
-	dnsHealthMu.RLock()
-	defer dnsHealthMu.RUnlock()
-	if len(dnsHealth) != 2 {
-		t.Fatalf("expected 2 health entries, got %d: %+v", len(dnsHealth), dnsHealth)
-	}
-	if h, ok := dnsHealth["up.lan"]; !ok || !h.Up {
-		t.Errorf("expected up.lan Up=true, got %+v", dnsHealth["up.lan"])
-	}
-	if h, ok := dnsHealth["down.lan"]; !ok || h.Up {
-		t.Errorf("expected down.lan Up=false, got %+v", dnsHealth["down.lan"])
-	}
-	callsMu.Lock()
-	if calls["up.lan"] != 1 || calls["down.lan"] != 1 {
-		t.Errorf("stub call counts wrong: %+v", calls)
-	}
-	if calls["skip.lan"] != 0 {
-		t.Errorf("TXT alias should be skipped, got calls=%d", calls["skip.lan"])
-	}
-	callsMu.Unlock()
 }

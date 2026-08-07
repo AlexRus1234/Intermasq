@@ -40,6 +40,7 @@ import (
 	"intermask/internal/bins"
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
+	"intermask/internal/metrics"
 	templatepkg "intermask/internal/templates"
 )
 
@@ -93,7 +94,7 @@ func init() {
 // keeps using the real starters.
 var (
 	startSSEBroadcasterFn   = startSSEBroadcaster
-	startDNSHealthCheckerFn = startDNSHealthChecker
+	startDNSHealthCheckerFn = metrics.StartDNSHealthChecker
 )
 
 func loadPlugins(r *gin.Engine) {
@@ -215,7 +216,7 @@ func setupServer() (*gin.Engine, error) {
 	// /metrics is exposed outside the /api group so Prometheus can scrape it
 	// at the conventional URL. Authentication is handled inside the handler
 	// (Bearer / X-API-Key / ?token=) so the scrape_url can stay self-contained.
-	r.GET("/metrics", metricsHandler)
+	r.GET("/metrics", metrics.Handler)
 
 	api := r.Group("/api")
 	{

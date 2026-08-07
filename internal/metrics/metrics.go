@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-package main
+package metrics
 
 import (
 	"context"
@@ -29,6 +29,8 @@ import (
 
 	"intermask/internal/auth"
 	"intermask/internal/dnsmasq"
+	"intermask/internal/initd"
+	"intermask/internal/netstate"
 	"intermask/internal/stats"
 )
 
@@ -47,21 +49,21 @@ var (
 	dnsHealth   = make(map[string]dnsHealthEntry)
 )
 
-// metricsHandler exposes operational metrics in Prometheus exposition format.
+// Handler exposes operational metrics in Prometheus exposition format.
 // Authentication is identical to the rest of the API: either an
 // Authorization: Bearer <jwt> header, X-API-Key: <secret> header, or a
 // ?token=<jwt-or-secret> query parameter (the last one is convenient for
 // Prometheus scrape configs which cannot easily send custom headers).
-func metricsHandler(c *gin.Context) {
+func Handler(c *gin.Context) {
 	if !checkMetricsAuth(c) {
 		c.AbortWithStatusJSON(401, gin.H{"error": "auth_required"})
 		return
 	}
 
 	hosts := dnsmasq.ReadAllHosts()
-	leases := parseLeases()
-	arp := getArpTable()
-	active := checkDnsmasqStatus()
+	leases := netstate.ParseLeases()
+	arp := netstate.GetArpTable()
+	active := initd.Current().IsActive("dnsmasq")
 
 	var b strings.Builder
 	writeSimpleMetric(&b, "intermasq_hosts_total", "Total number of managed dhcp-host entries.", float64(len(hosts)))
@@ -133,10 +135,10 @@ func writeLabeledMetric(b *strings.Builder, name, help string, labels map[string
 	fmt.Fprintf(b, "%s{%s} %g\n", name, strings.Join(parts, ","), value)
 }
 
-// startDNSHealthChecker launches a background goroutine that periodically
+// StartDNSHealthChecker launches a background goroutine that periodically
 // resolves every managed domain (A/CNAME aliases) and records the result so
 // it can be scraped via /metrics as intermasq_domain_up{domain=...}.
-func startDNSHealthChecker() {
+func StartDNSHealthChecker() {
 	go func() {
 		// First pass quickly so /metrics has data right after startup.
 		runDNSHealthPass()

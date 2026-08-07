@@ -2,8 +2,8 @@
 // Copyright (C) 2026 AlexRus1234
 //
 // This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published
-// by the Free Software Foundation, either version 3 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // This program is distributed in the hope that it will be useful,
@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-package main
+package metrics
 
 import (
 	"net/http/httptest"
@@ -194,16 +194,16 @@ func TestCheckMetricsAuth_NoAuth(t *testing.T) {
 	}
 }
 
-// TestMetricsHandler_AllMetricNames exercises the whole metricsHandler end
+// TestMetricsHandler_AllMetricNames exercises the whole Handler end
 // to end (P2.7). The existing tests cover the formatters and the auth gate
 // in isolation, but never the assembled exposition output — so renaming or
 // dropping any of the 9 canonical metric names would not be caught. The two
 // intermasq_domain_* labeled series are only emitted inside the dnsHealth
-// loop (metrics.go:80-87), so we seed one entry to guarantee they appear.
+// loop, so we seed one entry to guarantee they appear.
 func TestMetricsHandler_AllMetricNames(t *testing.T) {
 	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
-	// metricsHandler -> checkDnsmasqStatus -> initd.Current().IsActive.
+	// Handler -> initd.Current().IsActive.
 	// Without setupServer the package-level sysCaller is a nil interface and
 	// the handler nil-derefs. NoneCaller is side-effect-free and returns
 	// false for IsActive, which is all we need to exercise the output
@@ -223,10 +223,10 @@ func TestMetricsHandler_AllMetricNames(t *testing.T) {
 	w, c := newMetricsContext("GET", "/metrics")
 	c.Request.Header.Set("Authorization", "Bearer "+jwtStr)
 
-	metricsHandler(c)
+	Handler(c)
 
 	if w.Code != 200 {
-		t.Fatalf("expected 200 from metricsHandler, got %d (body=%s)", w.Code, w.Body.String())
+		t.Fatalf("expected 200 from Handler, got %d (body=%s)", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
 	required := []string{
@@ -242,7 +242,81 @@ func TestMetricsHandler_AllMetricNames(t *testing.T) {
 	}
 	for _, name := range required {
 		if !strings.Contains(body, name) {
-			t.Errorf("metricsHandler: missing metric %q in body\n--- body ---\n%s", name, body)
+			t.Errorf("Handler: missing metric %q in body\n--- body ---\n%s", name, body)
 		}
+	}
+}
+
+// ===== Handler auth/status (L2) =====
+
+// setupMetricsGlobals wires up the globals Handler touches: SecretKey
+// for auth, sysCaller for initd.Current().IsActive, and ConfigDir for
+// ReadAllHosts. All originals are restored on test completion.
+func setupMetricsGlobals(t *testing.T) {
+	t.Helper()
+	newTestDir(t)
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
+	initd.SetCurrentForTest(t, &initd.NoneCaller{})
+}
+
+func TestMetricsHandler_NoAuth_401(t *testing.T) {
+	setupMetricsGlobals(t)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/metrics", nil)
+	Handler(c)
+
+	if w.Code != 401 {
+		t.Fatalf("expected 401 without auth, got %d", w.Code)
+	}
+	// A8 regression: 401 must carry a JSON body so curl/Prometheus show a
+	// meaningful error instead of an empty reply.
+	if w.Body.Len() == 0 {
+		t.Errorf("expected non-empty body on 401, got empty")
+	}
+	if !strings.Contains(w.Body.String(), "auth_required") {
+		t.Errorf("expected body to contain \"auth_required\", got: %s", w.Body.String())
+	}
+}
+
+func TestMetricsHandler_APIKey_200(t *testing.T) {
+	setupMetricsGlobals(t)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/metrics", nil)
+	c.Request.Header.Set("X-API-Key", "test-secret-key-32-bytes-long!!")
+	Handler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200 with valid API key, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMetricsHandler_WrongAPIKey_401(t *testing.T) {
+	setupMetricsGlobals(t)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/metrics", nil)
+	c.Request.Header.Set("X-API-Key", "wrong-key")
+	Handler(c)
+
+	if w.Code != 401 {
+		t.Fatalf("expected 401 with wrong API key, got %d", w.Code)
+	}
+}
+
+func TestMetricsHandler_TokenQuery_200(t *testing.T) {
+	setupMetricsGlobals(t)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/metrics?token=test-secret-key-32-bytes-long!!", nil)
+	Handler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200 with ?token= query param, got %d: %s", w.Code, w.Body.String())
 	}
 }
