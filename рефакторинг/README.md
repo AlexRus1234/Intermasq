@@ -31,7 +31,7 @@
 | 07 | `07-auth.md` | Пользователи, JWT, rate-limit, middleware | ☑ `57fbe7f` |
 | 08 | `08-metrics.md` | /metrics + DNS health checker (раньше control: reload трогает счётчики) | ☑ `2070043` |
 | 09 | `09-control-sse.md` | SSE broadcaster, статус/перезапуск dnsmasq | ☑ `212380c` |
-| 10 | `10-plugins.md` | Загрузка плагинов | ☐ |
+| 10 | `10-plugins.md` | Загрузка плагинов | ☑ `8add10d` |
 | 11 | `11-webapi.md` | HTTP-хендлеры, тонкий main | ☐ |
 | 12 | `12-зачистка.md` | Опционально: швы, устаревшие ссылки, README | ☐ |
 
