@@ -102,7 +102,7 @@ func getNewDevices() []models.NewDeviceInfo {
 	return devices
 }
 
-func GetArpTable() map[string]bool                          { return getArpTable() }
-func ParseArpContent(content string) map[string]bool        { return parseArpContent(content) }
-func ParseLeases() []models.LeaseEntry                      { return parseLeases() }
-func GetNewDevices() []models.NewDeviceInfo                 { return getNewDevices() }
+func GetArpTable() map[string]bool                   { return getArpTable() }
+func ParseArpContent(content string) map[string]bool { return parseArpContent(content) }
+func ParseLeases() []models.LeaseEntry               { return parseLeases() }
+func GetNewDevices() []models.NewDeviceInfo          { return getNewDevices() }
