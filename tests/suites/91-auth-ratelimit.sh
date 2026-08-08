@@ -1,4 +1,7 @@
-# tests/suites/11-auth-ratelimit.sh — 12 rapid bad logins from same IP.
+# tests/suites/91-auth-ratelimit.sh — 12 rapid bad logins from same IP.
+#
+# This suite intentionally runs last: once the client IP is blocked, later
+# suites cannot re-login after password rotation or authenticate requests.
 
 # Rate limit: 12 rapid bad logins from same IP (limit=10/min)
 section "auth rate-limit"
