@@ -26,6 +26,7 @@ import (
 	"intermask/internal/models"
 	"intermask/internal/netstate"
 	"intermask/internal/validate"
+	"intermask/internal/version"
 )
 
 func statusHandler(c *gin.Context) {
@@ -35,7 +36,7 @@ func statusHandler(c *gin.Context) {
 	defer dnsmasq.Mu.Unlock()
 	c.JSON(200, gin.H{
 		"setup_required": setupRequired,
-		"version":        "3.0",
+		"version":        version.Version,
 		"dnsmasq_active": isActive,
 	})
 }

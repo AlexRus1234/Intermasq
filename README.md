@@ -133,7 +133,7 @@ go build -o intermasq .
 ### Production-сборка (оптимизированная, с версией)
 
 ```bash
-CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=3.1.0" -o intermasq .
+CGO_ENABLED=0 go build -ldflags="-s -w -X intermask/internal/version.Version=1.0.0-pre" -o intermasq .
 ```
 
 ### Запуск

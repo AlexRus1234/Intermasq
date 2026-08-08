@@ -36,6 +36,7 @@ import (
 	"intermask/internal/metrics"
 	"intermask/internal/plugins"
 	templatepkg "intermask/internal/templates"
+	"intermask/internal/version"
 	"intermask/internal/webapi"
 )
 
@@ -88,7 +89,7 @@ func main() {
 		fmt.Printf("[FATAL] setup: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Intermasq v3.0 Started on :%s\n", *Port)
+	fmt.Printf("Intermasq %s Started on :%s\n", version.Version, *Port)
 	if err := r.Run(":" + *Port); err != nil {
 		fmt.Printf("[FATAL] Server failed: %v\n", err)
 		os.Exit(1)

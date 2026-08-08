@@ -71,7 +71,7 @@ On first launch, the admin setup screen appears. After creating an account — f
 ### Production build (with version)
 
 ```bash
-CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=3.0.0" -o intermasq .
+CGO_ENABLED=0 go build -ldflags="-s -w -X intermask/internal/version.Version=1.0.0-pre" -o intermasq .
 ```
 
 ---
@@ -99,7 +99,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=3.0.0" -o intermasq .
 
 | Variable | Description |
 |---|---|
-| `INTERMASQ_SECRET` | Secret key for JWT and API-Key. If not set — default key is used |
+| `INTERMASQ_SECRET` | Required secret key for JWT and API-Key. The process exits if it is not set |
 
 ---
 
