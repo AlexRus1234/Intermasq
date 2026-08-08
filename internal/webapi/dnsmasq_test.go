@@ -268,6 +268,35 @@ func TestCreateUserEmptyFields(t *testing.T) {
 	}
 }
 
+// TestCreateUserPasswordTooLong guards the bcrypt >72-byte trap on
+// POST /api/users: an oversize password must 400 and the user must not be
+// persisted with an empty hash (which would brick the account).
+func TestCreateUserPasswordTooLong(t *testing.T) {
+	dir := t.TempDir()
+	*DBPath = filepath.Join(dir, "users.json")
+	auth.ClearUsers()
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := fmt.Sprintf(`{"username":"admin","password":"%s"}`, strings.Repeat("a", maxPasswordBytes+1))
+	c.Request = httptest.NewRequest("POST", "/api/users", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	createUserHandler(c)
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for oversize password, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "password_too_long") {
+		t.Errorf("expected password_too_long, got: %s", w.Body.String())
+	}
+	if auth.HasUser("admin") {
+		hash, _ := auth.GetUser("admin")
+		if hash == "" {
+			t.Fatal("admin persisted with empty hash — account would be bricked")
+		}
+		t.Errorf("admin unexpectedly created (hash len=%d)", len(hash))
+	}
+}
+
 func TestDeleteUser(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")

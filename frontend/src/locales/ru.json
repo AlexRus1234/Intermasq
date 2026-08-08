@@ -189,7 +189,10 @@
     "invalid_mac": "Неверный MAC-адрес",
     "file_not_found": "Файл не найден",
     "no_valid_conf_files": "Нет валидных .conf файлов в архиве",
-    "invalid_zip": "Неверный ZIP-архив"
+    "invalid_zip": "Неверный ZIP-архив",
+    "password_too_long": "Пароль длиннее 72 байт — bcrypt не поддерживает такой",
+    "username_too_long": "Имя пользователя длиннее 64 символов",
+    "missing_fields": "Заполните все обязательные поля"
   },
   "config": {
     "groupDns": "DNS / Сеть",

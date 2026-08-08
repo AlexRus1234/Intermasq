@@ -19,8 +19,11 @@ package dnsmasq
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"intermask/internal/models"
 )
 
 // ========== IsSafePath ==========
@@ -272,5 +275,139 @@ func TestRemoveAliasLineTXT(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "cname=wiki,nas.lan") {
 		t.Errorf("CNAME should be preserved:\n%s", out)
+	}
+}
+
+// ========== AppendHostLine / AppendAliasLine ==========
+
+// TestAppendHostLine_PreservesExistingContent is the happy path: existing
+// lines stay intact and the new line is appended on its own line.
+func TestAppendHostLine_PreservesExistingContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hosts.conf")
+	original := []byte("dhcp-host=aa:bb:cc:dd:ee:01,h1,10.0.0.1\n")
+	if err := os.WriteFile(path, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendHostLine(path, models.HostEntry{Mac: "aa:bb:cc:dd:ee:02", Hostname: "h2", Ip: "10.0.0.2"}); err != nil {
+		t.Fatalf("AppendHostLine: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(got)
+	if !strings.HasPrefix(s, "dhcp-host=aa:bb:cc:dd:ee:01,h1,10.0.0.1\n") {
+		t.Errorf("existing line lost:\n%s", s)
+	}
+	if !strings.Contains(s, "dhcp-host=aa:bb:cc:dd:ee:02,h2,10.0.0.2") {
+		t.Errorf("new line not appended:\n%s", s)
+	}
+}
+
+// TestAppendAliasLine_PreservesExistingContent is the alias happy path.
+func TestAppendAliasLine_PreservesExistingContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dns.conf")
+	original := []byte("address=/a.test/10.0.0.1\n")
+	if err := os.WriteFile(path, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendAliasLine(path, models.DnsAliasEntry{Type: "CNAME", Domain: "b.test", Target: "a.test"}); err != nil {
+		t.Fatalf("AppendAliasLine: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(got)
+	if !strings.HasPrefix(s, "address=/a.test/10.0.0.1\n") {
+		t.Errorf("existing line lost:\n%s", s)
+	}
+	if !strings.Contains(s, "cname=b.test,a.test") {
+		t.Errorf("new line not appended:\n%s", s)
+	}
+}
+
+// TestAppendHostLine_ReadErrorPreservesData is the regression test for the
+// data-loss bug: when ReadFile fails with a non-IsNotExist error, the file
+// must NOT be rewritten with just the new line. Reproduced by making the
+// file write-only (mode 0o200) so ReadFile is denied while WriteFile is still
+// allowed — exactly the "transient read error" footgun. Skips on Windows
+// (no unix permission bits) and when reads bypass permissions (e.g. root).
+func TestAppendHostLine_ReadErrorPreservesData(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits not honoured on Windows")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hosts.conf")
+	original := []byte("dhcp-host=aa:bb:cc:dd:ee:01,h1,10.0.0.1\n")
+	if err := os.WriteFile(path, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o200); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0644) })
+
+	// Self-check: if reads still succeed we cannot reproduce the read-error
+	// path (e.g. running as root) — skip rather than pass vacuously.
+	if _, err := os.ReadFile(path); err == nil {
+		t.Skip("running with read bypass (root?) — cannot simulate read error")
+	}
+
+	err := AppendHostLine(path, models.HostEntry{Mac: "aa:bb:cc:dd:ee:02", Ip: "10.0.0.2"})
+	if err == nil {
+		_ = os.Chmod(path, 0644)
+		t.Fatal("expected the read error to be propagated, got nil")
+	}
+	// Restore readability and assert the original content survived.
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("file must be left untouched on read failure;\n got: %q\nwant: %q", got, original)
+	}
+}
+
+// TestAppendAliasLine_ReadErrorPreservesData mirrors the host regression test
+// for AppendAliasLine (same data-loss footgun at write.go).
+func TestAppendAliasLine_ReadErrorPreservesData(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits not honoured on Windows")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dns.conf")
+	original := []byte("address=/a.test/10.0.0.1\n")
+	if err := os.WriteFile(path, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o200); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0644) })
+
+	if _, err := os.ReadFile(path); err == nil {
+		t.Skip("running with read bypass (root?) — cannot simulate read error")
+	}
+
+	err := AppendAliasLine(path, models.DnsAliasEntry{Type: "CNAME", Domain: "b.test", Target: "a.test"})
+	if err == nil {
+		_ = os.Chmod(path, 0644)
+		t.Fatal("expected the read error to be propagated, got nil")
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("file must be left untouched on read failure;\n got: %q\nwant: %q", got, original)
 	}
 }

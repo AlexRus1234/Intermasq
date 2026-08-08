@@ -330,16 +330,52 @@ func TestDeleteAliasHandler_NotFound(t *testing.T) {
 	}
 }
 
+// TestDeleteAliasHandler_BadType confirms a genuinely unsupported type is
+// rejected. (PTR/TXT used to be rejected here too — that was the bug; they
+// are now deletable, covered by TestDeleteAliasHandler_PTR_TXT below.)
 func TestDeleteAliasHandler_BadType(t *testing.T) {
 	dir := newTestDir(t)
 	file := filepath.Join(dir, "aliases.conf")
 
-	body := `{"type":"PTR","domain":"nas.local","file":"` + jsonPath(file) + `"}`
+	body := `{"type":"MX","domain":"nas.local","file":"` + jsonPath(file) + `"}`
 	w, c := newJSONContext("POST", "/api/aliases/delete", body)
 	deleteAliasHandler(c)
 
 	if w.Code != 400 {
-		t.Fatalf("expected 400 for PTR (UI only supports A/CNAME), got %d", w.Code)
+		t.Fatalf("expected 400 for unsupported type, got %d", w.Code)
+	}
+}
+
+// TestDeleteAliasHandler_PTR_TXT covers the fix: PTR and TXT records (which
+// ARE creatable through the API) must also be deletable. Previously the
+// delete handler accepted only A/CNAME, so PTR/TXT were stuck.
+func TestDeleteAliasHandler_PTR_TXT(t *testing.T) {
+	cases := []struct {
+		typ, domain, line string
+	}{
+		{"PTR", "10.1.168.192.in-addr.arpa", "ptr-record=10.1.168.192.in-addr.arpa,nas.lan\n"},
+		{"TXT", "nas.lan", "txt-record=nas.lan,v=spf1 -all\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.typ, func(t *testing.T) {
+			dir := newTestDir(t)
+			file := filepath.Join(dir, "aliases.conf")
+			if err := os.WriteFile(file, []byte(tc.line), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			body := `{"type":"` + tc.typ + `","domain":"` + tc.domain + `","file":"` + jsonPath(file) + `"}`
+			w, c := newJSONContext("POST", "/api/aliases/delete", body)
+			deleteAliasHandler(c)
+
+			if w.Code != 200 {
+				t.Fatalf("expected 200 for %s delete, got %d: %s", tc.typ, w.Code, w.Body.String())
+			}
+			content, _ := os.ReadFile(file)
+			if strings.Contains(string(content), tc.domain) {
+				t.Errorf("%s record should be removed; file:\n%s", tc.typ, content)
+			}
+		})
 	}
 }
 
@@ -1080,6 +1116,85 @@ func TestSetupHandler_AlreadySetup(t *testing.T) {
 
 	if w.Code != 403 {
 		t.Fatalf("expected 403 when already set up, got %d", w.Code)
+	}
+}
+
+// TestSetupHandler_EmptyFields covers the missing_fields guard added so the
+// very first account cannot be created with an empty username/password (which
+// previously produced a bcrypt hash of the empty string).
+func TestSetupHandler_EmptyFields(t *testing.T) {
+	dir := t.TempDir()
+	*auth.DBPath = filepath.Join(dir, "users.json")
+	auth.ClearUsers()
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
+
+	w, c := newJSONContext("POST", "/api/setup", `{"username":"","password":""}`)
+	setupHandler(c)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for empty fields, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "missing_fields") {
+		t.Errorf("expected missing_fields, got: %s", w.Body.String())
+	}
+	if auth.UserCount() != 0 {
+		t.Error("no user should have been created for empty fields")
+	}
+}
+
+// TestSetupHandler_PasswordTooLong guards against the bcrypt >72-byte trap:
+// golang.org/x/crypto v0.48 returns ErrPasswordTooLong; ignoring it (the old
+// `hash, _ := ...` pattern) persisted an empty hash and bricked the account.
+func TestSetupHandler_PasswordTooLong(t *testing.T) {
+	dir := t.TempDir()
+	*auth.DBPath = filepath.Join(dir, "users.json")
+	auth.ClearUsers()
+	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
+
+	body := fmt.Sprintf(`{"username":"admin","password":"%s"}`, strings.Repeat("a", maxPasswordBytes+1))
+	w, c := newJSONContext("POST", "/api/setup", body)
+	setupHandler(c)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for oversize password, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "password_too_long") {
+		t.Errorf("expected password_too_long, got: %s", w.Body.String())
+	}
+	// Critical: the account must NOT be persisted with an empty/garbage hash.
+	if hash, ok := auth.GetUser("admin"); ok {
+		if hash == "" {
+			t.Fatal("admin persisted with empty hash — account would be bricked")
+		}
+		t.Errorf("admin unexpectedly created (hash len=%d)", len(hash))
+	}
+}
+
+// TestChangePasswordHandler_PasswordTooLong mirrors the setup guard for
+// POST /api/users/password: a new_password over 72 bytes must 400 and leave
+// the existing hash untouched.
+func TestChangePasswordHandler_PasswordTooLong(t *testing.T) {
+	dir := t.TempDir()
+	*auth.DBPath = filepath.Join(dir, "users.json")
+	hash, err := bcrypt.GenerateFromPassword([]byte("old-secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setUsers(map[string]string{"admin": string(hash)})
+
+	body := fmt.Sprintf(`{"old_password":"old-secret","new_password":"%s"}`, strings.Repeat("b", maxPasswordBytes+1))
+	w, c := newJSONContext("POST", "/api/users/password", body)
+	changePasswordHandler(c)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for oversize new_password, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "password_too_long") {
+		t.Errorf("expected password_too_long, got: %s", w.Body.String())
+	}
+	current, _ := auth.GetUser("admin")
+	if current != string(hash) {
+		t.Error("existing hash must be left unchanged when the new password is rejected")
 	}
 }
 

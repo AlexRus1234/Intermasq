@@ -41,6 +41,13 @@ func statusHandler(c *gin.Context) {
 	})
 }
 
+// maxPasswordBytes is the bcrypt input limit (72 bytes). golang.org/x/crypto
+// v0.48+ returns ErrPasswordTooLong for anything longer; if a caller ignores
+// that error the resulting empty hash bricks the account (can never log in).
+// We reject oversize passwords up-front AND treat any bcrypt error as
+// password_too_long so the account is never persisted with a broken hash.
+const maxPasswordBytes = 72
+
 func setupHandler(c *gin.Context) {
 	if auth.UserCount() > 0 {
 		c.JSON(403, gin.H{"error": "already_setup"})
@@ -50,7 +57,23 @@ func setupHandler(c *gin.Context) {
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
-	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if req.Username == "" || req.Password == "" {
+		c.JSON(400, gin.H{"error": "missing_fields"})
+		return
+	}
+	if len(req.Username) > 64 {
+		c.JSON(400, gin.H{"error": "username_too_long"})
+		return
+	}
+	if len(req.Password) > maxPasswordBytes {
+		c.JSON(400, gin.H{"error": "password_too_long"})
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "password_too_long"})
+		return
+	}
 	if err := auth.AddUser(req.Username, string(hash)); err != nil {
 		if errors.Is(err, auth.ErrUserExists) {
 			c.JSON(403, gin.H{"error": "already_setup"})

@@ -58,10 +58,13 @@ var octetPrefixRegex = regexp.MustCompile(`^(\d{1,3}\.){0,2}\d{1,3}$`)
 //   - MAC (any token passing validate.ValidMAC)
 //   - IPv4/IPv6 (any token parseable by net.ParseIP)
 //   - tag qualifiers "set:<name>" / "tag:<name>" -> collected into Tags
+//   - a lease-time suffix ("12h", "3600", "infinite") -> LeaseTime
 //   - everything else                             -> Hostname
 //
-// "id:<client-id>" tokens are stored as Tags verbatim so they round-trip
-// without loss, but the UI does not surface them.
+// The lease-time is detected before the hostname fallback so a trailing
+// ",12h" no longer overwrites the real hostname on parse→format round-trip
+// (bulk move/edit). "id:<client-id>" tokens are stored as Tags verbatim so
+// they round-trip without loss, but the UI does not surface them.
 func ParseDhcpHostLine(raw, file string) (models.HostEntry, bool) {
 	line := strings.TrimSpace(raw)
 	if !strings.HasPrefix(line, "dhcp-host=") && !strings.HasPrefix(line, "dhcp-host:") {
@@ -84,6 +87,8 @@ func ParseDhcpHostLine(raw, file string) (models.HostEntry, bool) {
 			entry.Ip = p
 		case strings.HasPrefix(p, "set:"), strings.HasPrefix(p, "tag:"), strings.HasPrefix(p, "id:"):
 			tags = append(tags, p)
+		case IsLeaseTime(p):
+			entry.LeaseTime = p
 		default:
 			entry.Hostname = p
 		}
@@ -96,9 +101,9 @@ func ParseDhcpHostLine(raw, file string) (models.HostEntry, bool) {
 }
 
 // FormatDhcpHostLine renders a HostEntry back into the dnsmasq textual form.
-// Order is fixed: mac[, hostname][, ip][, tags...]. Tags come last because
-// that is the convention dnsmasq examples use and it keeps the human-readable
-// part of the line at the front.
+// Order is fixed: mac[, hostname][, ip][, tags...][, lease-time]. Tags come
+// after the IP and the lease-time is emitted last, matching the convention
+// dnsmasq examples use and keeping the human-readable part at the front.
 func FormatDhcpHostLine(h models.HostEntry) string {
 	parts := make([]string, 0, 4+len(h.Tags))
 	parts = append(parts, h.Mac)
@@ -109,6 +114,9 @@ func FormatDhcpHostLine(h models.HostEntry) string {
 		parts = append(parts, h.Ip)
 	}
 	parts = append(parts, h.Tags...)
+	if h.LeaseTime != "" {
+		parts = append(parts, h.LeaseTime)
+	}
 	return "dhcp-host=" + strings.Join(parts, ",")
 }
 

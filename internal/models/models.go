@@ -28,6 +28,11 @@ type HostEntry struct {
 	// dhcp-host qualifiers such as "id:<client-id>". Tags are serialized
 	// after the IP in their original form.
 	Tags []string `json:"tags,omitempty"`
+	// LeaseTime holds the optional dhcp-host lease-time suffix (e.g. "12h",
+	// "3600", "infinite"). It is parsed from / serialized as the trailing
+	// field so that bulk move/edit round-trip it instead of clobbering it
+	// into the hostname.
+	LeaseTime string `json:"lease_time,omitempty"`
 }
 
 // НОВОЕ: Для массового импорта

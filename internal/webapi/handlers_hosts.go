@@ -642,6 +642,7 @@ func bulkEditHandler(c *gin.Context) {
 		}
 		if err := dnsmasq.AppendHostLine(p.file, models.HostEntry{
 			Mac: p.mac, Hostname: p.newHost, Ip: p.newIP, File: p.file, Tags: p.newTags,
+			LeaseTime: p.oldEntry.LeaseTime,
 		}); err != nil {
 			c.JSON(500, gin.H{"error": "file_write_error", "mac": p.mac})
 			return

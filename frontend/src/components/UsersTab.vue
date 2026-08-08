@@ -5,10 +5,10 @@
           <div class="card-body">
               <div class="row g-2">
                   <div class="col-md-4">
-                      <input v-model="pwForm.old" type="password" class="form-control" :placeholder="$t('users.oldPassword')">
+                      <input v-model="pwForm.old" type="password" maxlength="72" class="form-control" :placeholder="$t('users.oldPassword')">
                   </div>
                   <div class="col-md-4">
-                      <input v-model="pwForm.new" type="password" class="form-control" :placeholder="$t('users.newPassword')">
+                      <input v-model="pwForm.new" type="password" maxlength="72" class="form-control" :placeholder="$t('users.newPassword')">
                   </div>
                   <div class="col-md-4">
                       <button @click="changePassword" class="btn btn-primary w-100">{{ $t('users.change') }}</button>
@@ -22,10 +22,10 @@
           <div class="card-body">
               <div class="row g-2">
                   <div class="col-md-4">
-                      <input v-model="newUser.username" type="text" class="form-control" :placeholder="$t('auth.username')">
+                      <input v-model="newUser.username" type="text" maxlength="64" class="form-control" :placeholder="$t('auth.username')">
                   </div>
                   <div class="col-md-4">
-                      <input v-model="newUser.password" type="password" class="form-control" :placeholder="$t('auth.password')">
+                      <input v-model="newUser.password" type="password" maxlength="72" class="form-control" :placeholder="$t('auth.password')">
                   </div>
                   <div class="col-md-4">
                       <button @click="createUser" class="btn btn-success w-100">+ {{ $t('users.create') }}</button>

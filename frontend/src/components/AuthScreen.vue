@@ -5,8 +5,8 @@
         <div class="card-body p-4">
           <h4 class="mb-4 text-center fw-bold">{{ store.view === 'setup' ? $t('auth.setupTitle') : $t('auth.loginTitle') }}</h4>
           
-          <input v-model="username" class="form-control mb-3" :placeholder="$t('auth.username')">
-          <input v-model="password" type="password" class="form-control mb-4" :placeholder="$t('auth.password')" @keyup.enter="submit">
+          <input v-model="username" class="form-control mb-3" maxlength="64" :placeholder="$t('auth.username')">
+          <input v-model="password" type="password" class="form-control mb-4" maxlength="72" :placeholder="$t('auth.password')" @keyup.enter="submit">
           
           <button @click="submit" class="btn btn-primary w-100 fw-bold">
             {{ store.view === 'setup' ? $t('auth.createAccount') : $t('auth.login') }}

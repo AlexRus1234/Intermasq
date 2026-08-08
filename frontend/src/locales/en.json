@@ -189,7 +189,10 @@
     "invalid_mac": "Invalid MAC address",
     "file_not_found": "File not found",
     "no_valid_conf_files": "No valid .conf files found in archive",
-    "invalid_zip": "Invalid ZIP archive"
+    "invalid_zip": "Invalid ZIP archive",
+    "password_too_long": "Password longer than 72 bytes — bcrypt does not support it",
+    "username_too_long": "Username longer than 64 characters",
+    "missing_fields": "Please fill in all required fields"
   },
   "config": {
     "groupDns": "DNS / Network",

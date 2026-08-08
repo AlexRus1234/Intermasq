@@ -38,10 +38,18 @@ func resolveAliasesTargetFile(reqFile string) (string, bool) {
 	return reqFile, true
 }
 
+// validAliasType reports whether t is one of the managed DNS alias types
+// (A/CNAME/PTR/TXT). Centralised so the add and delete paths cannot drift:
+// previously delete only accepted A/CNAME, leaving PTR/TXT un-deletable
+// through the API even though they could be created.
+func validAliasType(t string) bool {
+	return t == "A" || t == "CNAME" || t == "PTR" || t == "TXT"
+}
+
 // validateAliasEntry enforces the per-type rules for A/CNAME/PTR/TXT records.
 // Used on every add/bulk/CSV path so the rules cannot drift between them.
 func validateAliasEntry(a models.DnsAliasEntry) bool {
-	if a.Type != "A" && a.Type != "CNAME" && a.Type != "PTR" && a.Type != "TXT" {
+	if !validAliasType(a.Type) {
 		return false
 	}
 	if !validate.ValidAliasDomain(a.Domain) {
@@ -205,7 +213,7 @@ func deleteAliasHandler(c *gin.Context) {
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
-	if req.Type != "A" && req.Type != "CNAME" {
+	if !validAliasType(req.Type) {
 		c.JSON(400, gin.H{"error": "bad_request"})
 		return
 	}

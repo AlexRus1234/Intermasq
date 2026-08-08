@@ -36,11 +36,19 @@ func createUserHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "username_too_long"})
 		return
 	}
+	if len(req.Password) > maxPasswordBytes {
+		c.JSON(400, gin.H{"error": "password_too_long"})
+		return
+	}
 	if auth.HasUser(req.Username) {
 		c.JSON(409, gin.H{"error": "user_exists"})
 		return
 	}
-	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "password_too_long"})
+		return
+	}
 	if err := auth.AddUser(req.Username, string(hash)); err != nil {
 		if errors.Is(err, auth.ErrUserExists) {
 			c.JSON(409, gin.H{"error": "user_exists"})
@@ -89,13 +97,21 @@ func changePasswordHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "missing_fields"})
 		return
 	}
+	if len(req.NewPassword) > maxPasswordBytes {
+		c.JSON(400, gin.H{"error": "password_too_long"})
+		return
+	}
 	currentUser := getUser(c)
 	hash, ok := auth.GetUser(currentUser)
 	if !ok || bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.OldPassword)) != nil {
 		c.JSON(401, gin.H{"error": "invalid_credentials"})
 		return
 	}
-	newHash, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "password_too_long"})
+		return
+	}
 	if err := auth.UpdateUser(currentUser, string(newHash)); err != nil {
 		c.JSON(500, gin.H{"error": "save_error"})
 		return

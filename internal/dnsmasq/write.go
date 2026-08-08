@@ -139,9 +139,16 @@ func RemoveHostLine(filePath, mac string) error {
 }
 
 // AppendHostLine appends a single dhcp-host= line to filePath, preserving
-// existing content. The line is built via FormatDhcpHostLine.
+// existing content. The line is built via FormatDhcpHostLine. A read error
+// other than "file does not exist" is propagated: previously the error was
+// discarded and a transient I/O failure (or a path that resolves to a
+// directory) caused the file to be overwritten with only the new line,
+// destroying the whole config.
 func AppendHostLine(filePath string, h models.HostEntry) error {
-	content, _ := os.ReadFile(filePath)
+	content, err := os.ReadFile(filePath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	line := FormatDhcpHostLine(h)
 	out := strings.TrimRight(string(content), "\n")
 	if out != "" {
@@ -152,9 +159,13 @@ func AppendHostLine(filePath string, h models.HostEntry) error {
 }
 
 // AppendAliasLine appends a single alias directive to the file, preserving
-// existing content. Does NOT validate; caller must do that.
+// existing content. Does NOT validate; caller must do that. See
+// AppendHostLine for why the ReadFile error is no longer discarded.
 func AppendAliasLine(filePath string, entry models.DnsAliasEntry) error {
-	content, _ := os.ReadFile(filePath)
+	content, err := os.ReadFile(filePath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	line := AliasToLine(entry)
 	out := strings.TrimRight(string(content), "\n")
 	if out != "" {

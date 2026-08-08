@@ -96,6 +96,81 @@ func TestParseDhcpHostLine_TrailingNewline(t *testing.T) {
 	}
 }
 
+// TestParseDhcpHostLine_LeaseTime covers the regression where a trailing
+// lease-time suffix (",12h") was mis-parsed as the hostname and then dropped
+// on format round-trip, corrupting bulk move/edit. The suffix must land in
+// LeaseTime and the real hostname must survive.
+func TestParseDhcpHostLine_LeaseTime(t *testing.T) {
+	dir := newTestDir(t)
+	file := filepath.Join(dir, "test.conf")
+
+	cases := []struct {
+		name   string
+		line   string
+		host   string
+		lease  string
+	}{
+		{"hours", "dhcp-host=aa:bb:cc:dd:ee:ff,192.168.1.10,host1,12h", "host1", "12h"},
+		{"seconds", "dhcp-host=aa:bb:cc:dd:ee:ff,host2,3600", "host2", "3600"},
+		{"infinite", "dhcp-host=aa:bb:cc:dd:ee:ff,host3,10.0.0.3,infinite", "host3", "infinite"},
+		{"host_before_ip", "dhcp-host=aa:bb:cc:dd:ee:ff,host4,10.0.0.4,7d", "host4", "7d"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			entry, ok := ParseDhcpHostLine(tc.line, file)
+			if !ok {
+				t.Fatalf("expected parse success for %q", tc.line)
+			}
+			if entry.Hostname != tc.host {
+				t.Errorf("hostname: got %q, want %q", entry.Hostname, tc.host)
+			}
+			if entry.LeaseTime != tc.lease {
+				t.Errorf("lease_time: got %q, want %q", entry.LeaseTime, tc.lease)
+			}
+			// Round-trip: parsing the formatted output must yield the same
+			// fields and the line must still carry the suffix.
+			formatted := FormatDhcpHostLine(entry)
+			if !strings.Contains(formatted, tc.lease) {
+				t.Errorf("formatted line dropped lease-time: %q", formatted)
+			}
+			round, ok := ParseDhcpHostLine(formatted, file)
+			if !ok {
+				t.Fatalf("round-trip parse failed for %q", formatted)
+			}
+			if round.Hostname != tc.host || round.LeaseTime != tc.lease {
+				t.Errorf("round-trip mismatch: got host=%q lease=%q, want host=%q lease=%q",
+					round.Hostname, round.LeaseTime, tc.host, tc.lease)
+			}
+		})
+	}
+}
+
+// TestParseDhcpHostLine_LeaseTimeWithTag ensures a lease-time coexists with a
+// set: tag and that the tag survives the round-trip too.
+func TestParseDhcpHostLine_LeaseTimeWithTag(t *testing.T) {
+	dir := newTestDir(t)
+	file := filepath.Join(dir, "test.conf")
+
+	entry, ok := ParseDhcpHostLine("dhcp-host=aa:bb:cc:dd:ee:ff,host1,10.0.0.1,set:phone,12h", file)
+	if !ok {
+		t.Fatal("expected parse success")
+	}
+	if entry.Hostname != "host1" {
+		t.Errorf("hostname: got %q, want host1", entry.Hostname)
+	}
+	if entry.LeaseTime != "12h" {
+		t.Errorf("lease_time: got %q, want 12h", entry.LeaseTime)
+	}
+	if len(entry.Tags) != 1 || entry.Tags[0] != "set:phone" {
+		t.Errorf("tags: got %+v, want [set:phone]", entry.Tags)
+	}
+	formatted := FormatDhcpHostLine(entry)
+	// Tag must precede the trailing lease-time.
+	if !strings.HasSuffix(formatted, ",set:phone,12h") {
+		t.Errorf("unexpected format order: %q", formatted)
+	}
+}
+
 // TestParseCSVHostsNormalizesDashMAC (A4 regression) — CSV import normalises
 // dash-MACs the same way the JSON add path does.
 func TestParseCSVHostsNormalizesDashMAC(t *testing.T) {
