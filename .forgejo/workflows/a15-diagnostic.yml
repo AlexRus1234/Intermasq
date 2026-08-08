@@ -17,8 +17,29 @@ jobs:
       INTERMASQ_SECRET: "ci-test-secret-32-bytes-pad-XXXXXXXX"
 
     steps:
-      - name: Install git and basics
-        run: dnf install -y --setopt=install_weak_deps=False git curl tar gcc make nodejs npm
+      - name: Install git first (minimal fedora image lacks it)
+        run: dnf install -y --setopt=install_weak_deps=False git curl
+
+      - name: Trust Local CA
+        run: |
+          curl -k https://172.20.0.1:9000/roots.pem -o /etc/pki/ca-trust/source/anchors/step-ca.crt
+          update-ca-trust
+          git config --global http.sslCAInfo /etc/pki/ca-trust/source/anchors/step-ca.crt
+
+      - name: Configure Nora RPM repo
+        run: |
+          printf '%s\n' \
+            '[nora-runner]' \
+            'name=Nora Runner Dependencies' \
+            'baseurl=https://nora.panelka.yadr01.internal/rpm/runner/' \
+            'gpgcheck=0' \
+            'enabled=1' \
+            'priority=1' \
+            'sslverify=1' \
+            > /etc/yum.repos.d/nora.repo
+
+      - name: Install remaining system dependencies
+        run: dnf install -y --setopt=install_weak_deps=False tar gcc make nodejs npm
 
       - name: Checkout
         uses: actions/checkout@v4
