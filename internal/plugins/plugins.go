@@ -42,6 +42,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"intermask/internal/auth"
 )
 
 var (
@@ -128,7 +129,7 @@ func Load(r *gin.Engine) {
 			},
 		}
 
-		r.Any("/plugins/"+p.ID+"/*any", func(c *gin.Context) {
+		r.Any("/plugins/"+p.ID+"/*any", auth.Middleware, func(c *gin.Context) {
 			c.Request.URL.Path = c.Param("any")
 			proxy.ServeHTTP(c.Writer, c.Request)
 		})
