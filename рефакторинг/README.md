@@ -32,7 +32,7 @@
 | 08 | `08-metrics.md` | /metrics + DNS health checker (раньше control: reload трогает счётчики) | ☑ `2070043` |
 | 09 | `09-control-sse.md` | SSE broadcaster, статус/перезапуск dnsmasq | ☑ `212380c` |
 | 10 | `10-plugins.md` | Загрузка плагинов | ☑ `8add10d` |
-| 11 | `11-webapi.md` | HTTP-хендлеры, тонкий main | ☐ |
+| 11 | `11-webapi.md` | HTTP-хендлеры, тонкий main | ☑ `4cfb83a` |
 | 12 | `12-зачистка.md` | Опционально: швы, устаревшие ссылки, README | ☐ |
 
 ## Сквозные правила (полный блок — в каждом файле этапа)
