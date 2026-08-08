@@ -55,6 +55,11 @@ func Register(r *gin.Engine, ciMode bool) {
 				c.JSON(200, gin.H{"status": "restarting"})
 				if !ciMode {
 					go func() {
+						// Kill plugin children before the supervisor restarts
+						// us: on openrc/runit/sysvinit only the main PID is
+						// killed, so without this the old plugins survive and
+						// pile up as duplicates after the restart.
+						plugins.Stop()
 						if err := initd.Current().RestartSelf(); err != nil {
 							fmt.Printf("[INIT] self-restart failed: %v\n", err)
 						}

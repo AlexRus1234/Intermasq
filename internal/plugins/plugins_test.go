@@ -50,15 +50,19 @@ func TestLoadPlugins_FakeDir(t *testing.T) {
 	origPluginsDir := PluginsDir
 	origSocketsDir := SocketsDir
 	origLoaded := loadedPlugins
+	origCmds := startedCmds
 	pluginsRoot := t.TempDir()
 	socketsRoot := t.TempDir()
 	PluginsDir = pluginsRoot
 	SocketsDir = socketsRoot
 	loadedPlugins = nil
+	startedCmds = nil
 	t.Cleanup(func() {
+		Stop()
 		PluginsDir = origPluginsDir
 		SocketsDir = origSocketsDir
 		loadedPlugins = origLoaded
+		startedCmds = origCmds
 	})
 
 	// Build a fake plugin directory: manifest.json + executable shell-script.
@@ -207,4 +211,150 @@ func TestLoadPlugins_BrokenManifest(t *testing.T) {
 			t.Errorf("broken manifest should not register a route; got %s", route.Path)
 		}
 	}
+}
+
+// TestLoadPlugins_DuplicateIDNoPanic covers the startup-panic regression:
+// two plugin subdirectories with the same manifest id used to register the
+// /plugins/<id>/* route twice, which makes gin panic at boot. Now the first
+// manifest wins and the duplicate is skipped — no panic, exactly one route,
+// one loaded entry and one started process.
+func TestLoadPlugins_DuplicateIDNoPanic(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake plugin binary (shell-script) unsupported on Windows")
+	}
+	origPluginsDir := PluginsDir
+	origSocketsDir := SocketsDir
+	origLoaded := loadedPlugins
+	origCmds := startedCmds
+	pluginsRoot := t.TempDir()
+	PluginsDir = pluginsRoot
+	SocketsDir = t.TempDir()
+	loadedPlugins = nil
+	startedCmds = nil
+	t.Cleanup(func() {
+		Stop()
+		PluginsDir = origPluginsDir
+		SocketsDir = origSocketsDir
+		loadedPlugins = origLoaded
+		startedCmds = origCmds
+	})
+
+	// Two plugin dirs whose manifests share id "dup".
+	for _, sub := range []string{"a", "b"} {
+		pluginDir := filepath.Join(pluginsRoot, sub)
+		if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		manifest := []byte(`{"id":"dup","name":"Dup ` + sub + `","bin":"p"}`)
+		if err := os.WriteFile(filepath.Join(pluginDir, "manifest.json"), manifest, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(pluginDir, "p"), []byte("#!/bin/sh\nsleep 60\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+
+	Load(r) // must NOT panic on the duplicate id
+
+	routeCount := 0
+	for _, route := range r.Routes() {
+		if strings.HasSuffix(route.Path, "/plugins/dup/*any") {
+			routeCount++
+		}
+	}
+	if routeCount != 1 {
+		t.Errorf("expected exactly 1 /plugins/dup route, got %d", routeCount)
+	}
+	dupLoaded := 0
+	for _, p := range loadedPlugins {
+		if p.ID == "dup" {
+			dupLoaded++
+		}
+	}
+	if dupLoaded != 1 {
+		t.Errorf("expected exactly 1 loaded plugin for dup id, got %d", dupLoaded)
+	}
+	startedCmdsMu.Lock()
+	started := len(startedCmds)
+	startedCmdsMu.Unlock()
+	if started != 1 {
+		t.Errorf("expected exactly 1 started process for dup id, got %d", started)
+	}
+}
+
+// TestStopKillsStartedProcesses covers the orphaned-plugin-process bug:
+// before Stop existed, plugin children stayed alive after the server was
+// restarted/stopped (on openrc/runit/sysvinit only the main PID is killed),
+// piling up as duplicates. After Load, exactly one process is tracked; after
+// Stop it is reaped and the tracked slice is cleared.
+func TestStopKillsStartedProcesses(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake plugin binary (shell-script) unsupported on Windows")
+	}
+	origPluginsDir := PluginsDir
+	origSocketsDir := SocketsDir
+	origLoaded := loadedPlugins
+	origCmds := startedCmds
+	pluginsRoot := t.TempDir()
+	PluginsDir = pluginsRoot
+	SocketsDir = t.TempDir()
+	loadedPlugins = nil
+	startedCmds = nil
+	t.Cleanup(func() {
+		Stop()
+		PluginsDir = origPluginsDir
+		SocketsDir = origSocketsDir
+		loadedPlugins = origLoaded
+		startedCmds = origCmds
+	})
+
+	pluginDir := filepath.Join(pluginsRoot, "demo")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "manifest.json"), []byte(`{"id":"demo","name":"Demo","bin":"demo"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "demo"), []byte("#!/bin/sh\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	Load(r)
+
+	startedCmdsMu.Lock()
+	if len(startedCmds) != 1 {
+		startedCmdsMu.Unlock()
+		t.Fatalf("expected 1 started plugin process, got %d", len(startedCmds))
+	}
+	cmd := startedCmds[0]
+	startedCmdsMu.Unlock()
+
+	Stop()
+
+	// Kill + Wait was called inside Stop, so the process is now reaped.
+	if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
+		t.Fatalf("plugin process was not killed/reaped by Stop")
+	}
+	startedCmdsMu.Lock()
+	remaining := len(startedCmds)
+	startedCmdsMu.Unlock()
+	if remaining != 0 {
+		t.Errorf("expected startedCmds cleared after Stop, got %d", remaining)
+	}
+}
+
+// TestStopIsIdempotent confirms a second Stop call is a harmless no-op (the
+// restart-self path and the SIGTERM handler can both fire on the same
+// shutdown).
+func TestStopIsIdempotent(t *testing.T) {
+	startedCmdsMu.Lock()
+	startedCmds = nil
+	startedCmdsMu.Unlock()
+	Stop() // must not panic on an empty slice
+	Stop() // and again
 }

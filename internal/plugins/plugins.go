@@ -39,6 +39,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -59,6 +60,15 @@ var (
 // loadedPlugins holds every manifest that Load successfully parsed and
 // mounted. Unexported: the /api/plugins handler reads it via Loaded.
 var loadedPlugins []PluginManifest
+
+// startedCmds tracks every plugin process Launch started so Stop can kill
+// them on shutdown/restart. Supervisors on openrc/runit/sysvinit kill only
+// the main PID on stop/restart, so without an explicit Kill the plugin
+// children stay alive and pile up as duplicates after restart-self.
+var (
+	startedCmdsMu sync.Mutex
+	startedCmds   []*exec.Cmd
+)
 
 // PluginManifest is the on-disk shape of <plugin>/manifest.json. Load
 // populates loadedPlugins with the parsed manifests; /api/plugins marshals
@@ -82,6 +92,12 @@ func Load(r *gin.Engine) {
 		return
 	}
 
+	// seen guards against two manifests sharing the same id: registering the
+	// reverse-proxy route /plugins/<id>/* twice panics inside gin at startup,
+	// and two sockets/plugins with the same id are meaningless anyway. The
+	// first manifest wins; later ones are skipped.
+	seen := make(map[string]bool)
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -99,6 +115,12 @@ func Load(r *gin.Engine) {
 			continue
 		}
 
+		if p.ID == "" || seen[p.ID] {
+			fmt.Printf("[PLUGINS] Skipping plugin with empty or duplicate id %q (dir %s)\n", p.ID, entry.Name())
+			continue
+		}
+		seen[p.ID] = true
+
 		binPath := filepath.Join(path, p.Bin)
 		sockPath := filepath.Join(SocketsDir, p.ID+".sock")
 
@@ -114,6 +136,9 @@ func Load(r *gin.Engine) {
 				fmt.Printf("[PLUGINS] Error starting %s: %v\n", p.Name, err)
 				continue
 			}
+			startedCmdsMu.Lock()
+			startedCmds = append(startedCmds, cmd)
+			startedCmdsMu.Unlock()
 			fmt.Printf("[PLUGINS] Started %s on socket %s\n", p.Name, sockPath)
 		}
 
@@ -145,11 +170,44 @@ func Loaded() []PluginManifest {
 	return loadedPlugins
 }
 
+// Stop terminates every plugin process started by Load. It is best-effort
+// and idempotent: already-exited processes are skipped, and the tracked
+// slice is cleared so a second call is a no-op.
+//
+// Callers:
+//   - the restart-self handler, BEFORE invoking the supervisor's restart, so
+//     the old plugin processes die with the old server instead of being
+//     orphaned (on openrc/runit/sysvinit the supervisor kills only the main
+//     PID, leaving plugin children running → duplicates after restart);
+//   - main's SIGTERM/SIGINT handler, so `systemctl stop` / a manual kill
+//     also cleans up plugin children on every init system.
+func Stop() {
+	startedCmdsMu.Lock()
+	cmds := startedCmds
+	startedCmds = nil
+	startedCmdsMu.Unlock()
+
+	for _, cmd := range cmds {
+		if cmd.Process == nil {
+			continue
+		}
+		// Already reaped (e.g. plugin exited on its own). Wait was already
+		// called, so skip to avoid the "waitid: no child process" path.
+		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			continue
+		}
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}
+}
+
 // SetDirsForTest reroutes PluginsDir/SocketsDir at the given paths for the
-// duration of the test, resets loadedPlugins to nil, and restores all three
-// on cleanup. It is the cross-package seam used by withSandboxFlags in
-// package main (which used to mutate the package vars directly before the
-// plugin code moved here).
+// duration of the test, resets loadedPlugins and startedCmds to nil, and
+// restores all of them on cleanup (calling Stop first so any plugin process
+// a test started via Load is reaped instead of leaking out of the test run).
+// It is the cross-package seam used by withSandboxFlags in package main
+// (which used to mutate the package vars directly before the plugin code
+// moved here).
 //
 // Exported for cross-package tests during modularization.
 func SetDirsForTest(t *testing.T, pluginsDir, socketsDir string) {
@@ -157,12 +215,16 @@ func SetDirsForTest(t *testing.T, pluginsDir, socketsDir string) {
 	origPluginsDir := PluginsDir
 	origSocketsDir := SocketsDir
 	origLoaded := loadedPlugins
+	origCmds := startedCmds
 	PluginsDir = pluginsDir
 	SocketsDir = socketsDir
 	loadedPlugins = nil
+	startedCmds = nil
 	t.Cleanup(func() {
+		Stop()
 		PluginsDir = origPluginsDir
 		SocketsDir = origSocketsDir
 		loadedPlugins = origLoaded
+		startedCmds = origCmds
 	})
 }

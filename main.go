@@ -23,6 +23,8 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/gin-gonic/gin"
 	"github.com/swaggo/files"
@@ -89,6 +91,19 @@ func main() {
 		fmt.Printf("[FATAL] setup: %v\n", err)
 		os.Exit(1)
 	}
+	// On SIGTERM/SIGINT kill plugin children before exiting. Supervisors on
+	// openrc/runit/sysvinit (and a bare `kill`) terminate only the main PID,
+	// so without this the plugin processes stay alive after the server is
+	// gone. (restart-self does its own Stop() before invoking the supervisor,
+	// this covers stop / manual kill on every init system.)
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		sig := <-sigCh
+		fmt.Printf("\n[SHUTDOWN] received %s, stopping plugin processes\n", sig)
+		plugins.Stop()
+		os.Exit(0)
+	}()
 	fmt.Printf("Intermasq %s Started on :%s\n", version.Version, *Port)
 	if err := r.Run(":" + *Port); err != nil {
 		fmt.Printf("[FATAL] Server failed: %v\n", err)
