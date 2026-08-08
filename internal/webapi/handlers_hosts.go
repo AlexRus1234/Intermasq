@@ -1,4 +1,4 @@
-package main
+package webapi
 
 // This file holds HTTP handlers for the static-host subsystem
 // (dhcp-host=): single add/edit/delete, bulk add via JSON or CSV,
@@ -18,13 +18,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"intermask/internal/audit"
 	"intermask/internal/dnsmasq"
+	"intermask/internal/models"
 	templatepkg "intermask/internal/templates"
 	"intermask/internal/validate"
 )
 
 func getHostsHandler(c *gin.Context) {
-	hosts := []HostEntry{}
+	hosts := []models.HostEntry{}
 	files, err := os.ReadDir(*dnsmasq.ConfigDir)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "dir_read_error"})
@@ -58,7 +60,7 @@ func getHostsHandler(c *gin.Context) {
 }
 
 func addHostHandler(c *gin.Context) {
-	var req HostEntry
+	var req models.HostEntry
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
@@ -122,7 +124,7 @@ func addHostHandler(c *gin.Context) {
 		return
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:     getUser(c),
 		Action:   "add",
 		Mac:      req.Mac,
@@ -137,7 +139,7 @@ func addHostHandler(c *gin.Context) {
 // validateHostTags / normalizeHostTags live in internal/validate.
 
 func bulkAddHostsHandler(c *gin.Context) {
-	var req BulkHostReq
+	var req models.BulkHostReq
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
@@ -240,7 +242,7 @@ func bulkAddHostsHandler(c *gin.Context) {
 		return
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   getUser(c),
 		Action: "bulk_add",
 		File:   req.File,
@@ -302,7 +304,7 @@ func deleteHostHandler(c *gin.Context) {
 			return
 		}
 
-		writeAudit(AuditEntry{
+		audit.WriteAudit(audit.AuditEntry{
 			User:     getUser(c),
 			Action:   "delete",
 			Mac:      mac,
@@ -424,7 +426,7 @@ func importCSVHandler(c *gin.Context) {
 		return
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   getUser(c),
 		Action: "bulk_add",
 		File:   targetFile,
@@ -435,7 +437,7 @@ func importCSVHandler(c *gin.Context) {
 }
 
 func bulkMoveHandler(c *gin.Context) {
-	var req BulkMoveReq
+	var req models.BulkMoveReq
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
@@ -513,7 +515,7 @@ func bulkMoveHandler(c *gin.Context) {
 		moved++
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   getUser(c),
 		Action: "bulk_move",
 		File:   req.Target,
@@ -524,7 +526,7 @@ func bulkMoveHandler(c *gin.Context) {
 }
 
 func bulkEditHandler(c *gin.Context) {
-	var req BulkEditReq
+	var req models.BulkEditReq
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
@@ -550,7 +552,7 @@ func bulkEditHandler(c *gin.Context) {
 	type plannedChange struct {
 		mac      string
 		file     string
-		oldEntry *HostEntry
+		oldEntry *models.HostEntry
 		newIP    string
 		newHost  string
 		newTags  []string
@@ -626,7 +628,7 @@ func bulkEditHandler(c *gin.Context) {
 			c.JSON(500, gin.H{"error": "file_write_error", "mac": p.mac})
 			return
 		}
-		if err := dnsmasq.AppendHostLine(p.file, HostEntry{
+		if err := dnsmasq.AppendHostLine(p.file, models.HostEntry{
 			Mac: p.mac, Hostname: p.newHost, Ip: p.newIP, File: p.file, Tags: p.newTags,
 		}); err != nil {
 			c.JSON(500, gin.H{"error": "file_write_error", "mac": p.mac})
@@ -634,7 +636,7 @@ func bulkEditHandler(c *gin.Context) {
 		}
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   getUser(c),
 		Action: "bulk_edit",
 		Mac:    fmt.Sprintf("%d hosts", len(planned)),
@@ -655,7 +657,7 @@ func getTemplatesHandler(c *gin.Context) {
 }
 
 func createTemplateHandler(c *gin.Context) {
-	var req Template
+	var req models.Template
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
@@ -697,7 +699,7 @@ func deleteTemplateHandler(c *gin.Context) {
 }
 
 func applyTemplateHandler(c *gin.Context) {
-	var req ApplyTemplateReq
+	var req models.ApplyTemplateReq
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}

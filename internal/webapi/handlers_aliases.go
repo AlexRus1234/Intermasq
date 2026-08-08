@@ -1,4 +1,4 @@
-package main
+package webapi
 
 // HTTP handlers for the DNS alias subsystem (address= / cname= /
 // ptr-record= / txt-record=). CRUD, bulk add, CSV import/export, plus the
@@ -14,7 +14,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"intermask/internal/audit"
 	"intermask/internal/dnsmasq"
+	"intermask/internal/models"
 	"intermask/internal/validate"
 )
 
@@ -38,7 +40,7 @@ func resolveAliasesTargetFile(reqFile string) (string, bool) {
 
 // validateAliasEntry enforces the per-type rules for A/CNAME/PTR/TXT records.
 // Used on every add/bulk/CSV path so the rules cannot drift between them.
-func validateAliasEntry(a DnsAliasEntry) bool {
+func validateAliasEntry(a models.DnsAliasEntry) bool {
 	if a.Type != "A" && a.Type != "CNAME" && a.Type != "PTR" && a.Type != "TXT" {
 		return false
 	}
@@ -61,7 +63,7 @@ func getAliasesHandler(c *gin.Context) {
 }
 
 func addAliasHandler(c *gin.Context) {
-	var req DnsAliasEntry
+	var req models.DnsAliasEntry
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
@@ -91,7 +93,7 @@ func addAliasHandler(c *gin.Context) {
 		return
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:     getUser(c),
 		Action:   "alias_add",
 		Mac:      req.Type,
@@ -104,7 +106,7 @@ func addAliasHandler(c *gin.Context) {
 }
 
 func bulkAddAliasesHandler(c *gin.Context) {
-	var req BulkAliasReq
+	var req models.BulkAliasReq
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
@@ -116,7 +118,7 @@ func bulkAddAliasesHandler(c *gin.Context) {
 	}
 	req.File = target
 
-	valid := []DnsAliasEntry{}
+	valid := []models.DnsAliasEntry{}
 	for _, a := range req.Aliases {
 		a.File = req.File
 		if !validateAliasEntry(a) {
@@ -188,7 +190,7 @@ func bulkAddAliasesHandler(c *gin.Context) {
 		return
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   getUser(c),
 		Action: "alias_bulk_add",
 		File:   req.File,
@@ -199,7 +201,7 @@ func bulkAddAliasesHandler(c *gin.Context) {
 }
 
 func deleteAliasHandler(c *gin.Context) {
-	var req DeleteAliasReq
+	var req models.DeleteAliasReq
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
@@ -226,7 +228,7 @@ func deleteAliasHandler(c *gin.Context) {
 		return
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:     getUser(c),
 		Action:   "alias_delete",
 		Mac:      req.Type,
@@ -336,7 +338,7 @@ func importAliasesCSVHandler(c *gin.Context) {
 		return
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   getUser(c),
 		Action: "alias_bulk_add",
 		File:   targetFile,

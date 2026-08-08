@@ -2,8 +2,8 @@
 // Copyright (C) 2026 AlexRus1234
 //
 // This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published
-// by the Free Software Foundation, either version 3 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // This program is distributed in the hope that it will be useful,
@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-package main
+package webapi
 
 // Coverage sweep block B (логи/Coverage_sweep.md §2.B): Linux-gated tests
 // that exercise dnsmasq-dependent success paths by injecting a fake
@@ -25,233 +25,31 @@ package main
 // Not safe to run in t.Parallel(): we mutate the global bin-path state (via
 // bins.SetPathForTest) and the `sysCaller` package var. Tests save/restore
 // via t.Cleanup.
+//
+// The fake-bin harness (fakeDnsmasq / fakeDnsmasqArgvInspect /
+// fakeDnsmasqStrict / fakeBin / setBinPath / itoa), the history helpers
+// (withHistoryDir / newestHistoryVersion / firstVersion) and multipartWriter
+// live in helpers_test.go.
 
 import (
 	"archive/zip"
 	"bytes"
-	"mime/multipart"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
-	"intermask/internal/bins"
+	"github.com/gin-gonic/gin"
+
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
-
-	"github.com/gin-gonic/gin"
 )
-
-// fakeDnsmasq writes a shell-script "dnsmasq" that exits with `exitCode`
-// into a temp dir, points the cached dnsmasq path (internal/bins, via
-// setBinPath/bins.SetPathForTest) at it, and registers cleanup to restore
-// the previous value. The script honours the shebang convention; on
-// non-Linux hosts callers must t.Skip() beforehand.
-//
-// If exitCode is 0, the script behaves like the real dnsmasq's `--test`
-// success path. If exitCode != 0, the script prints a marker to stderr+stdout
-// (so CombinedOutput captures a non-empty string) and exits with that code.
-func fakeDnsmasq(t *testing.T, exitCode int) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("fake-dnsmasq shell-script unsupported on Windows")
-	}
-	tmp := t.TempDir()
-	bin := filepath.Join(tmp, "dnsmasq")
-	var script string
-	if exitCode == 0 {
-		script = "#!/bin/sh\nexit 0\n"
-	} else {
-		script = "#!/bin/sh\necho 'fake dnsmasq: test failed'\nexit " + itoa(exitCode) + "\n"
-	}
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake dnsmasq: %v", err)
-	}
-	setBinPath(t, "dnsmasq", bin)
-}
-
-// fakeDnsmasqArgvInspect is like fakeDnsmasq but the script also writes its
-// own argv ($@) to a sibling log file before exiting. Used by wiring-tests
-// (A13/A14 regression guards) that need to assert dnsmasq was invoked with
-// `--conf-file=<path>` rather than bare `--test`. Returns the binary path
-// (for completeness) and the log path (to be passed to readArgvLog).
-//
-// Unlike fakeDnsmasq, this helper does NOT echo a marker to stderr on
-// exitCode!=0 — the focus here is argv capture, not error-body shape.
-// Callers wanting the marker body for `dnsmasq_test_failed` matching should
-// keep using fakeDnsmasq.
-func fakeDnsmasqArgvInspect(t *testing.T, exitCode int) (binPath, logPath string) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("fake-dnsmasq shell-script unsupported on Windows")
-	}
-	dir := t.TempDir()
-	binPath = filepath.Join(dir, "dnsmasq")
-	logPath = filepath.Join(dir, "argv.log")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + logPath + "\"\nexit " + itoa(exitCode) + "\n"
-	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake dnsmasq (argv-inspect): %v", err)
-	}
-	setBinPath(t, "dnsmasq", binPath)
-	return binPath, logPath
-}
-
-// readArgvLog reads the argv capture file produced by fakeDnsmasqArgvInspect.
-// Fatal-fails the test if the file is missing — wiring tests always expect a
-// capture (i.e. dnsmasq was actually invoked).
-func readArgvLog(t *testing.T, logPath string) string {
-	t.Helper()
-	b, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read argv log %s: %v", logPath, err)
-	}
-	return string(b)
-}
-
-// fakeDnsmasqStrict installs a fake `dnsmasq` that ACTUALLY inspects the
-// config file named by --conf-file=<path> and exits 1 if it contains the
-// marker `# INVALID` (exit 0 otherwise). This lets a test assert that
-// writeConfigWithTest/writeFileRaw genuinely ran `dnsmasq --test` against the
-// just-written content AND that a content rejection surfaces as
-// `dnsmasq_test_failed` — something the plain fakeDnsmasq (which is
-// `#!/bin/sh\nexit 0` and accepts any garbage) cannot do.
-//
-// Mirrors fakeDnsmasq wiring: points the cached dnsmasq path (internal/bins,
-// via setBinPath/bins.SetPathForTest) at the script, registers cleanup,
-// skips on Windows (shebang not honoured by os/exec there).
-func fakeDnsmasqStrict(t *testing.T) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("fake-dnsmasq shell-script unsupported on Windows")
-	}
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "dnsmasq")
-	// Parse --conf-file=<path> out of argv, read that file, reject on the
-	// `# INVALID` marker. `grep -q` + `exit 1` mirrors a real `dnsmasq --test`
-	// content rejection closely enough for the success/failure wiring under
-	// test. Writes nothing to stdout/stderr on success; on rejection prints a
-	// short message so CombinedOutput captures a non-empty body (matching the
-	// real dnsmasq --test failure shape that becomes `dnsmasq_test_failed: ...`).
-	script := `#!/bin/sh
-conf=""
-for arg in "$@"; do
-    case "$arg" in
-        --conf-file=*) conf="${arg#--conf-file=}" ;;
-    esac
-done
-if [ -n "$conf" ] && [ -f "$conf" ]; then
-    if grep -q '# INVALID' "$conf"; then
-        echo "fake dnsmasq: invalid config"
-        exit 1
-    fi
-fi
-exit 0
-`
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write strict fake dnsmasq: %v", err)
-	}
-	setBinPath(t, "dnsmasq", bin)
-}
-
-// fakeBin writes a shell-script binary `name` (with `script` body, no
-// shebang) into a temp dir, installs it under the matching bin-path var in
-// internal/bins for the duration of the test (via bins.SetPathForTest), and
-// registers cleanup to restore the previous value. Recognised names:
-// "dnsmasq", "sudo", "systemctl", "service", "rc-service", "sv". Windows is
-// skipped because the shebang trick is not honoured by os/exec there.
-//
-// This is the seam used by coverage sweep block D (§3.T-D): all SystemCaller
-// methods call bins.Sudo()/bins.Systemctl()/... which read these cached
-// paths — so pointing them at fake scripts exercises the exec-wiring without
-// a real init system. See логи/Coverage_sweep.md §2.D ("vanity-покрытие").
-func fakeBin(t *testing.T, name, script string) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("fake shell-script binary unsupported on Windows")
-	}
-	dir := t.TempDir()
-	bin := filepath.Join(dir, name)
-	full := "#!/bin/sh\n" + script + "\n"
-	if err := os.WriteFile(bin, []byte(full), 0o755); err != nil {
-		t.Fatalf("write fake %s: %v", name, err)
-	}
-	setBinPath(t, name, bin)
-}
-
-// setBinPath assigns `bin` to the cached path matching `name` and registers
-// cleanup to restore the previous value (plus a binsOnce reset so a later
-// accessor call may re-resolve). Unlike fakeBin, it does not write any file
-// — useful when a test wants to point a var at an existing path. Delegates to
-// bins.SetPathForTest (the cross-package seam); name set is identical.
-func setBinPath(t *testing.T, name, bin string) {
-	t.Helper()
-	bins.SetPathForTest(t, name, bin)
-}
-
-// itoa is a tiny stdlib-free itoa so we avoid importing strconv just for the
-// script-assembly line above. Supports non-negative ints only.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [16]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(buf[i:])
-}
-
-// withSysCaller used to live here in package main and swap the package var
-// sysCaller for the test. It moved with system.go to internal/initd: the
-// exported seam initd.SetCurrentForTest now plays that role across packages
-// (see the reload-handler tests below). failCaller used to live here too as
-// a main-package-only SystemCaller driving reloadDnsmasq's caller-failure
-// branch; it moved to internal/control with the ReloadDnsmasq tests during
-// stage 9 of the modularization.
-
-// withHistoryDir points *HistoryDir at a temp dir for the duration of the
-// test. Restores the previous value on cleanup.
-func withHistoryDir(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	orig := *dnsmasq.HistoryDir
-	*dnsmasq.HistoryDir = dir
-	t.Cleanup(func() { *dnsmasq.HistoryDir = orig })
-	return dir
-}
-
-// newestHistoryVersion is kept for the remaining handler-level tests.
-func newestHistoryVersion(t *testing.T, filePath string) string {
-	t.Helper()
-	versions, err := dnsmasq.ListHistory(filePath)
-	if err != nil {
-		t.Fatalf("listHistory: %v", err)
-	}
-	if len(versions) == 0 {
-		t.Fatal("no history versions produced")
-	}
-	return versions[0].Version
-}
-
-// firstVersion returns the only stored version for a handler-level test.
-func firstVersion(t *testing.T, filePath string) string {
-	t.Helper()
-	versions, err := dnsmasq.ListHistory(filePath)
-	if err != nil || len(versions) != 1 {
-		t.Fatalf("firstVersion: %v (%d)", err, len(versions))
-	}
-	return versions[0].Version
-}
 
 // ===== T-B.3 + T-B.4 reloadDnsmasq / reloadHandler =====
 // (TestReloadDnsmasq_Success / _TestFail / _CallerFail moved to internal/control
 // during stage 9 of the modularization; the handler-level TestReloadHandler_*
-// stay here until stage 11.)
+// stay here.)
 
 func TestReloadHandler_200(t *testing.T) {
 	fakeDnsmasq(t, 0)
@@ -374,25 +172,6 @@ func TestHistoryRestoreHandler_Success(t *testing.T) {
 	if !bytes.Equal(got, orig) {
 		t.Errorf("restore mismatch: got %q, want %q", got, orig)
 	}
-}
-
-// multipartWriter fills `dst` with a multipart/form-data body carrying a
-// single field named "file" with the given filename and contents, and
-// returns the writer so the caller can read FormDataContentType().
-func multipartWriter(t *testing.T, dst *bytes.Buffer, filename string, content []byte) *multipart.Writer {
-	t.Helper()
-	mw := multipart.NewWriter(dst)
-	fw, err := mw.CreateFormFile("file", filename)
-	if err != nil {
-		t.Fatalf("create form file: %v", err)
-	}
-	if _, err := fw.Write(content); err != nil {
-		t.Fatalf("write form file: %v", err)
-	}
-	if err := mw.Close(); err != nil {
-		t.Fatalf("close multipart: %v", err)
-	}
-	return mw
 }
 
 // ===== T-B.9 putFileHandler: dnsmasq-test-failure → 400 + rollback (A13) =====

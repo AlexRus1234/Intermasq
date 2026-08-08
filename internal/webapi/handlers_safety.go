@@ -1,4 +1,4 @@
-package main
+package webapi
 
 // Safety-net handlers: .bak rollback, multi-level versioned history
 // (list/diff/restore), ZIP backup download, ZIP restore. The backend logic
@@ -12,7 +12,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"intermask/internal/audit"
 	"intermask/internal/dnsmasq"
+	"intermask/internal/models"
 )
 
 func rollbackHandler(c *gin.Context) {
@@ -31,7 +33,7 @@ func rollbackHandler(c *gin.Context) {
 		return
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   getUser(c),
 		Action: "rollback",
 		File:   req.File,
@@ -100,7 +102,7 @@ func historyDiffHandler(c *gin.Context) {
 
 // historyRestoreHandler restores a config file to a stored version.
 func historyRestoreHandler(c *gin.Context) {
-	var req HistoryRestoreReq
+	var req models.HistoryRestoreReq
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
@@ -118,7 +120,7 @@ func historyRestoreHandler(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "restore_error", "detail": err.Error()})
 		return
 	}
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:    getUser(c),
 		Action:  "restore",
 		File:    req.File,
@@ -173,7 +175,7 @@ func restoreBackupHandler(c *gin.Context) {
 		}
 		return
 	}
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   getUser(c),
 		Action: "backup_restore",
 	})

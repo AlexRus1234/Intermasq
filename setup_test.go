@@ -34,11 +34,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+
+	"intermask/internal/auth"
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
+	"intermask/internal/netstate"
 	"intermask/internal/plugins"
-
-	"github.com/gin-gonic/gin"
+	templatepkg "intermask/internal/templates"
 )
 
 // withSandboxFlags reroutes every package-level path flag / dir that
@@ -68,21 +71,21 @@ func withSandboxFlags(t *testing.T) string {
 		ConfigDir                                  *string
 		InitSystem, SystemdScope                   *string
 	}{
-		DBPath:        DBPath,
-		TemplatesPath: TemplatesPath,
+		DBPath:        auth.DBPath,
+		TemplatesPath: templatepkg.TemplatesPath,
 		HistoryDir:    dnsmasq.HistoryDir,
 		ConfigDir:     dnsmasq.ConfigDir,
-		ArpPath:       ArpPath,
-		LeasesPath:    LeasesPath,
+		ArpPath:       netstate.ArpPath,
+		LeasesPath:    netstate.LeasesPath,
 		InitSystem:    InitSystem,
 		SystemdScope:  SystemdScope,
 	}
-	*DBPath = filepath.Join(tmp, "users.json")
-	*TemplatesPath = filepath.Join(tmp, "templates.json")
+	*auth.DBPath = filepath.Join(tmp, "users.json")
+	*templatepkg.TemplatesPath = filepath.Join(tmp, "templates.json")
 	*dnsmasq.HistoryDir = filepath.Join(tmp, "history")
 	*dnsmasq.ConfigDir = filepath.Join(tmp, "conf")
-	*ArpPath = filepath.Join(tmp, "arp")
-	*LeasesPath = filepath.Join(tmp, "leases")
+	*netstate.ArpPath = filepath.Join(tmp, "arp")
+	*netstate.LeasesPath = filepath.Join(tmp, "leases")
 	// Plugin discovery dirs (and the parsed loadedPlugins slice) are
 	// rerouted/reset/restored via the cross-package seam in internal/plugins,
 	// since those package vars moved there during stage 10.
@@ -92,12 +95,12 @@ func withSandboxFlags(t *testing.T) string {
 	t.Cleanup(func() {
 		startSSEBroadcasterFn = origSSE
 		startDNSHealthCheckerFn = origDNS
-		*DBPath = *orig.DBPath
-		*TemplatesPath = *orig.TemplatesPath
+		*auth.DBPath = *orig.DBPath
+		*templatepkg.TemplatesPath = *orig.TemplatesPath
 		*dnsmasq.HistoryDir = *orig.HistoryDir
 		*dnsmasq.ConfigDir = *orig.ConfigDir
-		*ArpPath = *orig.ArpPath
-		*LeasesPath = *orig.LeasesPath
+		*netstate.ArpPath = *orig.ArpPath
+		*netstate.LeasesPath = *orig.LeasesPath
 		*InitSystem = *orig.InitSystem
 		*SystemdScope = *orig.SystemdScope
 	})

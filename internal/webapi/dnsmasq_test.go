@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-package main
+package webapi
 
 import (
 	"context"
@@ -27,13 +27,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
+
+	"intermask/internal/audit"
 	"intermask/internal/auth"
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
+	"intermask/internal/models"
+	"intermask/internal/netstate"
 	templatepkg "intermask/internal/templates"
-
-	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 func TestParseArpContent(t *testing.T) {
@@ -42,7 +45,7 @@ func TestParseArpContent(t *testing.T) {
 192.168.1.2      0x1         0x2         11:22:33:44:55:66     *    eth0
 192.168.1.3      0x1         0x0         77:88:99:aa:bb:cc     *    eth0
 `
-	result := parseArpContent(content)
+	result := netstate.ParseArpContent(content)
 	if len(result) != 2 {
 		t.Fatalf("expected 2 active MACs, got %d", len(result))
 	}
@@ -60,7 +63,7 @@ func TestParseArpContent(t *testing.T) {
 func TestParseArpContentEmpty(t *testing.T) {
 	content := `IP address       HW type     Flags       HW address            Mask Device
 `
-	result := parseArpContent(content)
+	result := netstate.ParseArpContent(content)
 	if len(result) != 0 {
 		t.Fatalf("expected 0 MACs, got %d", len(result))
 	}
@@ -70,7 +73,7 @@ func TestParseArpContentZeroMac(t *testing.T) {
 	content := `IP address       HW type     Flags       HW address            Mask Device
 192.168.1.1      0x1         0x2         00:00:00:00:00:00     *    eth0
 `
-	result := parseArpContent(content)
+	result := netstate.ParseArpContent(content)
 	if len(result) != 0 {
 		t.Fatalf("expected 0 MACs (zero MAC filtered), got %d", len(result))
 	}
@@ -80,7 +83,7 @@ func TestParseArpContentUppercaseMac(t *testing.T) {
 	content := `IP address       HW type     Flags       HW address            Mask Device
 192.168.1.1      0x1         0x2         AA:BB:CC:DD:EE:FF     *    eth0
 `
-	result := parseArpContent(content)
+	result := netstate.ParseArpContent(content)
 	if !result["aa:bb:cc:dd:ee:ff"] {
 		t.Error("expected MAC to be lowercased")
 	}
@@ -350,11 +353,11 @@ func TestChangePasswordWrongOld(t *testing.T) {
 func TestGetNewDevicesAllInStatic(t *testing.T) {
 	dir := t.TempDir()
 	*dnsmasq.ConfigDir = dir
-	*ArpPath = filepath.Join(dir, "arp")
-	*LeasesPath = filepath.Join(dir, "leases")
-	os.WriteFile(*ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
-	os.WriteFile(*LeasesPath, []byte("0 aa:bb:cc:dd:ee:ff 192.168.1.1 * 01:aa:bb:cc:dd:ee:ff\n"), 0644)
-	devices := getNewDevices()
+	*netstate.ArpPath = filepath.Join(dir, "arp")
+	*netstate.LeasesPath = filepath.Join(dir, "leases")
+	os.WriteFile(*netstate.ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
+	os.WriteFile(*netstate.LeasesPath, []byte("0 aa:bb:cc:dd:ee:ff 192.168.1.1 * 01:aa:bb:cc:dd:ee:ff\n"), 0644)
+	devices := netstate.GetNewDevices()
 	if len(devices) != 0 {
 		t.Fatalf("expected 0 devices (MAC in leases), got %d", len(devices))
 	}
@@ -363,12 +366,12 @@ func TestGetNewDevicesAllInStatic(t *testing.T) {
 func TestGetNewDevicesAllInHosts(t *testing.T) {
 	dir := t.TempDir()
 	*dnsmasq.ConfigDir = dir
-	*ArpPath = filepath.Join(dir, "arp")
-	*LeasesPath = filepath.Join(dir, "leases")
-	os.WriteFile(*ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
-	os.WriteFile(*LeasesPath, []byte(""), 0644)
+	*netstate.ArpPath = filepath.Join(dir, "arp")
+	*netstate.LeasesPath = filepath.Join(dir, "leases")
+	os.WriteFile(*netstate.ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
+	os.WriteFile(*netstate.LeasesPath, []byte(""), 0644)
 	os.WriteFile(filepath.Join(dir, "hosts.conf"), []byte("dhcp-host=aa:bb:cc:dd:ee:ff,host1,192.168.1.1\n"), 0644)
-	devices := getNewDevices()
+	devices := netstate.GetNewDevices()
 	if len(devices) != 0 {
 		t.Fatalf("expected 0 devices (MAC in static), got %d", len(devices))
 	}
@@ -377,11 +380,11 @@ func TestGetNewDevicesAllInHosts(t *testing.T) {
 func TestGetNewDevicesUnknown(t *testing.T) {
 	dir := t.TempDir()
 	*dnsmasq.ConfigDir = dir
-	*ArpPath = filepath.Join(dir, "arp")
-	*LeasesPath = filepath.Join(dir, "leases")
-	os.WriteFile(*ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
-	os.WriteFile(*LeasesPath, []byte(""), 0644)
-	devices := getNewDevices()
+	*netstate.ArpPath = filepath.Join(dir, "arp")
+	*netstate.LeasesPath = filepath.Join(dir, "leases")
+	os.WriteFile(*netstate.ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
+	os.WriteFile(*netstate.LeasesPath, []byte(""), 0644)
+	devices := netstate.GetNewDevices()
 	if len(devices) != 1 {
 		t.Fatalf("expected 1 unknown device, got %d", len(devices))
 	}
@@ -393,11 +396,11 @@ func TestGetNewDevicesUnknown(t *testing.T) {
 func TestGetNewDevicesEmpty(t *testing.T) {
 	dir := t.TempDir()
 	*dnsmasq.ConfigDir = dir
-	*ArpPath = filepath.Join(dir, "arp")
-	*LeasesPath = filepath.Join(dir, "leases")
-	os.WriteFile(*ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n"), 0644)
-	os.WriteFile(*LeasesPath, []byte(""), 0644)
-	devices := getNewDevices()
+	*netstate.ArpPath = filepath.Join(dir, "arp")
+	*netstate.LeasesPath = filepath.Join(dir, "leases")
+	os.WriteFile(*netstate.ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n"), 0644)
+	os.WriteFile(*netstate.LeasesPath, []byte(""), 0644)
+	devices := netstate.GetNewDevices()
 	if len(devices) != 0 {
 		t.Fatalf("expected 0 devices, got %d", len(devices))
 	}
@@ -548,8 +551,8 @@ func TestLogoutRevokesToken(t *testing.T) {
 
 func TestEventsHandlerStreamsSSE(t *testing.T) {
 	dir := t.TempDir()
-	*ArpPath = filepath.Join(dir, "arp")
-	os.WriteFile(*ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.5      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
+	*netstate.ArpPath = filepath.Join(dir, "arp")
+	os.WriteFile(*netstate.ArpPath, []byte("IP address       HW type     Flags       HW address            Mask Device\n192.168.1.5      0x1         0x2         aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -856,7 +859,7 @@ func TestCreateConfigFileHandlerTemplateAuditWritten(t *testing.T) {
 	*dnsmasq.ConfigDir = dir
 	auditDir := t.TempDir()
 	auditPath := filepath.Join(auditDir, "audit.log")
-	*AuditLogPath = auditPath
+	*audit.AuditLogPath = auditPath
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -872,7 +875,7 @@ func TestCreateConfigFileHandlerTemplateAuditWritten(t *testing.T) {
 	if err != nil {
 		t.Fatalf("audit log not readable: %v", err)
 	}
-	var entry AuditEntry
+	var entry audit.AuditEntry
 	if err := json.Unmarshal(data[:len(data)-1], &entry); err != nil { // последняя '\n'
 		t.Fatalf("audit entry parse error: %v", err)
 	}
@@ -891,8 +894,8 @@ func TestCreateConfigFileHandlerTemplateAuditWritten(t *testing.T) {
 func TestLoadTemplatesFailsOnCorruptJSON(t *testing.T) {
 	if os.Getenv("INTERMASQ_TEST_FATAL") == "1" {
 		dir := t.TempDir()
-		*TemplatesPath = filepath.Join(dir, "templates.json")
-		os.WriteFile(*TemplatesPath, []byte("definitely not json"), 0600)
+		*templatepkg.TemplatesPath = filepath.Join(dir, "templates.json")
+		os.WriteFile(*templatepkg.TemplatesPath, []byte("definitely not json"), 0600)
 		templatepkg.Load()
 		t.Fatal("loadTemplates should have called os.Exit on corrupt JSON")
 		return
@@ -1145,14 +1148,14 @@ func TestAddHostHandlerDashMACNormalized(t *testing.T) {
 func TestValidateAliasEntryPTRAndTXT(t *testing.T) {
 	cases := []struct {
 		name  string
-		entry DnsAliasEntry
+		entry models.DnsAliasEntry
 		want  bool
 	}{
-		{"valid PTR", DnsAliasEntry{Type: "PTR", Domain: "10.in-addr.arpa", Target: "nas.lan"}, true},
-		{"valid TXT", DnsAliasEntry{Type: "TXT", Domain: "nas.lan", Target: "v=spf1 -all"}, true},
-		{"TXT empty target", DnsAliasEntry{Type: "TXT", Domain: "nas.lan", Target: ""}, false},
-		{"TXT with newline", DnsAliasEntry{Type: "TXT", Domain: "nas.lan", Target: "a\nb"}, false},
-		{"unknown type", DnsAliasEntry{Type: "MX", Domain: "x", Target: "y"}, false},
+		{"valid PTR", models.DnsAliasEntry{Type: "PTR", Domain: "10.in-addr.arpa", Target: "nas.lan"}, true},
+		{"valid TXT", models.DnsAliasEntry{Type: "TXT", Domain: "nas.lan", Target: "v=spf1 -all"}, true},
+		{"TXT empty target", models.DnsAliasEntry{Type: "TXT", Domain: "nas.lan", Target: ""}, false},
+		{"TXT with newline", models.DnsAliasEntry{Type: "TXT", Domain: "nas.lan", Target: "a\nb"}, false},
+		{"unknown type", models.DnsAliasEntry{Type: "MX", Domain: "x", Target: "y"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

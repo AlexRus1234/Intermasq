@@ -23,13 +23,11 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/swaggo/files"
 	"github.com/swaggo/gin-swagger"
 	_ "intermask/docs"
-	"intermask/internal/audit"
 	authpkg "intermask/internal/auth"
 	"intermask/internal/bins"
 	"intermask/internal/control"
@@ -38,6 +36,7 @@ import (
 	"intermask/internal/metrics"
 	"intermask/internal/plugins"
 	templatepkg "intermask/internal/templates"
+	"intermask/internal/webapi"
 )
 
 //go:embed frontend/dist/*
@@ -139,74 +138,11 @@ func setupServer() (*gin.Engine, error) {
 	// (Bearer / X-API-Key / ?token=) so the scrape_url can stay self-contained.
 	r.GET("/metrics", metrics.Handler)
 
-	api := r.Group("/api")
-	{
-		api.GET("/status", statusHandler)
-		api.POST("/setup", setupHandler)
-		api.POST("/login", authpkg.RateLimitMiddleware(10, time.Minute), loginHandler)
-
-		protected := api.Group("/")
-		protected.Use(authpkg.Middleware)
-		auth := protected
-		{
-			protected.GET("/plugins", func(c *gin.Context) { c.JSON(200, plugins.Loaded()) })
-			protected.POST("/restart-self", func(c *gin.Context) {
-				c.JSON(200, gin.H{"status": "restarting"})
-				if !*CiMode {
-					go func() {
-						if err := initd.Current().RestartSelf(); err != nil {
-							fmt.Printf("[INIT] self-restart failed: %v\n", err)
-						}
-					}()
-				}
-			})
-			protected.GET("/hosts", getHostsHandler)
-			auth.GET("/hosts/next-ip", nextIPHandler)
-			auth.POST("/hosts/apply-template", applyTemplateHandler)
-			auth.GET("/leases", getLeasesHandler)
-			auth.GET("/arp", getArpHandler)
-			auth.GET("/audit", audit.Handler)
-			auth.GET("/hosts/csv", exportCSVHandler)
-			auth.POST("/hosts/csv", importCSVHandler)
-			auth.POST("/hosts", addHostHandler)
-			auth.POST("/hosts/bulk", bulkAddHostsHandler)
-			auth.POST("/hosts/bulk-move", bulkMoveHandler)
-			auth.POST("/hosts/bulk-edit", bulkEditHandler)
-			auth.DELETE("/hosts/:mac", deleteHostHandler)
-			auth.GET("/templates", getTemplatesHandler)
-			auth.POST("/templates", createTemplateHandler)
-			auth.DELETE("/templates/:id", deleteTemplateHandler)
-			auth.GET("/templates/ranges", getDhcpRangesHandler)
-			auth.GET("/config", getConfigHandler)
-			auth.PUT("/config", updateConfigHandler)
-			auth.POST("/config/file", createConfigFileHandler)
-			auth.DELETE("/config/file", deleteConfigFileHandler)
-			auth.GET("/config/templates", listConfigTemplatesHandler)
-			auth.GET("/aliases", getAliasesHandler)
-			auth.POST("/aliases", addAliasHandler)
-			auth.POST("/aliases/bulk", bulkAddAliasesHandler)
-			auth.POST("/aliases/delete", deleteAliasHandler)
-			auth.GET("/aliases/csv", exportAliasesCSVHandler)
-			auth.POST("/aliases/csv", importAliasesCSVHandler)
-			auth.POST("/rollback", rollbackHandler)
-			auth.GET("/history", historyListHandler)
-			auth.GET("/history/diff", historyDiffHandler)
-			auth.POST("/history/restore", historyRestoreHandler)
-			auth.POST("/reload", reloadHandler)
-			auth.GET("/backup", backupHandler)
-			auth.POST("/backup/restore", restoreBackupHandler)
-			auth.GET("/files/:name", getFileHandler)
-			auth.PUT("/files/:name", putFileHandler)
-			auth.GET("/events", eventsHandler)
-			auth.GET("/users", getUsersHandler)
-			auth.POST("/users", createUserHandler)
-			auth.DELETE("/users/:name", deleteUserHandler)
-			auth.POST("/users/password", changePasswordHandler)
-			auth.POST("/logout", logoutHandler)
-			auth.GET("/new-devices", getNewDevicesHandler)
-			auth.POST("/leases/to-static", bulkLeaseToStaticHandler)
-		}
-	}
+	// Every /api route (status, setup, login, the auth-protected CRUD + SSE
+	// group, restart-self, plugins) is wired by the webapi package. ciMode
+	// gates the self-restart side-effect so the CI test harness never kills
+	// itself; /metrics, swagger and the static FS stay here (non-/api).
+	webapi.Register(r, *CiMode)
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	staticFS, _ := fs.Sub(staticFiles, "frontend/dist")

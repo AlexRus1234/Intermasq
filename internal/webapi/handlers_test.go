@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-package main
+package webapi
 
 // Handler-level integration tests (L2) for endpoints not yet covered by
 // dnsmasq_test.go, plus Gap 3 edge cases (IPv6, unicode, empty/comments-only
@@ -37,38 +37,16 @@ import (
 	"sync"
 	"testing"
 
-	"intermask/internal/auth"
-	"intermask/internal/dnsmasq"
-
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
+
+	"intermask/internal/audit"
+	"intermask/internal/auth"
+	"intermask/internal/dnsmasq"
+	"intermask/internal/models"
+	"intermask/internal/netstate"
+	templatepkg "intermask/internal/templates"
 )
-
-// ===== Test helpers =====
-
-// newTestDir creates a temp dir, points *dnsmasq.ConfigDir at it, and returns the dir.
-// t.TempDir auto-cleans on test completion.
-func newTestDir(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	*dnsmasq.ConfigDir = dir
-	return dir
-}
-
-// newJSONContext builds a gin test context with a JSON body and admin user.
-func newJSONContext(method, target, body string) (*httptest.ResponseRecorder, *gin.Context) {
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(method, target, strings.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	c.Set("user", "admin")
-	return w, c
-}
-
-// jsonPath escapes a file path for embedding in a JSON string literal.
-func jsonPath(p string) string {
-	return strings.ReplaceAll(p, "\\", "\\\\")
-}
 
 // ===== Host handlers (L2) =====
 
@@ -623,7 +601,7 @@ func TestRollbackHandler_UnsafePath(t *testing.T) {
 
 func TestCreateTemplateHandler_Success(t *testing.T) {
 	dir := newTestDir(t)
-	*TemplatesPath = filepath.Join(dir, "templates.json")
+	*templatepkg.TemplatesPath = filepath.Join(dir, "templates.json")
 	resetTemplates()
 
 	body := `{"name":"Test Template","hostname_pattern":"device-{NNN}","ip_range":"10.0.0.0/24","target_file":"` + jsonPath(filepath.Join(dir, "hosts.conf")) + `"}`
@@ -640,9 +618,9 @@ func TestCreateTemplateHandler_Success(t *testing.T) {
 
 func TestCreateTemplateHandler_Duplicate(t *testing.T) {
 	dir := newTestDir(t)
-	*TemplatesPath = filepath.Join(dir, "templates.json")
+	*templatepkg.TemplatesPath = filepath.Join(dir, "templates.json")
 	resetTemplates()
-	setTemplate("test-template", Template{ID: "test-template", Name: "Test Template"})
+	setTemplate("test-template", models.Template{ID: "test-template", Name: "Test Template"})
 
 	body := `{"name":"Test Template","hostname_pattern":"device-{NNN}","ip_range":"10.0.0.0/24","target_file":"` + jsonPath(filepath.Join(dir, "hosts.conf")) + `"}`
 	w, c := newJSONContext("POST", "/api/templates", body)
@@ -655,7 +633,7 @@ func TestCreateTemplateHandler_Duplicate(t *testing.T) {
 
 func TestCreateTemplateHandler_MissingFields(t *testing.T) {
 	dir := newTestDir(t)
-	*TemplatesPath = filepath.Join(dir, "templates.json")
+	*templatepkg.TemplatesPath = filepath.Join(dir, "templates.json")
 	resetTemplates()
 
 	body := `{"name":"Empty"}`
@@ -669,9 +647,9 @@ func TestCreateTemplateHandler_MissingFields(t *testing.T) {
 
 func TestDeleteTemplateHandler_Success(t *testing.T) {
 	dir := newTestDir(t)
-	*TemplatesPath = filepath.Join(dir, "templates.json")
+	*templatepkg.TemplatesPath = filepath.Join(dir, "templates.json")
 	resetTemplates()
-	setTemplate("test-template", Template{ID: "test-template", Name: "Test"})
+	setTemplate("test-template", models.Template{ID: "test-template", Name: "Test"})
 
 	w, c := newJSONContext("DELETE", "/api/templates/test-template", "")
 	c.Params = gin.Params{{Key: "id", Value: "test-template"}}
@@ -687,7 +665,7 @@ func TestDeleteTemplateHandler_Success(t *testing.T) {
 
 func TestDeleteTemplateHandler_NotFound(t *testing.T) {
 	dir := newTestDir(t)
-	*TemplatesPath = filepath.Join(dir, "templates.json")
+	*templatepkg.TemplatesPath = filepath.Join(dir, "templates.json")
 	resetTemplates()
 
 	w, c := newJSONContext("DELETE", "/api/templates/missing", "")
@@ -869,7 +847,7 @@ func TestGetTemplatesHandler_Empty(t *testing.T) {
 
 func TestGetUsersHandler_ReturnsUsers(t *testing.T) {
 	dir := t.TempDir()
-	*DBPath = filepath.Join(dir, "users.json")
+	*auth.DBPath = filepath.Join(dir, "users.json")
 	setUsers(map[string]string{"admin": "hash", "alice": "hash2"})
 
 	w, c := newJSONContext("GET", "/api/users", "")
@@ -888,7 +866,7 @@ func TestGetArpHandler_ReturnsTable(t *testing.T) {
 	arpFile := filepath.Join(dir, "arp.txt")
 	os.WriteFile(arpFile, []byte("IP address     HW type  Flags  HW address           Mask Device\n"+
 		"192.168.1.10   0x1      0x2    aa:bb:cc:dd:ee:ff     *    eth0\n"), 0644)
-	*ArpPath = arpFile
+	*netstate.ArpPath = arpFile
 	newTestDir(t)
 
 	w, c := newJSONContext("GET", "/api/arp", "")
@@ -906,7 +884,7 @@ func TestGetLeasesHandler_ReturnsLeases(t *testing.T) {
 	dir := t.TempDir()
 	leasesFile := filepath.Join(dir, "leases")
 	os.WriteFile(leasesFile, []byte("1000 aa:bb:cc:dd:ee:ff 192.168.1.10 phone *\n"), 0644)
-	*LeasesPath = leasesFile
+	*netstate.LeasesPath = leasesFile
 	newTestDir(t)
 
 	w, c := newJSONContext("GET", "/api/leases", "")
@@ -921,7 +899,7 @@ func TestGetLeasesHandler_ReturnsLeases(t *testing.T) {
 }
 
 func TestGetLeasesHandler_NoFile(t *testing.T) {
-	*LeasesPath = filepath.Join(t.TempDir(), "no-leases")
+	*netstate.LeasesPath = filepath.Join(t.TempDir(), "no-leases")
 	newTestDir(t)
 
 	w, c := newJSONContext("GET", "/api/leases", "")
@@ -940,8 +918,8 @@ func TestGetNewDevicesHandler(t *testing.T) {
 	arpFile := filepath.Join(dir, "arp.txt")
 	os.WriteFile(arpFile, []byte("IP address     HW type  Flags  HW address           Mask Device\n"+
 		"192.168.1.10   0x1      0x2    11:22:33:44:55:01     *    eth0\n"), 0644)
-	*ArpPath = arpFile
-	*LeasesPath = filepath.Join(dir, "empty.leases")
+	*netstate.ArpPath = arpFile
+	*netstate.LeasesPath = filepath.Join(dir, "empty.leases")
 	newTestDir(t)
 
 	w, c := newJSONContext("GET", "/api/new-devices", "")
@@ -1024,10 +1002,10 @@ func TestAuditHandler_ReturnsEntries(t *testing.T) {
 	auditPath := filepath.Join(dir, "audit.log")
 	entry := `{"timestamp":"2026-01-01T00:00:00Z","user":"admin","action":"add","mac":"aa:bb:cc:dd:ee:ff"}` + "\n"
 	os.WriteFile(auditPath, []byte(entry), 0644)
-	*AuditLogPath = auditPath
+	*audit.AuditLogPath = auditPath
 
 	w, c := newJSONContext("GET", "/api/audit", "")
-	auditHandler(c)
+	audit.Handler(c)
 
 	if w.Code != 200 {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -1038,10 +1016,10 @@ func TestAuditHandler_ReturnsEntries(t *testing.T) {
 }
 
 func TestAuditHandler_NoLogFile(t *testing.T) {
-	*AuditLogPath = filepath.Join(t.TempDir(), "no-audit.log")
+	*audit.AuditLogPath = filepath.Join(t.TempDir(), "no-audit.log")
 
 	w, c := newJSONContext("GET", "/api/audit", "")
-	auditHandler(c)
+	audit.Handler(c)
 
 	if w.Code != 200 {
 		t.Fatalf("expected 200 (empty array), got %d", w.Code)
@@ -1074,7 +1052,7 @@ func TestBackupHandler_ReturnsZip(t *testing.T) {
 
 func TestSetupHandler_Success(t *testing.T) {
 	dir := t.TempDir()
-	*DBPath = filepath.Join(dir, "users.json")
+	*auth.DBPath = filepath.Join(dir, "users.json")
 	auth.ClearUsers()
 	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
@@ -1094,7 +1072,7 @@ func TestSetupHandler_Success(t *testing.T) {
 
 func TestSetupHandler_AlreadySetup(t *testing.T) {
 	dir := t.TempDir()
-	*DBPath = filepath.Join(dir, "users.json")
+	*auth.DBPath = filepath.Join(dir, "users.json")
 	setUsers(map[string]string{"admin": "hash"})
 
 	w, c := newJSONContext("POST", "/api/setup", `{"username":"admin","password":"secret123"}`)
@@ -1249,7 +1227,7 @@ func TestApplyTemplateHandler_Success(t *testing.T) {
 	os.WriteFile(targetFile, []byte(""), 0644)
 
 	resetTemplates()
-	setTemplate("test-tpl", Template{ID: "test-tpl", Name: "Test", IPRange: "10.99.0.0/24", HostnamePattern: "dev-{NNN}", TargetFile: targetFile})
+	setTemplate("test-tpl", models.Template{ID: "test-tpl", Name: "Test", IPRange: "10.99.0.0/24", HostnamePattern: "dev-{NNN}", TargetFile: targetFile})
 
 	w, c := newJSONContext("POST", "/api/hosts/apply-template", `{"mac":"aa:bb:cc:dd:ee:ff","template_id":"test-tpl"}`)
 	applyTemplateHandler(c)
@@ -1277,7 +1255,7 @@ func TestApplyTemplateHandler_NotFound(t *testing.T) {
 func TestApplyTemplateHandler_BadMAC(t *testing.T) {
 	newTestDir(t)
 	resetTemplates()
-	setTemplate("test-tpl", Template{ID: "test-tpl"})
+	setTemplate("test-tpl", models.Template{ID: "test-tpl"})
 
 	w, c := newJSONContext("POST", "/api/hosts/apply-template", `{"mac":"bad","template_id":"test-tpl"}`)
 	applyTemplateHandler(c)
@@ -1491,7 +1469,7 @@ func TestRollbackHandler_Success(t *testing.T) {
 // rejects, so the success branch was never reached.
 func TestChangePasswordHandler_Success(t *testing.T) {
 	dir := t.TempDir()
-	*DBPath = filepath.Join(dir, "users.json")
+	*auth.DBPath = filepath.Join(dir, "users.json")
 	hash, err := bcrypt.GenerateFromPassword([]byte("old-secret"), bcrypt.MinCost)
 	if err != nil {
 		t.Fatal(err)
@@ -1524,7 +1502,7 @@ func TestChangePasswordHandler_Success(t *testing.T) {
 // (empty new_password → 400), a branch not previously exercised.
 func TestChangePasswordHandler_EmptyNewPassword(t *testing.T) {
 	dir := t.TempDir()
-	*DBPath = filepath.Join(dir, "users.json")
+	*auth.DBPath = filepath.Join(dir, "users.json")
 	setUsers(map[string]string{"admin": "$2a$10$irrelevant"})
 
 	w, c := newJSONContext("POST", "/api/users/password", `{"old_password":"x","new_password":""}`)

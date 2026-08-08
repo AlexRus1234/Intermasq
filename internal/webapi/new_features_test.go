@@ -19,7 +19,7 @@
 // Kept in a separate file from dnsmasq_test.go so the new work is easy to
 // review alongside the implementation diffs.
 
-package main
+package webapi
 
 import (
 	"encoding/json"
@@ -32,11 +32,13 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+
+	"intermask/internal/audit"
 	"intermask/internal/auth"
 	"intermask/internal/dnsmasq"
 	"intermask/internal/initd"
-
-	"github.com/gin-gonic/gin"
+	"intermask/internal/models"
 )
 
 // Backend TestDeleteConfigFile* tests migrated to internal/dnsmasq in stage 5.
@@ -49,7 +51,7 @@ func TestDeleteConfigFileHandlerSuccess(t *testing.T) {
 	*dnsmasq.ConfigDir = dir
 	*dnsmasq.HistoryDir = filepath.Join(dir, "history")
 	*dnsmasq.HistoryDepth = 5
-	*AuditLogPath = filepath.Join(dir, "audit.log")
+	*audit.AuditLogPath = filepath.Join(dir, "audit.log")
 
 	path := filepath.Join(dir, "trash.conf")
 	os.WriteFile(path, []byte("# Managed by Intermasq\ndomain-needed\n"), 0644)
@@ -69,14 +71,14 @@ func TestDeleteConfigFileHandlerSuccess(t *testing.T) {
 	}
 
 	// Audit log should contain a config_delete_file entry.
-	data, _ := os.ReadFile(*AuditLogPath)
+	data, _ := os.ReadFile(*audit.AuditLogPath)
 	if !strings.Contains(string(data), "config_delete_file") {
 		t.Errorf("audit log should record config_delete_file:\n%s", data)
 	}
 
 	// Response body must be a ConfigSnapshot, and the deleted file must
 	// not appear in it.
-	var snap ConfigSnapshot
+	var snap models.ConfigSnapshot
 	if err := json.Unmarshal(w.Body.Bytes(), &snap); err != nil {
 		t.Fatalf("response is not a ConfigSnapshot: %v", err)
 	}
@@ -167,7 +169,7 @@ func TestConcurrentCreateUserNoLostRecords(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
 	auth.ClearUsers()
-	*AuditLogPath = filepath.Join(dir, "audit.log")
+	*audit.AuditLogPath = filepath.Join(dir, "audit.log")
 
 	const n = 30
 	var wg sync.WaitGroup
@@ -211,7 +213,7 @@ func TestConcurrentCreateUserDuplicateNoCorruption(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
 	auth.ClearUsers()
-	*AuditLogPath = filepath.Join(dir, "audit.log")
+	*audit.AuditLogPath = filepath.Join(dir, "audit.log")
 
 	const n = 20
 	var wg sync.WaitGroup
@@ -263,7 +265,7 @@ func TestStatusHandlerSafeUnderConcurrentUserWrite(t *testing.T) {
 	dir := t.TempDir()
 	*DBPath = filepath.Join(dir, "users.json")
 	auth.ClearUsers()
-	*AuditLogPath = filepath.Join(dir, "audit.log")
+	*audit.AuditLogPath = filepath.Join(dir, "audit.log")
 	// statusHandler calls initd.Current().IsActive("dnsmasq"); the test
 	// binary never runs initd.Init, so wire up the no-op caller manually.
 	initd.SetCurrentForTest(t, &initd.NoneCaller{})

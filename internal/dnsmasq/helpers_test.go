@@ -28,12 +28,13 @@ import (
 // This file holds the in-package copies of the fake-dnsmasq test helpers
 // that the migrated linux-only tests (TestWriteConfigWithTest_*,
 // TestRestoreHistoryVersion_*) need to inject a stub binary via
-// bins.SetPathForTest. The originals stay in package main's linux_test.go
-// because the handler-level wiring tests (TestPutFileHandler_*,
-// TestUpdateConfigHandler_*, TestRestoreBackupHandler_*, TestReload*) which
-// remain in main until stage 11 also depend on them. The two copies cannot
-// share code without polluting the production API of one package or the
-// other, so the duplication is intentional.
+// bins.SetPathForTest. The originals now live in internal/webapi's
+// helpers_test.go because the handler-level wiring tests
+// (TestPutFileHandler_*, TestUpdateConfigHandler_*,
+// TestRestoreBackupHandler_*, TestReload*) moved there during stage 11 and
+// also depend on them. The two copies cannot share code without polluting
+// the production API of one package or the other, so the duplication is
+// intentional.
 
 // fakeDnsmasq writes a shell-script "dnsmasq" that exits with `exitCode`
 // into a temp dir, points the cached dnsmasq path (internal/bins, via

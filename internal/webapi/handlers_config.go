@@ -1,4 +1,4 @@
-package main
+package webapi
 
 // HTTP handlers for the visual dnsmasq config editor + the raw file
 // editor (GET/PUT /api/files/:name) + template-backed file creation +
@@ -13,7 +13,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"intermask/internal/audit"
 	"intermask/internal/dnsmasq"
+	"intermask/internal/models"
 )
 
 func getConfigHandler(c *gin.Context) {
@@ -22,7 +24,7 @@ func getConfigHandler(c *gin.Context) {
 }
 
 func updateConfigHandler(c *gin.Context) {
-	var req ConfigUpdateReq
+	var req models.ConfigUpdateReq
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
@@ -61,7 +63,7 @@ func updateConfigHandler(c *gin.Context) {
 		return
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   getUser(c),
 		Action: "config_update",
 		File:   req.File,
@@ -77,7 +79,7 @@ func getDhcpRangesHandler(c *gin.Context) {
 }
 
 func createConfigFileHandler(c *gin.Context) {
-	var req CreateConfigFileReq
+	var req models.CreateConfigFileReq
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
@@ -114,7 +116,7 @@ func createConfigFileHandler(c *gin.Context) {
 		return
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:     getUser(c),
 		Action:   "config_create_file",
 		File:     fullPath,
@@ -170,7 +172,7 @@ func deleteConfigFileHandler(c *gin.Context) {
 		return
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   getUser(c),
 		Action: "config_delete_file",
 		File:   req.File,
@@ -248,7 +250,7 @@ func putFileHandler(c *gin.Context) {
 		}
 		return
 	}
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   getUser(c),
 		Action: "config_write_raw",
 		File:   path,

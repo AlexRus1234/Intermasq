@@ -1,4 +1,4 @@
-package main
+package webapi
 
 // User management handlers: create, delete, list users, change own
 // password, logout (JWT revocation). All mutations are guarded by the
@@ -14,7 +14,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+	"intermask/internal/audit"
 	"intermask/internal/auth"
+	"intermask/internal/models"
 )
 
 func getUsersHandler(c *gin.Context) {
@@ -22,7 +24,7 @@ func getUsersHandler(c *gin.Context) {
 }
 
 func createUserHandler(c *gin.Context) {
-	var req AuthReq
+	var req models.AuthReq
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
@@ -47,7 +49,7 @@ func createUserHandler(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "save_error"})
 		return
 	}
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   getUser(c),
 		Action: "user_create",
 		Mac:    req.Username,
@@ -70,7 +72,7 @@ func deleteUserHandler(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "save_error"})
 		return
 	}
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   currentUser,
 		Action: "user_delete",
 		Mac:    name,
@@ -79,7 +81,7 @@ func deleteUserHandler(c *gin.Context) {
 }
 
 func changePasswordHandler(c *gin.Context) {
-	var req UserPasswordReq
+	var req models.UserPasswordReq
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
@@ -98,7 +100,7 @@ func changePasswordHandler(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "save_error"})
 		return
 	}
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   currentUser,
 		Action: "password_change",
 	})

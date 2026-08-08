@@ -1,4 +1,4 @@
-package main
+package webapi
 
 // Root handlers: status, setup, login, reload, arp, next-ip, leases,
 // new-devices, events (SSE), bulk lease→static. Per-domain handlers live
@@ -19,9 +19,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 
+	"intermask/internal/audit"
 	"intermask/internal/auth"
 	"intermask/internal/control"
 	"intermask/internal/dnsmasq"
+	"intermask/internal/models"
 	"intermask/internal/netstate"
 	"intermask/internal/validate"
 )
@@ -43,7 +45,7 @@ func setupHandler(c *gin.Context) {
 		c.JSON(403, gin.H{"error": "already_setup"})
 		return
 	}
-	var req AuthReq
+	var req models.AuthReq
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
@@ -64,7 +66,7 @@ func setupHandler(c *gin.Context) {
 // caller's IP so a legitimate user who fat-fingered their password twice
 // and then typed it correctly is not left counting against the limit.
 func loginHandler(c *gin.Context) {
-	var req AuthReq
+	var req models.AuthReq
 	if err := c.BindJSON(&req); err != nil {
 		return
 	}
@@ -101,7 +103,7 @@ func reloadHandler(c *gin.Context) {
 		return
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   getUser(c),
 		Action: "reload",
 	})
@@ -130,7 +132,7 @@ func getNewDevicesHandler(c *gin.Context) {
 // wasteful. The UI therefore surfaces a prominent reminder to click
 // "Apply" before expecting the changes to take effect.
 func bulkLeaseToStaticHandler(c *gin.Context) {
-	var req BulkLeaseToStaticReq
+	var req models.BulkLeaseToStaticReq
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "invalid_data"})
 		return
@@ -204,7 +206,7 @@ func bulkLeaseToStaticHandler(c *gin.Context) {
 		if hostname == "*" || hostname == "" {
 			hostname = "device-" + strings.ReplaceAll(strings.ToLower(l.Mac), ":", "")[:8]
 		}
-		newLines = append(newLines, dnsmasq.FormatDhcpHostLine(HostEntry{
+		newLines = append(newLines, dnsmasq.FormatDhcpHostLine(models.HostEntry{
 			Mac: l.Mac, Hostname: hostname, Ip: l.Ip, File: req.File,
 		}))
 		count++
@@ -215,7 +217,7 @@ func bulkLeaseToStaticHandler(c *gin.Context) {
 		return
 	}
 
-	writeAudit(AuditEntry{
+	audit.WriteAudit(audit.AuditEntry{
 		User:   getUser(c),
 		Action: "bulk_lease_to_static",
 		File:   req.File,
