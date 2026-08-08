@@ -198,8 +198,8 @@ Go statement-coverage сейчас **82.7%\*** (CI Linux) / 75.6% (Windows).
 
 ## Метрики "когда готово к v1.0 release"
 
-- [x] `tests/known-bugs.txt` пустой на целевой dnsmasq ≥2.86; ИЛИ содержит только version-conditional баги с явной причиной (нынешний статус: A15 — KNOWN-CONDITIONAL на dnsmasq 2.80, dhcp-host tag-set strictness; A14 FIXED в predrel-test-remediation-P1, 2026-08-02)
-- [x] smoke.sh: 0 Fail / 0 Known-fail на целевой dnsmasq ≥2.86 (139/139 CLEAN PASS); A15 KNOWN-fail срабатывает только на dnsmasq 2.80 (compat-matrix, opt-in)
+- [x] `tests/known-bugs.txt` пустой; A14 и A15 FIXED.
+- [x] smoke.sh: 0 Fail / 0 Known-fail на dnsmasq 2.80/2.86/2.90; compat-matrix после A15 fix — CLEAN PASS на всех трёх версиях (156/156 в актуальном прогоне)
 - [x] L1+L2 Go test coverage ≥ 70% (`go test -cover ./...`) — **82.7% на CI Linux** / 75.6% Windows (Coverage sweep A+B+C+D + Quality sweep Этап 3, `логи/quality-sweep.md`)
 - [x] Playwright: 20+ spec'ов, все зелёные (33 pass + 1 permanent-skip `config-raw`, покрыт smoke)
 - [x] L5: post-reboot stable — обе ВМ пережили рестарт, `run_l5_vm_tests` green (PASS=16/16); opt-in, гоняется по факту правок в init-путях (`system.go`/`bins.go`/`main.go`)

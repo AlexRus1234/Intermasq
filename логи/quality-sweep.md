@@ -5,6 +5,27 @@
 
 ---
 
+## A15 post-fix verification (2026-08-08) ✅
+
+Временный diagnostic workflow подтвердил точную причину A15: dnsmasq 2.80
+отклонял `tag:<name>` в `dhcp-host`, если тег не был предварительно объявлен.
+Для static-host это была ошибка продуктового контракта: хост должен назначать
+тег через `set:<name>`.
+
+Исправление в коммите `8d3c84b`:
+
+- backend и frontend принимают для новых host-записей `set:<name>` и
+  `id:<client-id>`;
+- `tag:<name>` отклоняется как matching-condition, а не assignment;
+- bulk JSON endpoint также закрыт этой проверкой;
+- smoke/E2E используют `set:iot,set:guest`;
+- A15 удалён из `tests/known-bugs.txt` и из smoke known-fail checks.
+
+Актуальный compat-matrix после фикса: dnsmasq 2.80, 2.86 и 2.90 — без
+unexpected failures, smoke завершается `rc=0`; показанный прогон 2.90:
+`156/156`, `0 Fail`, `0 Known-fail`, `0 Skipped`. Временный diagnostic
+workflow удалён после получения stderr.
+
 ## Этап 4 — Go mutation-testing (ВЫПОЛНЕН 2026-07-31)
 
 **Подход:** ручные point-мутации (без `go-mutesting`) на throwaway-ветке
@@ -371,4 +392,3 @@ success через `fakeDnsmasq`) — но только на CI (Linux). Ост�
   в handler'ах — как и предписывает §3 («Не гони дальше — ROI обрывается»).
 
 ---
-
