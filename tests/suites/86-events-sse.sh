@@ -1,6 +1,6 @@
 # tests/suites/86-events-sse.sh — GET /api/events (SSE).
 # P3.8: this endpoint had no smoke coverage. eventsHandler pushes an immediate
-# `event:arp` frame on connect (handlers.go:239 `c.SSEvent("arp", arp)`) before
+# `event:arp` frame on connect (internal/webapi/handlers.go:244 `c.SSEvent("arp", arp)`) before
 # entering the streaming loop, so we can connect, grab the first event block,
 # and assert an `event:` line arrived — without waiting for a deferred push.
 

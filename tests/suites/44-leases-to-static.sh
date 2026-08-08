@@ -1,7 +1,7 @@
 # tests/suites/44-leases-to-static.sh — POST /api/leases/to-static.
 # P3.8: this endpoint had no smoke coverage. bulkLeaseToStaticHandler writes
 # one dhcp-host= line per selected lease directly to a file (it intentionally
-# does NOT run `dnsmasq --test` — see handlers.go:123 comment), so it is safe
+# does NOT run `dnsmasq --test` — see internal/webapi/handlers.go:129 comment), so it is safe
 # to exercise against a fresh file. We POST two synthetic leases and assert
 # 200 + count == 2.
 

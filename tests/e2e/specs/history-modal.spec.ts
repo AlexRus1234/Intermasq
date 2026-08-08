@@ -34,7 +34,7 @@ test('history modal: list version, diff, restore', async ({ page }) => {
 
   // A version row must be present.
   // P2.11: pin the row by its data-version identity, not by DOM position.
-  // The history list is newest-first (history.go:208-210); `.first()` would
+  // The history list is newest-first (internal/dnsmasq/history.go); `.first()` would
   // silently pick the wrong version if that order ever flips or if the
   // version set grows. We want the OLDEST snapshot — the one taken before
   // GONE was added, whose content is {KEEP} only — so restoring it makes

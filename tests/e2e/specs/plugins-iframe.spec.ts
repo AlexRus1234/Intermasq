@@ -5,7 +5,7 @@
 // Flow (App.vue): the user menu lists store.plugins as 🧩 <name> dropdown
 // items; clicking one sets store.tab='plugin-<id>', which renders the
 // .plugin-overlay with <iframe src="/plugins/<id>/">. The reverse proxy
-// (main.go::loadPlugins) forwards /plugins/hello/* to the plugin's unix
+// (internal/plugins.Load) forwards /plugins/hello/* to the plugin's unix
 // socket. The mock serves JSON `{"plugin":"hello",...}` at "/", so the
 // iframe body ends up containing "hello".
 //

@@ -6,7 +6,7 @@
 // the .card.border-success form; enter a name, pick a template in the
 // form's <select>, click ＋. createConfigFile (api/config.js) POSTs
 // /api/config/file; the backend writes the template content verbatim (it
-// is a skeleton — no dnsmasq --test at create time, see config_templates.go).
+// is a skeleton — no dnsmasq --test at create time, see internal/dnsmasq/config_templates.go).
 // On success the new file's tab appears and is auto-selected.
 //
 // We assert the tab shows up AND the raw content (GET /api/files/<name>)

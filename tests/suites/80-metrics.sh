@@ -3,7 +3,7 @@
 
 section "metrics"
 
-# A8 was: /metrics returned 401 with an EMPTY body. FIXED in metrics.go:62
+# A8 was: /metrics returned 401 with an EMPTY body. FIXED in internal/metrics/metrics.go:59
 # (AbortWithStatusJSON now writes {"error":"auth_required"}). A8 is no longer
 # in known-bugs.txt, so this is an HONEST regression: the 401 body must be
 # non-empty AND contain "auth_required". (Previously this check's description

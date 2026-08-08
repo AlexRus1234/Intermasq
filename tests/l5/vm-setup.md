@@ -33,12 +33,12 @@
   пути резолвятся из реального `$PATH`).
 - **2 инстанса intermasq:**
   - `intermasq:18081` — root, `UseSudo=false`. Canonical-имя `intermasq` (т.к.
-    `RestartSelf()` хардкодит его, `system.go:61`) → restart-self = self.
+    `RestartSelf()` хардкодит его, `internal/initd/system.go:61`) → restart-self = self.
   - `intermasq-rootless:18082` — user `intermasq` + sudoers, `UseSudo=true`.
     Restart-self бьёт по root-sibling (PID-change доказывает выполнение sudo-ветки).
 - **Секрет** `INTERMASQ_SECRET` (из Forgejo-секрета `L5_INTERMASQ_SECRET`).
 - **`-ci-mode` НЕ передаётся** → дефолт `false` → `/api/restart-self` зовёт
-  `RestartSelf()` (`main.go:264` `if !*CiMode`).
+  `RestartSelf()` (`internal/webapi/register.go` `if !ciMode`).
 - **Флаги intermasq:** `-init-system=auto` (тестирует detect), `-port 18081/18082`,
   `-conf-dir /etc/intermasq/conf` (root) / `/var/lib/intermasq-rw/conf` (rootless),
   свои `-db`/`-history-dir`/`-leases`/`-arp-file /proc/net/arp`.

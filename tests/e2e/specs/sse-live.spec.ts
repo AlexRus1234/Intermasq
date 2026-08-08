@@ -7,14 +7,14 @@
 //     /tmp/e2e-arp.txt and exports ARP_FILE). Without ARP_FILE the full
 //     variant skips.
 //
-// /api/events is behind authMiddleware (auth.go) which accepts only a
+// /api/events is behind authMiddleware (internal/auth/auth.go) which accepts only a
 // Bearer JWT / X-API-Key (?token= was removed — it leaked JWTs into logs).
 // Native EventSource can't send headers, so the simplified variant uses
 // fetch() from the page context: fetch resolves as soon as status + headers
 // arrive, letting us assert 200 + text/event-stream without consuming the
 // (long-lived) body.
 //
-// SSE broadcaster (sse.go:78) polls the arp file every 5s and pushes a
+// SSE broadcaster (internal/control/sse.go) polls the arp file every 5s and pushes a
 // delta only when the set changes; the full variant therefore waits up to
 // 20s (4 cycles) for the new 🟢.
 
@@ -69,7 +69,7 @@ test('sse-live: appended ARP entry surfaces as new online dot', async ({ page })
   // Mutate the writable arp file: append NEW_MAC flagged 0x2 (reachable).
   appendFileSync(ARP_FILE!, `10.99.99.1     0x1         0x2         ${NEW_MAC}     *        eth0\n`)
 
-  // SSE broadcaster polls every 5s (sse.go:78); wait up to 20s for 🟢.
+  // SSE broadcaster polls every 5s (internal/control/sse.go); wait up to 20s for 🟢.
   const onlineDot = page.locator('tr', { hasText: NEW_MAC }).locator('td.text-center span.text-success')
   await expect(onlineDot).toBeVisible({ timeout: 20000 })
 })

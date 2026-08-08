@@ -1,7 +1,7 @@
 // Audit log: a host added via the API shows up in the safety tab's audit table.
 //
 // addHostHandler writes an AuditEntry {Action:"add", Mac, Hostname, ...}
-// (handlers_hosts.go:121). SafetyTab renders <AuditTab/>, whose table rows
+// (internal/webapi/handlers_hosts.go:127). SafetyTab renders <AuditTab/>, whose table rows
 // show entry.mac and entry.hostname verbatim (the action badge is
 // i18n-translated via audit.action_<action>, so it is NOT a stable anchor).
 //
@@ -26,7 +26,7 @@ import { apiLogin, seedHosts, deleteHostApi, CONF_DIR } from '../lib/api'
 const MAC = 'aa:e1:00:00:00:01'
 const AUDIT_FILE = `${CONF_DIR}/e2e-audit.conf`
 // Per-run-unique hostname: digits-only suffix keeps it hostname-valid (the
-// regex in main.go:79 requires alnum start/end), and pid+timestamp rules out
+// regex in internal/validate/validate.go requires alnum start/end), and pid+timestamp rules out
 // collision with stale entries from a previous local run.
 const HOSTNAME = `audit-${process.pid}-${Date.now()}`
 

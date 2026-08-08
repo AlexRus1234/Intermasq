@@ -325,29 +325,23 @@ intermasq_domain_up{domain="wiki.lan"} == 0
 
 ```
 .
-├── main.go                 # Точка входа, роутинг Gin, загрузка плагинов, флаги
-├── auth.go                 # JWT, аутентификация, rate-limit, пользователи (bcrypt)
-├── handlers.go             # Корневые HTTP-обработчики (status, login, reload, SSE)
-├── handlers_hosts.go       # CRUD хостов + bulk + CSV + шаблоны
-├── handlers_aliases.go     # CRUD DNS-записей + CSV
-├── handlers_config.go      # Редактор конфига + raw-файлы + удаление файлов
-├── handlers_safety.go      # История версий + откат + ZIP backup
-├── handlers_users.go       # Пользователи + logout
-├── models.go               # Структуры данных (HostEntry, DnsAliasEntry, …)
-├── dnsmasq.go              # Ядро dhcp-host: парсинг, валидация, IP-transform, file IO
-├── aliases.go              # DNS-алиасы (address=/cname=/ptr-record=/txt-record=)
-├── arp_leases.go           # ARP, leases, обнаружение устройств
-├── config_snapshot.go      # Визуальный редактор директив dnsmasq
-├── history.go              # Многоуровневая история версий + .bak + unified diff
-├── backup.go               # ZIP backup/restore + удаление файлов
-├── sse.go                  # SSE broker + статус/reload dnsmasq
-├── audit.go                # Журнал аудита
-├── oui.go                  # Таблица OUI (определение вендора по MAC)
-├── metrics.go              # /metrics для Prometheus + DNS health-check
-├── system.go               # Абстракция init-систем (SystemCaller)
-├── bins.go                 # Авто-resolve путей к системным бинарникам
-├── templates.go            # Шаблоны хостов (создание/применение)
-├── config_templates.go     # Шаблоны конфигурации dnsmasq
+├── main.go                 # Точка входа: флаги, bootstrap, gin engine, статика/swagger (тонкий)
+├── internal/               # Вся бизнес-логика (раньше — плоский package main)
+│   ├── models/             # Типы данных (HostEntry, DnsAliasEntry, …)
+│   ├── validate/           # Валидаторы MAC/IP/hostname/tag + нормализаторы
+│   ├── oui/                # Таблица OUI (определение вендора по MAC)
+│   ├── stats/              # Счётчики stats
+│   ├── bins/               # Авто-resolve путей к системным бинарникам
+│   ├── initd/              # SystemCaller — детект и управление init-системами
+│   ├── dnsmasq/            # Ядро dhcp-host: парсинг/запись, алиасы, конфиг, история, backup
+│   ├── netstate/           # ARP, leases, обнаружение устройств
+│   ├── templates/          # Шаблоны хостов (создание/применение)
+│   ├── auth/               # Пользователи, JWT, rate-limit, middleware (bcrypt)
+│   ├── audit/              # Журнал аудита
+│   ├── control/            # SSE broadcaster, статус/reload dnsmasq
+│   ├── metrics/            # /metrics для Prometheus + DNS health-check
+│   ├── plugins/            # Загрузка/проксирование плагинов (Unix-сокеты)
+│   └── webapi/             # HTTP-обработчики + регистрация роутов (/api/*)
 ├── docs/                   # OpenAPI-спецификация + документация фич
 │   ├── swagger.yaml / swagger.json
 │   └── docs.go
@@ -361,10 +355,15 @@ intermasq_domain_up{domain="wiki.lan"} == 0
 │   │   └── components/         # static/ dns/ config/ safety/ history/ audit/ …
 │   └── vite.config.js
 ├── .forgejo/workflows/     # CI: сборка, тесты, smoke
-├── tests/                  # E2E-тесты
+├── tests/                  # Smoke-сьюты, Playwright E2E, L5 (живые ВМ)
 ├── LICENSE                 # GNU AGPL v3
 └── README.md               # Этот файл
 ```
+
+> 💡 **Почему `main.go` в корне, а не в `cmd/intermasq/`?** Директива
+> `//go:embed frontend/dist/*` не умеет подниматься по дереву (`../`), поэтому
+> точка входа обязана жить рядом с `frontend/`. Сборка остаётся прежней:
+> `go build -o intermasq .`
 
 ---
 

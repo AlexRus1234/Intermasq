@@ -48,7 +48,7 @@ test('users: deleting self is rejected', async ({ page }) => {
   // without hitting the API. Accept every dialog (the confirm() guard plus
   // the cannot-delete-self alert on the error path) so the click completes,
   // and assert the DELETE response is 400 + cannot_delete_self — the
-  // canonical contract from handlers_users.go:68.
+  // canonical contract from internal/webapi/handlers_users.go.
   page.on('dialog', (d) => d.accept())
 
   const [resp] = await Promise.all([

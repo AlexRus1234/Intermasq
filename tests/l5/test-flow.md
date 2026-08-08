@@ -49,7 +49,7 @@ sudo) — 8 ассертов:
 |---|---|---|
 | 1 | `[INIT] System:` в логе | `detectInitSystem()` отработал на живом PID 1 |
 | 2 | init совпадает с `EXPECTED_INIT` | `systemd`/`openrc` детектирован верно |
-| 3 | role = `root` / `via sudo` | ветка `UseSudo` выбрана верно (`os.Getuid`, `system.go:287/299`) |
+| 3 | role = `root` / `via sudo` | ветка `UseSudo` выбрана верно (`os.Getuid`, `internal/initd/system.go`) |
 | 4 | `/api/setup` или `/api/login` → JWT | сервер жив, auth работает |
 | 5 | `GET /api/status` → `dnsmasq_active:true` | `IsActive()` реально дёрнул init-команду (`systemctl/rc-service … is-active/status`) |
 | 6 | `POST /api/reload` → dnsmasq PID сменился | `Restart("dnsmasq")` реально рестартанул dnsmasq (прямая или `sudo`) |
@@ -77,6 +77,6 @@ L5: both VMs PASS (root + rootless for systemd + openrc)
 ## Гоччи (важные)
 
 - `-ci-mode` НЕ ставить — иначе `/api/restart-self` не зовёт `RestartSelf()`.
-- Корневой инстанс = canonical имя `intermasq` (из-за хардкода в `system.go:61`).
+- Корневой инстанс = canonical имя `intermasq` (из-за хардкода в `internal/initd/system.go:61`).
 - Alpine nft грузит `.nft`, не `.conf`; Arch — `.conf` (provision различает).
 - scp бинарника только в `/tmp/` + `mv` (ETXTBSY).

@@ -2,7 +2,7 @@
 
 Единственный функциональный слой, требующий **живых init-систем** (systemd /
 openrc) как PID 1. Контейнеры не годятся: `detectInitSystem()` читает
-`/proc/1/comm` (`system.go:247`), а в контейнере PID 1 — bash/entrypoint.
+`/proc/1/comm` (`internal/initd/system.go`), а в контейнере PID 1 — bash/entrypoint.
 Fake-бинари из Coverage sweep D дали statement-процент, но не реальную
 уверенность; L5 закрывает именно функциональную дыру.
 
