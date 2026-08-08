@@ -116,6 +116,13 @@ func FormatDhcpHostLine(h models.HostEntry) string {
 // entry whose MAC matches mac (case-insensitive). Returns nil if the file
 // is unreadable or contains no matching entry.
 func ReadHostByMac(filePath, mac string) *models.HostEntry {
+	Mu.RLock()
+	defer Mu.RUnlock()
+	return ReadHostByMacLocked(filePath, mac)
+}
+
+// ReadHostByMacLocked is ReadHostByMac for callers holding Mu.Lock.
+func ReadHostByMacLocked(filePath, mac string) *models.HostEntry {
 	macLower := strings.ToLower(mac)
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -236,6 +243,13 @@ func (t *IPTransform) Apply(ip string) (string, error) {
 // FindHostsByIP returns every dhcp-host= entry matching ip (excluding the
 // one with excludeMac, case-insensitive) across all .conf files in ConfigDir.
 func FindHostsByIP(ip, excludeMac string) []models.HostEntry {
+	Mu.RLock()
+	defer Mu.RUnlock()
+	return FindHostsByIPLocked(ip, excludeMac)
+}
+
+// FindHostsByIPLocked is FindHostsByIP for callers holding Mu.Lock.
+func FindHostsByIPLocked(ip, excludeMac string) []models.HostEntry {
 	result := []models.HostEntry{}
 	excludeMacLower := strings.ToLower(excludeMac)
 
@@ -269,6 +283,13 @@ func FindHostsByIP(ip, excludeMac string) []models.HostEntry {
 // FindHostsByMac returns every dhcp-host= entry whose MAC matches mac
 // (case-insensitive) across all .conf files in ConfigDir.
 func FindHostsByMac(mac string) []models.HostEntry {
+	Mu.RLock()
+	defer Mu.RUnlock()
+	return FindHostsByMacLocked(mac)
+}
+
+// FindHostsByMacLocked is FindHostsByMac for callers holding Mu.Lock.
+func FindHostsByMacLocked(mac string) []models.HostEntry {
 	result := []models.HostEntry{}
 	macLower := strings.ToLower(mac)
 
@@ -302,6 +323,13 @@ func FindHostsByMac(mac string) []models.HostEntry {
 // ReadAllHosts scans every .conf file in ConfigDir and returns every
 // dhcp-host= entry as a structured HostEntry, in file-then-line order.
 func ReadAllHosts() []models.HostEntry {
+	Mu.RLock()
+	defer Mu.RUnlock()
+	return ReadAllHostsLocked()
+}
+
+// ReadAllHostsLocked is ReadAllHosts for callers holding Mu.Lock.
+func ReadAllHostsLocked() []models.HostEntry {
 	hosts := []models.HostEntry{}
 	files, err := os.ReadDir(*ConfigDir)
 	if err != nil {

@@ -26,6 +26,9 @@ import (
 )
 
 func getHostsHandler(c *gin.Context) {
+	dnsmasq.Mu.RLock()
+	defer dnsmasq.Mu.RUnlock()
+
 	hosts := []models.HostEntry{}
 	files, err := os.ReadDir(*dnsmasq.ConfigDir)
 	if err != nil {
@@ -79,8 +82,11 @@ func addHostHandler(c *gin.Context) {
 	}
 	req.Tags = validate.NormalizeHostTags(req.Tags)
 
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
+
 	if req.Ip != "" {
-		conflicts := dnsmasq.FindHostsByIP(req.Ip, req.Mac)
+		conflicts := dnsmasq.FindHostsByIPLocked(req.Ip, req.Mac)
 		if len(conflicts) > 0 {
 			fmt.Printf("[VALIDATION] IP duplicate detected: %d conflicts for IP %s\n", len(conflicts), req.Ip)
 			c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
@@ -88,16 +94,13 @@ func addHostHandler(c *gin.Context) {
 		}
 	}
 
-	macConflicts := dnsmasq.FindHostsByMac(req.Mac)
+	macConflicts := dnsmasq.FindHostsByMacLocked(req.Mac)
 	if len(macConflicts) > 0 {
 		fmt.Printf("[VALIDATION] MAC duplicate detected: %d for MAC %s\n", len(macConflicts), req.Mac)
 		c.JSON(409, gin.H{"error": "mac_duplicate", "conflicts": macConflicts})
 		return
 	}
 	fmt.Printf("[VALIDATION] MAC %s accepted (ip=%q hostname=%q)\n", req.Mac, req.Ip, req.Hostname)
-
-	dnsmasq.Mu.Lock()
-	defer dnsmasq.Mu.Unlock()
 
 	dnsmasq.CreateLocalBackup(req.File)
 
@@ -176,27 +179,27 @@ func bulkAddHostsHandler(c *gin.Context) {
 		}
 	}
 
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
+
 	for _, h := range req.Hosts {
 		if !validate.ValidateHostTags(h.Tags) {
 			c.JSON(400, gin.H{"error": "invalid_tag", "mac": h.Mac, "detail": "host tags must use set:<name> (or id:<client-id>)"})
 			return
 		}
 		if h.Ip != "" {
-			conflicts := dnsmasq.FindHostsByIP(h.Ip, h.Mac)
+			conflicts := dnsmasq.FindHostsByIPLocked(h.Ip, h.Mac)
 			if len(conflicts) > 0 {
 				c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
 				return
 			}
 		}
-		macConflicts := dnsmasq.FindHostsByMac(h.Mac)
+		macConflicts := dnsmasq.FindHostsByMacLocked(h.Mac)
 		if len(macConflicts) > 0 {
 			c.JSON(409, gin.H{"error": "mac_duplicate", "conflicts": macConflicts})
 			return
 		}
 	}
-
-	dnsmasq.Mu.Lock()
-	defer dnsmasq.Mu.Unlock()
 
 	dnsmasq.CreateLocalBackup(req.File)
 
@@ -360,6 +363,9 @@ func importCSVHandler(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "csv_empty"})
 		return
 	}
+	for i := range hosts {
+		hosts[i].Mac = validate.NormalizeMAC(hosts[i].Mac)
+	}
 
 	for i, h1 := range hosts {
 		for j, h2 := range hosts {
@@ -370,21 +376,21 @@ func importCSVHandler(c *gin.Context) {
 		}
 	}
 
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
+
 	for _, h := range hosts {
-		conflicts := dnsmasq.FindHostsByIP(h.Ip, h.Mac)
+		conflicts := dnsmasq.FindHostsByIPLocked(h.Ip, h.Mac)
 		if len(conflicts) > 0 {
 			c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
 			return
 		}
-		macConflicts := dnsmasq.FindHostsByMac(h.Mac)
+		macConflicts := dnsmasq.FindHostsByMacLocked(h.Mac)
 		if len(macConflicts) > 0 {
 			c.JSON(409, gin.H{"error": "mac_duplicate", "conflicts": macConflicts})
 			return
 		}
 	}
-
-	dnsmasq.Mu.Lock()
-	defer dnsmasq.Mu.Unlock()
 
 	dnsmasq.CreateLocalBackup(targetFile)
 
@@ -473,13 +479,14 @@ func bulkMoveHandler(c *gin.Context) {
 	skipped := []string{}
 
 	for _, h := range req.Hosts {
-		existing := dnsmasq.ReadHostByMac(h.File, h.Mac)
+		existing := dnsmasq.ReadHostByMacLocked(h.File, h.Mac)
 		if existing == nil {
 			skipped = append(skipped, h.Mac)
 			continue
 		}
+		existing.Mac = strings.ToLower(strings.TrimSpace(existing.Mac))
 
-		ipConflicts := dnsmasq.FindHostsByIP(existing.Ip, existing.Mac)
+		ipConflicts := dnsmasq.FindHostsByIPLocked(existing.Ip, existing.Mac)
 		hasConflictInTarget := false
 		for _, cf := range ipConflicts {
 			if cf.File == req.Target {
@@ -492,7 +499,7 @@ func bulkMoveHandler(c *gin.Context) {
 			continue
 		}
 
-		macConflicts := dnsmasq.FindHostsByMac(existing.Mac)
+		macConflicts := dnsmasq.FindHostsByMacLocked(existing.Mac)
 		hasMacInTarget := false
 		for _, cf := range macConflicts {
 			if cf.File == req.Target {
@@ -565,12 +572,16 @@ func bulkEditHandler(c *gin.Context) {
 	planned := []plannedChange{}
 	seenNewIPs := make(map[string]string)
 
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
+
 	for _, h := range req.Hosts {
-		existing := dnsmasq.ReadHostByMac(h.File, h.Mac)
+		existing := dnsmasq.ReadHostByMacLocked(h.File, h.Mac)
 		if existing == nil {
 			c.JSON(404, gin.H{"error": "host_not_found", "mac": h.Mac})
 			return
 		}
+		existing.Mac = strings.ToLower(strings.TrimSpace(existing.Mac))
 
 		newIP, err := transform.Apply(existing.Ip)
 		if err != nil {
@@ -600,7 +611,7 @@ func bulkEditHandler(c *gin.Context) {
 		}
 		seenNewIPs[newIP] = existing.Mac
 
-		conflicts := dnsmasq.FindHostsByIP(newIP, existing.Mac)
+		conflicts := dnsmasq.FindHostsByIPLocked(newIP, existing.Mac)
 		if len(conflicts) > 0 {
 			c.JSON(409, gin.H{"error": "ip_duplicate", "conflicts": conflicts})
 			return
@@ -615,9 +626,6 @@ func bulkEditHandler(c *gin.Context) {
 			newTags:  existing.Tags,
 		})
 	}
-
-	dnsmasq.Mu.Lock()
-	defer dnsmasq.Mu.Unlock()
 
 	affectedFiles := make(map[string]bool)
 	for _, p := range planned {

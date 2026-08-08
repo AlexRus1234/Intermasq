@@ -38,7 +38,7 @@ const DefaultAliasesFileName = "10-dns-aliases.conf"
 // sequences so concurrent HTTP requests cannot interleave reads, decisions
 // and writes of the same .conf file. Kept as an exported value (not a
 // pointer) so callers use dnsmasq.Mu.Lock() / Unlock() verbatim.
-var Mu sync.Mutex
+var Mu sync.RWMutex
 
 // IsSafePath reports whether path is the configured ConfigDir itself or a
 // file inside it. Used as the single chokepoint for path-traversal defence

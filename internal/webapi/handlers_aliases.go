@@ -78,14 +78,14 @@ func addAliasHandler(c *gin.Context) {
 		return
 	}
 
-	conflicts := dnsmasq.FindAliasesByDomain(req.Domain, "", "")
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
+
+	conflicts := dnsmasq.FindAliasesByDomainLocked(req.Domain, "", "")
 	if len(conflicts) > 0 {
 		c.JSON(409, gin.H{"error": "alias_duplicate", "conflicts": conflicts})
 		return
 	}
-
-	dnsmasq.Mu.Lock()
-	defer dnsmasq.Mu.Unlock()
 
 	dnsmasq.CreateLocalBackup(req.File)
 	if err := dnsmasq.AppendAliasLine(req.File, req); err != nil {
@@ -140,16 +140,16 @@ func bulkAddAliasesHandler(c *gin.Context) {
 		}
 	}
 
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
+
 	for _, a := range valid {
-		conflicts := dnsmasq.FindAliasesByDomain(a.Domain, "", "")
+		conflicts := dnsmasq.FindAliasesByDomainLocked(a.Domain, "", "")
 		if len(conflicts) > 0 {
 			c.JSON(409, gin.H{"error": "alias_duplicate", "conflicts": conflicts})
 			return
 		}
 	}
-
-	dnsmasq.Mu.Lock()
-	defer dnsmasq.Mu.Unlock()
 
 	dnsmasq.CreateLocalBackup(req.File)
 
@@ -288,16 +288,17 @@ func importAliasesCSVHandler(c *gin.Context) {
 			}
 		}
 	}
+
+	dnsmasq.Mu.Lock()
+	defer dnsmasq.Mu.Unlock()
+
 	for _, a := range aliases {
-		conflicts := dnsmasq.FindAliasesByDomain(a.Domain, "", "")
+		conflicts := dnsmasq.FindAliasesByDomainLocked(a.Domain, "", "")
 		if len(conflicts) > 0 {
 			c.JSON(409, gin.H{"error": "alias_duplicate", "conflicts": conflicts})
 			return
 		}
 	}
-
-	dnsmasq.Mu.Lock()
-	defer dnsmasq.Mu.Unlock()
 
 	dnsmasq.CreateLocalBackup(targetFile)
 

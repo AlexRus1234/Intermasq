@@ -147,6 +147,13 @@ func AliasToLine(a models.DnsAliasEntry) string {
 // ReadAllAliases scans all .conf files in ConfigDir and returns every
 // address=/cname=/ptr-record=/txt-record= directive as a structured entry.
 func ReadAllAliases() []models.DnsAliasEntry {
+	Mu.RLock()
+	defer Mu.RUnlock()
+	return ReadAllAliasesLocked()
+}
+
+// ReadAllAliasesLocked is ReadAllAliases for callers holding Mu.Lock.
+func ReadAllAliasesLocked() []models.DnsAliasEntry {
 	aliases := []models.DnsAliasEntry{}
 	files, err := os.ReadDir(*ConfigDir)
 	if err != nil {
@@ -181,9 +188,16 @@ func ReadAllAliases() []models.DnsAliasEntry {
 // FindAliasesByDomain returns aliases whose Domain matches (case-insensitive)
 // the given domain, excluding one with the provided file+type combination.
 func FindAliasesByDomain(domain string, excludeType, excludeFile string) []models.DnsAliasEntry {
+	Mu.RLock()
+	defer Mu.RUnlock()
+	return FindAliasesByDomainLocked(domain, excludeType, excludeFile)
+}
+
+// FindAliasesByDomainLocked is FindAliasesByDomain for callers holding Mu.Lock.
+func FindAliasesByDomainLocked(domain string, excludeType, excludeFile string) []models.DnsAliasEntry {
 	result := []models.DnsAliasEntry{}
 	domainLower := strings.ToLower(domain)
-	for _, a := range ReadAllAliases() {
+	for _, a := range ReadAllAliasesLocked() {
 		if strings.ToLower(a.Domain) != domainLower {
 			continue
 		}
