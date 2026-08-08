@@ -17,6 +17,7 @@
 package auth
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -46,6 +47,13 @@ var (
 	blacklistMu sync.RWMutex
 )
 
+const maxStoreSize = 100000
+
+var (
+	userTokenVersions = make(map[string]uint64)
+	userTokenMu       sync.RWMutex
+)
+
 func init() { go cleanBlacklistLoop() }
 
 func cleanBlacklistLoop() {
@@ -67,6 +75,17 @@ func cleanupBlacklistOnce(now time.Time) {
 
 func RevokeToken(jti string, exp time.Time) {
 	blacklistMu.Lock()
+	if _, exists := blacklist[jti]; !exists && len(blacklist) >= maxStoreSize {
+		var oldestID string
+		var oldest time.Time
+		for id, expiry := range blacklist {
+			if oldestID == "" || expiry.Before(oldest) {
+				oldestID = id
+				oldest = expiry
+			}
+		}
+		delete(blacklist, oldestID)
+	}
 	blacklist[jti] = exp
 	blacklistMu.Unlock()
 }
@@ -106,7 +125,7 @@ func RateLimitMiddleware(maxAttempts int, window time.Duration) gin.HandlerFunc 
 		}
 		rateLimitMu.Unlock()
 
-		ip := c.ClientIP()
+		ip := c.RemoteIP()
 		rateLimitMu.Lock()
 		stamps := rateLimitStore[ip]
 		cutoff := time.Now().Add(-window)
@@ -117,6 +136,22 @@ func RateLimitMiddleware(maxAttempts int, window time.Duration) gin.HandlerFunc 
 			}
 		}
 		recent = append(recent, time.Now())
+		if len(stamps) == 0 && len(rateLimitStore) >= maxStoreSize {
+			var oldestIP string
+			var oldest time.Time
+			for candidateIP, candidateStamps := range rateLimitStore {
+				if len(candidateStamps) == 0 {
+					oldestIP = candidateIP
+					break
+				}
+				candidateOldest := candidateStamps[0]
+				if oldestIP == "" || candidateOldest.Before(oldest) {
+					oldestIP = candidateIP
+					oldest = candidateOldest
+				}
+			}
+			delete(rateLimitStore, oldestIP)
+		}
 		rateLimitStore[ip] = recent
 		rateLimitMu.Unlock()
 
@@ -217,14 +252,22 @@ func UpdateUser(name, hash string) error {
 	usersMu.Lock()
 	defer usersMu.Unlock()
 	users[name] = hash
-	return saveUsersLocked()
+	if err := saveUsersLocked(); err != nil {
+		return err
+	}
+	revokeUserTokens(name)
+	return nil
 }
 
 func DeleteUser(name string) error {
 	usersMu.Lock()
 	defer usersMu.Unlock()
 	delete(users, name)
-	return saveUsersLocked()
+	if err := saveUsersLocked(); err != nil {
+		return err
+	}
+	revokeUserTokens(name)
+	return nil
 }
 
 func SetUser(name, hash string) { usersMu.Lock(); users[name] = hash; usersMu.Unlock() }
@@ -232,8 +275,11 @@ func ClearUsers()               { usersMu.Lock(); users = make(map[string]string
 
 func MakeToken(user string) string {
 	jti := fmt.Sprintf("%s-%d", user, time.Now().UnixNano())
+	userTokenMu.RLock()
+	version := userTokenVersions[user]
+	userTokenMu.RUnlock()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": user, "exp": time.Now().Add(72 * time.Hour).Unix(), "jti": jti,
+		"sub": user, "exp": time.Now().Add(72 * time.Hour).Unix(), "jti": jti, "ver": version,
 	})
 	s, _ := token.SignedString(SecretKey)
 	return s
@@ -241,7 +287,7 @@ func MakeToken(user string) string {
 
 func Middleware(c *gin.Context) {
 	apiKey := c.GetHeader("X-API-Key")
-	if apiKey != "" && apiKey == string(SecretKey) {
+	if apiKey != "" && subtle.ConstantTimeCompare([]byte(apiKey), SecretKey) == 1 {
 		c.Set("user", "api-key")
 		c.Next()
 		return
@@ -254,7 +300,12 @@ func Middleware(c *gin.Context) {
 		c.AbortWithStatus(401)
 		return
 	}
-	token, _ := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) { return SecretKey, nil })
+	token, _ := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return SecretKey, nil
+	})
 	if token == nil || !token.Valid {
 		c.AbortWithStatus(401)
 		return
@@ -265,10 +316,24 @@ func Middleware(c *gin.Context) {
 			return
 		}
 		if sub, ok := claims["sub"].(string); ok {
+			userTokenMu.RLock()
+			currentVersion := userTokenVersions[sub]
+			userTokenMu.RUnlock()
+			version, ok := claims["ver"].(float64)
+			if !ok || version < 0 || uint64(version) != currentVersion {
+				c.AbortWithStatus(401)
+				return
+			}
 			c.Set("user", sub)
 		}
 	}
 	c.Next()
+}
+
+func revokeUserTokens(name string) {
+	userTokenMu.Lock()
+	userTokenVersions[name]++
+	userTokenMu.Unlock()
 }
 
 // SetSecretForTest ... Exported for cross-package tests during modularization.
