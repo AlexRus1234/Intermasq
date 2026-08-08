@@ -119,10 +119,8 @@ jobs:
             echo "All versions accepted the synthetic config."
           fi
 
-      - name: Upload diagnostic artifacts
+      - name: Cleanup diagnostic files
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: a15-diagnostic-logs
-          path: /tmp/a15-out/
-          retention-days: 14
+        run: |
+          rm -rf /tmp/a15-build /tmp/a15-conf /tmp/a15-out
+          echo "A15 diagnostic temporary files removed"
