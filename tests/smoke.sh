@@ -14,7 +14,7 @@
 #   - safety (backup, restore, history list/diff/restore)
 #   - users CRUD
 #   - audit log presence
-#   - /metrics auth (4 methods) + A8 body-on-401 regression
+#   - /metrics auth (Bearer, X-API-Key, query-token rejection) + A8 body-on-401 regression
 #   - path traversal battery (A11)
 #   - apply-template / leases-to-static / restart-self / reload / SSE events (P3.8)
 #

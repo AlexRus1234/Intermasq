@@ -26,7 +26,7 @@ S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -H "X-API-Key: $SECRET" "$BASE/
 check "GET /metrics with X-API-Key" 200 "$S" || true
 
 S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" "$BASE/metrics?token=$SECRET")
-check "GET /metrics with ?token=" 200 "$S" || true
+check "GET /metrics with ?token= rejected" 401 "$S" || true
 
 S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" "$BASE/metrics?token=wrong")
 check "GET /metrics with wrong ?token= → 401" 401 "$S" || true

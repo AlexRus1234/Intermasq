@@ -1,6 +1,6 @@
 # tests/suites/60-users.sh — user CRUD, password change, cannot-delete-self.
 
-if require_jwt "users" 9; then
+if require_jwt "users" 12; then
     S=$(GET "$JWT" "/api/users")
     check "GET /api/users" 200 "$S" || true
 
@@ -26,9 +26,22 @@ if require_jwt "users" 9; then
     S=$(POST "$JWT" "/api/users/password" "{\"old_password\":\"$ADMIN_PASS\",\"new_password\":\"newpass\"}")
     check "Change own password (correct old)" 200 "$S" || true
 
-    # Change back so we can keep testing
+    # Password changes revoke the current JWT. Re-login before changing the
+    # password back, then re-login once more so later suites use a fresh token.
+    S=$(PPOST "/api/login" "{\"username\":\"$ADMIN_USER\",\"password\":\"newpass\"}")
+    check "Re-login after password change" 200 "$S" || true
+    if [ "$S" = "200" ]; then
+        JWT=$(body | jval .token)
+    fi
+
     S=$(POST "$JWT" "/api/users/password" "{\"old_password\":\"newpass\",\"new_password\":\"$ADMIN_PASS\"}")
     check "Change password back" 200 "$S" || true
+
+    S=$(PPOST "/api/login" "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASS\"}")
+    check "Re-login after restoring password" 200 "$S" || true
+    if [ "$S" = "200" ]; then
+        JWT=$(body | jval .token)
+    fi
 
     # Change with wrong old
     S=$(POST "$JWT" "/api/users/password" "{\"old_password\":\"wrong\",\"new_password\":\"x\"}")

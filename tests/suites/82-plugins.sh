@@ -18,8 +18,7 @@ if require_jwt "plugins" 3; then
     fi
 
     # Gap 6: /plugins/hello/health is proxied onto the plugin's socket.
-    # (Plugin routes are mounted on the root router, not the auth group, so
-    # the Authorization header is simply ignored — harmless to send it.)
+    # Plugin routes are protected by the standard auth middleware.
     S=$(GET "$JWT" "/plugins/hello/health")
     check "GET /plugins/hello/health proxied → 200" 200 "$S" || true
     echo "  proxy body: $(body)"
