@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -260,13 +261,19 @@ func TestLoadPlugins_DuplicateIDNoPanic(t *testing.T) {
 	Load(r) // must NOT panic on the duplicate id
 
 	routeCount := 0
+	// r.Any registers the path under every HTTP method gin knows (9 on
+	// current versions), so dedupe by path string — what matters is that the
+	// /plugins/dup path is registered exactly once. (A duplicate Load would
+	// have panicked inside gin at the second registration anyway.)
+	distinctDup := make(map[string]bool)
 	for _, route := range r.Routes() {
 		if strings.HasSuffix(route.Path, "/plugins/dup/*any") {
 			routeCount++
+			distinctDup[route.Path] = true
 		}
 	}
-	if routeCount != 1 {
-		t.Errorf("expected exactly 1 /plugins/dup route, got %d", routeCount)
+	if len(distinctDup) != 1 {
+		t.Errorf("expected exactly 1 distinct /plugins/dup path, got %d (route entries=%d)", len(distinctDup), routeCount)
 	}
 	dupLoaded := 0
 	for _, p := range loadedPlugins {
@@ -331,14 +338,18 @@ func TestStopKillsStartedProcesses(t *testing.T) {
 		startedCmdsMu.Unlock()
 		t.Fatalf("expected 1 started plugin process, got %d", len(startedCmds))
 	}
-	cmd := startedCmds[0]
+	pid := startedCmds[0].Process.Pid
 	startedCmdsMu.Unlock()
 
 	Stop()
 
-	// Kill + Wait was called inside Stop, so the process is now reaped.
-	if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
-		t.Fatalf("plugin process was not killed/reaped by Stop")
+	// Ground truth: after Kill+Wait the OS process must be gone. Probe with
+	// signal 0 (nil return == still alive). We avoid relying on
+	// cmd.ProcessState.Exited() because that can stay unset on some paths
+	// (e.g. if the process self-exited and was reaped with ECHILD).
+	proc, _ := os.FindProcess(pid)
+	if err := proc.Signal(syscall.Signal(0)); err == nil {
+		t.Fatalf("plugin process %d still alive after Stop", pid)
 	}
 	startedCmdsMu.Lock()
 	remaining := len(startedCmds)
