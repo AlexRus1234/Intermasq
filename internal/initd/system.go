@@ -51,7 +51,7 @@ func (s *SystemdSystemCaller) IsActive(service string) bool {
 func (s *SystemdSystemCaller) Restart(service string) error {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command(bins.Sudo(), bins.Systemctl(), "restart", service)
+		cmd = exec.Command(bins.Sudo(), "-n", bins.Systemctl(), "restart", service)
 	} else {
 		cmd = exec.Command(bins.Systemctl(), "restart", service)
 	}
@@ -61,7 +61,7 @@ func (s *SystemdSystemCaller) Restart(service string) error {
 func (s *SystemdSystemCaller) RestartSelf() error {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command(bins.Sudo(), bins.Systemctl(), "restart", "intermasq")
+		cmd = exec.Command(bins.Sudo(), "-n", bins.Systemctl(), "restart", "intermasq")
 	} else {
 		cmd = exec.Command(bins.Systemctl(), "restart", "intermasq")
 	}
@@ -115,7 +115,7 @@ func (s *OpenRCCaller) IsActive(service string) bool {
 func (s *OpenRCCaller) Restart(service string) error {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command(bins.Sudo(), bins.RcService(), service, "restart")
+		cmd = exec.Command(bins.Sudo(), "-n", bins.RcService(), service, "restart")
 	} else {
 		cmd = exec.Command(bins.RcService(), service, "restart")
 	}
@@ -125,7 +125,7 @@ func (s *OpenRCCaller) Restart(service string) error {
 func (s *OpenRCCaller) RestartSelf() error {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command(bins.Sudo(), bins.RcService(), "intermasq", "restart")
+		cmd = exec.Command(bins.Sudo(), "-n", bins.RcService(), "intermasq", "restart")
 	} else {
 		cmd = exec.Command(bins.RcService(), "intermasq", "restart")
 	}
@@ -160,7 +160,7 @@ func (s *RunitCaller) Restart(service string) error {
 	var cmd *exec.Cmd
 	svcPath := s.ServiceDir + "/" + service
 	if s.UseSudo {
-		cmd = exec.Command(bins.Sudo(), bins.Sv(), "restart", svcPath)
+		cmd = exec.Command(bins.Sudo(), "-n", bins.Sv(), "restart", svcPath)
 	} else {
 		cmd = exec.Command(bins.Sv(), "restart", svcPath)
 	}
@@ -171,7 +171,7 @@ func (s *RunitCaller) RestartSelf() error {
 	var cmd *exec.Cmd
 	svcPath := s.ServiceDir + "/intermasq"
 	if s.UseSudo {
-		cmd = exec.Command(bins.Sudo(), bins.Sv(), "restart", svcPath)
+		cmd = exec.Command(bins.Sudo(), "-n", bins.Sv(), "restart", svcPath)
 	} else {
 		cmd = exec.Command(bins.Sv(), "restart", svcPath)
 	}
@@ -202,7 +202,7 @@ func (s *SysVinitCaller) IsActive(service string) bool {
 func (s *SysVinitCaller) Restart(service string) error {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command(bins.Sudo(), bins.Service(), service, "restart")
+		cmd = exec.Command(bins.Sudo(), "-n", bins.Service(), service, "restart")
 	} else {
 		cmd = exec.Command(bins.Service(), service, "restart")
 	}
@@ -212,7 +212,7 @@ func (s *SysVinitCaller) Restart(service string) error {
 func (s *SysVinitCaller) RestartSelf() error {
 	var cmd *exec.Cmd
 	if s.UseSudo {
-		cmd = exec.Command(bins.Sudo(), bins.Service(), "intermasq", "restart")
+		cmd = exec.Command(bins.Sudo(), "-n", bins.Service(), "intermasq", "restart")
 	} else {
 		cmd = exec.Command(bins.Service(), "intermasq", "restart")
 	}
