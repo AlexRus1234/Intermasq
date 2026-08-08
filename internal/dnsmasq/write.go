@@ -72,7 +72,9 @@ func WriteFileRaw(path string, content []byte) error {
 	testCmd := exec.Command(bins.Dnsmasq(), "--test", "--conf-file="+path)
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
 		stats.Counters.TestFailures.Add(1)
-		_ = RollbackFile(path)
+		if restoreErr := restoreLocalBackup(path); restoreErr != nil {
+			return fmt.Errorf("dnsmasq_test_failed: %s; rollback failed: %w", testOut, restoreErr)
+		}
 		return fmt.Errorf("dnsmasq_test_failed: %s", testOut)
 	}
 	return nil
@@ -93,10 +95,24 @@ func WriteConfigWithTest(path string, content []byte) error {
 	testCmd := exec.Command(bins.Dnsmasq(), "--test", "--conf-file="+path)
 	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
 		stats.Counters.TestFailures.Add(1)
-		_ = RollbackFile(path)
+		if restoreErr := restoreLocalBackup(path); restoreErr != nil {
+			return fmt.Errorf("dnsmasq_test_failed: %s; rollback failed: %w", testOut, restoreErr)
+		}
 		return fmt.Errorf("dnsmasq_test_failed: %s", testOut)
 	}
 	return nil
+}
+
+// restoreLocalBackup restores the pre-write content without re-running
+// dnsmasq --test. The failed validation already established that the new
+// content is invalid; validating the backup with the same failing command
+// would prevent the original content from being restored.
+func restoreLocalBackup(path string) error {
+	content, err := os.ReadFile(path + ".bak")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, content, 0644)
 }
 
 // RemoveHostLine deletes every dhcp-host= line in filePath whose body
