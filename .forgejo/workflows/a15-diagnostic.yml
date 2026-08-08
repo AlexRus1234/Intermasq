@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Install git and basics
-        run: dnf install -y --setopt=install_weak_deps=False git curl tar gcc make
+        run: dnf install -y --setopt=install_weak_deps=False git curl tar gcc make nodejs npm
 
       - name: Checkout
         uses: actions/checkout@v4
