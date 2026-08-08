@@ -1428,39 +1428,6 @@ func TestHistoryDiffHandler_UnknownToVersion(t *testing.T) {
 	}
 }
 
-// ----- rollbackHandler: success 200 path (was 70%) -----
-
-// TestRollbackHandler_Success covers the success path: an existing .bak is
-// restored, audit is written, and 200 rollback_ok is returned. rollbackFile
-// does not run dnsmasq --test, so this is portable.
-func TestRollbackHandler_Success(t *testing.T) {
-	dir := newTestDir(t)
-	*dnsmasq.HistoryDir = t.TempDir()
-	*dnsmasq.HistoryDepth = 5
-	file := filepath.Join(dir, "r.conf")
-	if err := os.WriteFile(file, []byte("new-broken\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(file+".bak", []byte("old-good\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	body := `{"file":"` + jsonPath(file) + `"}`
-	w, c := newJSONContext("POST", "/api/rollback", body)
-	rollbackHandler(c)
-
-	if w.Code != 200 {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Body.String(), "rollback_ok") {
-		t.Errorf("expected rollback_ok body, got: %s", w.Body.String())
-	}
-	got, _ := os.ReadFile(file)
-	if string(got) != "old-good\n" {
-		t.Errorf("file should be restored from .bak: got %q", got)
-	}
-}
-
 // ----- changePasswordHandler: success 200 path (was 50%) -----
 
 // TestChangePasswordHandler_Success exercises the full success path with a

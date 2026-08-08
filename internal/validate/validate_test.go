@@ -148,7 +148,7 @@ func TestNormalizeMAC(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"aa-bb-cc-dd-ee-ff", "aa:bb:cc:dd:ee:ff"},
 		{"aa:bb:cc:dd:ee:ff", "aa:bb:cc:dd:ee:ff"},
-		{"AA-BB-CC-DD-EE-FF", "AA:BB:CC:DD:EE:FF"},
+		{"AA-BB-CC-DD-EE-FF", "aa:bb:cc:dd:ee:ff"},
 		{"", ""},
 	}
 	for _, tc := range cases {

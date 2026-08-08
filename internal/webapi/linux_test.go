@@ -174,6 +174,42 @@ func TestHistoryRestoreHandler_Success(t *testing.T) {
 	}
 }
 
+// TestRollbackHandler_Success covers the successful rollback path with the
+// dnsmasq validation required by RollbackFile. The fake keeps this test
+// deterministic while fakeDnsmasq skips it on platforms that cannot execute
+// the project's shell-script test double.
+func TestRollbackHandler_Success(t *testing.T) {
+	fakeDnsmasq(t, 0)
+	dir := newTestDir(t)
+	*dnsmasq.HistoryDir = t.TempDir()
+	*dnsmasq.HistoryDepth = 5
+	file := filepath.Join(dir, "r.conf")
+	if err := os.WriteFile(file, []byte("new-broken\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file+".bak", []byte("old-good\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"file":"` + jsonPath(file) + `"}`
+	w, c := newJSONContext("POST", "/api/rollback", body)
+	rollbackHandler(c)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "rollback_ok") {
+		t.Errorf("expected rollback_ok body, got: %s", w.Body.String())
+	}
+	got, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "old-good\n" {
+		t.Errorf("file should be restored from .bak: got %q", got)
+	}
+}
+
 // ===== T-B.9 putFileHandler: dnsmasq-test-failure → 400 + rollback (A13) =====
 //
 // Coverage sweep §3 (Этап 3): the handler-level branch where writeFileRaw

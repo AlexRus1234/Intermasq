@@ -127,24 +127,24 @@ func TestCheckMetricsAuth_APIKeyWrong(t *testing.T) {
 	}
 }
 
-// TestCheckMetricsAuth_TokenQuerySecret covers ?token=<secret> success.
+// TestCheckMetricsAuth_TokenQuerySecret confirms query secrets are rejected.
 func TestCheckMetricsAuth_TokenQuerySecret(t *testing.T) {
 	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
 	_, c := newMetricsContext("GET", "/metrics?token=test-secret-key-32-bytes-long!!")
-	if !checkMetricsAuth(c) {
-		t.Error("expected true for ?token=<secret>")
+	if checkMetricsAuth(c) {
+		t.Error("query secret must be rejected")
 	}
 }
 
-// TestCheckMetricsAuth_TokenQueryJWT covers ?token=<jwt> success.
+// TestCheckMetricsAuth_TokenQueryJWT confirms query JWTs are rejected.
 func TestCheckMetricsAuth_TokenQueryJWT(t *testing.T) {
 	auth.SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
 
 	jwtStr := signTestJWT(t, auth.SecretKey)
 	_, c := newMetricsContext("GET", "/metrics?token="+jwtStr)
-	if !checkMetricsAuth(c) {
-		t.Error("expected true for ?token=<valid jwt>")
+	if checkMetricsAuth(c) {
+		t.Error("query JWT must be rejected")
 	}
 }
 
@@ -316,7 +316,7 @@ func TestMetricsHandler_TokenQuery_200(t *testing.T) {
 	c.Request = httptest.NewRequest("GET", "/metrics?token=test-secret-key-32-bytes-long!!", nil)
 	Handler(c)
 
-	if w.Code != 200 {
-		t.Fatalf("expected 200 with ?token= query param, got %d: %s", w.Code, w.Body.String())
+	if w.Code != 401 {
+		t.Fatalf("expected 401 with ?token= query param, got %d: %s", w.Code, w.Body.String())
 	}
 }

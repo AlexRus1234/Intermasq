@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"intermask/internal/models"
@@ -30,6 +31,26 @@ func withTemplatesPath(t *testing.T, path string) {
 	origPath, origMap := *TemplatesPath, templates
 	*TemplatesPath, templates = path, make(map[string]models.Template)
 	t.Cleanup(func() { *TemplatesPath, templates = origPath, origMap })
+}
+
+func TestTemplateConcurrentReadWrite(t *testing.T) {
+	Reset()
+	const workers = 8
+	const iterations = 50
+	var wg sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				id := "template-" + string(rune('a'+worker))
+				Set(id, models.Template{ID: id, Name: "name"})
+				Get(id)
+				All()
+			}
+		}(worker)
+	}
+	wg.Wait()
 }
 
 func TestLoadAndSaveTemplates(t *testing.T) {

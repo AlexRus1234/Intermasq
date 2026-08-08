@@ -33,6 +33,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"intermask/internal/bins"
@@ -183,6 +184,27 @@ func TestSystemdSystemCaller_Restart_Fakes(t *testing.T) {
 			err := c.Restart("dnsmasq")
 			checkErr(t, err, tc.wantErr)
 		})
+	}
+}
+
+func TestSystemdSystemCaller_SudoUsesNonInteractiveFlag(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake shell-script binary unsupported on Windows")
+	}
+	logPath := filepath.Join(t.TempDir(), "sudo-argv.log")
+	fakeBin(t, "sudo", "printf '%s\\n' \"$@\" > "+logPath)
+	fakeBin(t, "systemctl", "exit 0")
+
+	if err := (&SystemdSystemCaller{UseSudo: true}).Restart("dnsmasq"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	argv := string(data)
+	if !strings.Contains(argv, "-n\n") || !strings.Contains(argv, "systemctl\n") {
+		t.Fatalf("sudo argv missing non-interactive invocation: %q", argv)
 	}
 }
 

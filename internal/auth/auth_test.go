@@ -30,6 +30,9 @@ func resetAuthState() {
 	rateLimitMu.Lock()
 	rateLimitStore = make(map[string][]time.Time)
 	rateLimitMu.Unlock()
+	userTokenMu.Lock()
+	userTokenVersions = make(map[string]uint64)
+	userTokenMu.Unlock()
 }
 
 func TestLoadUsersMissingFileIsOK(t *testing.T) {
@@ -158,5 +161,48 @@ func TestAuthMiddlewareNoCredentials(t *testing.T) {
 	Middleware(c)
 	if w.Code != 401 {
 		t.Fatal("missing credentials were accepted")
+	}
+}
+
+func TestAuthMiddlewareRejectsNonHMAC(t *testing.T) {
+	resetAuthState()
+	SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
+	token := jwt.NewWithClaims(jwt.SigningMethodNone, jwt.MapClaims{
+		"sub": "admin",
+		"exp": time.Now().Add(time.Hour).Unix(),
+		"ver": 0,
+	})
+	tokenString, err := token.SignedString(jwt.UnsafeAllowNoneSignatureType)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/", nil)
+	c.Request.Header.Set("Authorization", "Bearer "+tokenString)
+	Middleware(c)
+	if w.Code != 401 {
+		t.Fatalf("expected alg=none to be rejected, got %d", w.Code)
+	}
+}
+
+func TestAuthMiddlewareRevokesTokenAfterUserUpdate(t *testing.T) {
+	resetAuthState()
+	SetSecretForTest(t, []byte("test-secret-key-32-bytes-long!!"))
+	*DBPath = filepath.Join(t.TempDir(), "users.json")
+	SetUser("admin", "old-hash")
+	token := MakeToken("admin")
+	if err := UpdateUser("admin", "new-hash"); err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/", nil)
+	c.Request.Header.Set("Authorization", "Bearer "+token)
+	Middleware(c)
+	if w.Code != 401 {
+		t.Fatalf("expected token to be revoked after update, got %d", w.Code)
 	}
 }

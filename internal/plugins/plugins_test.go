@@ -23,6 +23,7 @@ package plugins
 // withSandboxFlags in main goes through SetDirsForTest instead.
 
 import (
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -141,6 +142,28 @@ func TestLoadPlugins_NoDir(t *testing.T) {
 		if strings.Contains(route.Path, "/plugins/") {
 			t.Errorf("expected no plugin routes; got %s", route.Path)
 		}
+	}
+}
+
+func TestPluginRouteRequiresAuthentication(t *testing.T) {
+	pluginsRoot := t.TempDir()
+	pluginDir := filepath.Join(pluginsRoot, "demo")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "manifest.json"), []byte(`{"id":"demo","name":"Demo","bin":"missing"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	SetDirsForTest(t, pluginsRoot, t.TempDir())
+
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	Load(r)
+	req := httptest.NewRequest("GET", "/plugins/demo/health", nil)
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != 401 {
+		t.Fatalf("expected unauthenticated plugin request to return 401, got %d", resp.Code)
 	}
 }
 
