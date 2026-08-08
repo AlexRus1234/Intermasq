@@ -254,7 +254,7 @@ http://<host>:<port>/swagger/index.html
 |---|---|
 | 🌐 **Браузер** | `Authorization: Bearer <JWT>` |
 | 🤖 **Скрипты / плагины** | `X-API-Key: <INTERMASQ_SECRET>` |
-| 📊 **Prometheus / SSE** | `?token=<JWT-или-SECRET>` в URL |
+| 📊 **Prometheus / SSE** | `Authorization: Bearer <JWT>` или `X-API-Key: <SECRET>` |
 
 ---
 
@@ -307,8 +307,7 @@ scrape_configs:
   - job_name: intermasq
     scrape_interval: 30s
     metrics_path: /metrics
-    params:
-      token: ['<INTERMASQ_SECRET>']
+    bearer_token: '<JWT>'
     static_configs:
       - targets: ['172.20.0.1:8081']
 ```

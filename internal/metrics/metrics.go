@@ -51,9 +51,7 @@ var (
 
 // Handler exposes operational metrics in Prometheus exposition format.
 // Authentication is identical to the rest of the API: either an
-// Authorization: Bearer <jwt> header, X-API-Key: <secret> header, or a
-// ?token=<jwt-or-secret> query parameter (the last one is convenient for
-// Prometheus scrape configs which cannot easily send custom headers).
+// Authorization: Bearer <jwt> header or X-API-Key: <secret> header.
 func Handler(c *gin.Context) {
 	if !checkMetricsAuth(c) {
 		c.AbortWithStatusJSON(401, gin.H{"error": "auth_required"})
@@ -87,24 +85,19 @@ func Handler(c *gin.Context) {
 	c.String(200, b.String())
 }
 
-// checkMetricsAuth replicates the relevant slice of authMiddleware but also
-// accepts the ?token= query value equal to SecretKey (API key), so a
-// Prometheus scrape_url can be `http://host/metrics?token=<secret>`.
+// checkMetricsAuth verifies the headers supported by the metrics endpoint.
 func checkMetricsAuth(c *gin.Context) bool {
 	if apiKey := c.GetHeader("X-API-Key"); apiKey != "" && apiKey == string(auth.SecretKey) {
 		return true
 	}
-	if tok := c.Query("token"); tok != "" {
-		if tok == string(auth.SecretKey) {
-			return true
-		}
-		if token, _ := jwt.Parse(tok, func(t *jwt.Token) (interface{}, error) { return auth.SecretKey, nil }); token != nil && token.Valid {
-			return true
-		}
-	}
 	if authHeader := c.GetHeader("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
 		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-		token, _ := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) { return auth.SecretKey, nil })
+		token, _ := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+			}
+			return auth.SecretKey, nil
+		})
 		if token != nil && token.Valid {
 			return true
 		}
