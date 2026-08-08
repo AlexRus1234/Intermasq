@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { store, actions } from './store.js'
 
@@ -16,6 +16,37 @@ const { locale } = useI18n()
 
 let arpInterval = null
 let sseConnection = null
+const pluginFrameSrc = ref('')
+let pluginObjectUrl = ''
+let pluginLoadId = 0
+
+function clearPluginFrame() {
+    if (pluginObjectUrl) URL.revokeObjectURL(pluginObjectUrl)
+    pluginObjectUrl = ''
+    pluginFrameSrc.value = ''
+}
+
+async function loadPluginFrame(tab) {
+    const loadId = ++pluginLoadId
+    clearPluginFrame()
+
+    const pluginID = tab.replace('plugin-', '')
+    const response = await fetch(`/plugins/${encodeURIComponent(pluginID)}/`, {
+        headers: { Authorization: `Bearer ${store.token}` },
+        credentials: 'same-origin'
+    })
+    if (!response.ok || loadId !== pluginLoadId) return
+
+    const contentType = response.headers.get('content-type') || 'text/html'
+    let content = await response.text()
+    if (contentType.includes('text/html')) {
+        const base = `<base href="/plugins/${encodeURIComponent(pluginID)}/">`
+        content = content.replace(/<head([^>]*)>/i, `<head$1>${base}`)
+    }
+
+    pluginObjectUrl = URL.createObjectURL(new Blob([content], { type: contentType }))
+    pluginFrameSrc.value = pluginObjectUrl
+}
 
 function uploadRestore() {
     const input = document.createElement('input')
@@ -56,6 +87,13 @@ onMounted(() => {
 })
 
 onUnmounted(() => { if (sseConnection) sseConnection.close() })
+
+watch(() => store.tab, tab => {
+    if (tab.startsWith('plugin-')) loadPluginFrame(tab).catch(clearPluginFrame)
+    else clearPluginFrame()
+})
+
+onUnmounted(clearPluginFrame)
 </script>
 
 <template>
@@ -145,7 +183,8 @@ onUnmounted(() => { if (sseConnection) sseConnection.close() })
                 </div>
                 <div class="card-body p-0 w-100" style="height: calc(100vh - 120px); min-height: 600px;">
                     <iframe
-                        :src="'/plugins/' + store.tab.replace('plugin-', '') + '/'"
+                        v-if="pluginFrameSrc"
+                        :src="pluginFrameSrc"
                         style="width: 100%; height: 100%; border: none; display: block;">
                     </iframe>
                 </div>
