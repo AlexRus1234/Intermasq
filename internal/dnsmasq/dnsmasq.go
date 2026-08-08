@@ -57,7 +57,7 @@ var octetPrefixRegex = regexp.MustCompile(`^(\d{1,3}\.){0,2}\d{1,3}$`)
 // previously the same logic was duplicated in 5 places. It recognises:
 //   - MAC (any token passing validate.ValidMAC)
 //   - IPv4/IPv6 (any token parseable by net.ParseIP)
-//   - tag qualifiers "set:<name>" / "tag:<name>"  -> collected into Tags
+//   - tag qualifiers "set:<name>" / "tag:<name>" -> collected into Tags
 //   - everything else                             -> Hostname
 //
 // "id:<client-id>" tokens are stored as Tags verbatim so they round-trip

@@ -14,15 +14,8 @@ if require_jwt "backup restore" 4; then
     # writeConfigWithTest/restoreHistoryVersion), validating exactly what
     # the restore wrote. Returns 200 on any dnsmasq ≥2.86.
     #
-    # On dnsmasq 2.80 the restore can still fail with 400 dnsmasq_test_failed
-    # if the backup contains 10-static.conf with dhcp-host tag-set content
-    # that 2.80 rejects at --test — this is the SAME root cause as A15
-    # (history-restore path, suite 51). A14 previously masked it (bare --test
-    # failed on missing default config before ever reaching the file content).
-    # Tagged A15 + body_pattern so: on ≥2.86 → PASS; on 2.80 → KNOWN-fail
-    # (body matches 'dnsmasq_test_failed'); any unrelated regression → hard FAIL.
     S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -H "Authorization: Bearer $JWT" -F "file=@/tmp/smoke.backup.zip" "$BASE/api/backup/restore")
-    check "Restore valid ZIP → 200" 200 "$S" A15 'dnsmasq_test_failed' || true
+    check "Restore valid ZIP → 200" 200 "$S" || true
 
     # Error: no file field.
     S=$(curl -s -o /tmp/smoke.body -w "%{http_code}" -X POST -H "Authorization: Bearer $JWT" "$BASE/api/backup/restore")

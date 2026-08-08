@@ -30,14 +30,8 @@ if require_jwt "history diff + restore" 7; then
         # restored version is a previously-saved snapshot of valid dhcp-host
         # lines, so it validates cleanly and returns 200.
         #
-        # A15: on dnsmasq 2.80 the same static.conf is rejected at --test
-        # (stricter tag-set/dhcp-host validation), so the check is tagged
-        # A15 and the bug is registered in known-bugs.txt. On 2.86/2.90+ the
-        # check passes; A15 known-fail is version-conditional. The body_pattern
-        # 'dnsmasq_test_failed' guards against an unrelated regression in
-        # historyRestoreHandler — any other error body hard-fails the check.
         S=$(POST "$JWT" "/api/history/restore" "{\"file\":\"$FILE\",\"version\":\"$NEWEST_V\"}")
-        check "Restore known version → 200" 200 "$S" A15 'dnsmasq_test_failed' || true
+        check "Restore known version → 200" 200 "$S" || true
     else
         skip "Diff/restore happy path (no history versions)"
     fi

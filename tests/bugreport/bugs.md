@@ -29,7 +29,7 @@
 | A12 | HIGH | backend (main.go aliasDomainRegex) | FIXED | smoke.sh: `A12: Add TXT with underscore domain` |
 | A13 | HIGH | backend (dnsmasq.go writeFileRaw) | FIXED | smoke.sh: `PUT with invalid dnsmasq syntax → 400` (стал честным) |
 | A14 | HIGH | backend (backup.go restoreBackupZip) | FIXED | smoke.sh: `Restore valid ZIP → 200` (стал честным); L2 `TestRestoreBackupHandler_PassesConfFileToTest` (wiring argv) |
-| A15 | MEDIUM | backend (dnsmasq 2.80 dhcp-host tag-set strictness) | KNOWN-CONDITIONAL | smoke.sh: `Restore known version → 200` (suite 51) + `Restore valid ZIP → 200` (suite 52) — оба tag A15 + body-pattern `dnsmasq_test_failed`, KNOWN-fail только на dnsmasq 2.80 |
+| A15 | MEDIUM | backend/frontend (static-host tag semantics) | FIXED | compat-matrix: restore passes on dnsmasq 2.80/2.86/2.90 |
 
 **Итого:** 7 из 9 багов закрыты в Bugfix sweep (2026-07-28): A1, A2, A3, A4,
 A6, A8, A12 → FIXED. Ранее A5 + A13 уже закрыты (Блок A). A11 закрыт в
@@ -549,53 +549,22 @@ for _, name := range restoredFiles {
 
 ---
 
-## A15 — dnsmasq 2.80 отвергает restored static.conf на `--test`
+## A15 — неверная семантика `tag:` в static host
 
-> **Status: KNOWN-CONDITIONAL** (compat-matrix этап 2, 2026-07-31).
-> Срабатывает **только** на dnsmasq 2.80: восстановленный `10-static.conf`
-> отвергается `dnsmasq --test --conf-file=<path>` с exit 1, тогда как
-> 2.86/2.90 его принимают. На целевой dnsmasq (≥2.86) бага нет.
-> smoke-чек `51-history-diff-restore.sh:37` помечен `A15` +
-> body-pattern `'dnsmasq_test_failed'` (после P1.2): pipeline остаётся
-> жёлтым только на 2.80, на 2.86/2.90 — зелёный. Фикс A14 (per-file
-> `--conf-file=`) **не влияет** на A15 — корень A15 контентный
-> (dhcp-host tag-set синтаксис), не форма вызова.
+> **Status: FIXED.** Для новых статических хостов приложение принимает
+> `set:<name>` как назначение DHCP-тега. `tag:<name>` означает сопоставление
+> с уже существующим тегом и поэтому отклоняется host API/UI.
 
-**Severity:** MEDIUM
-**Component:** `dnsmasq 2.80` dhcp-host tag-set/identifier validation (в
-intermasq — сериализация `dhcp-host=` в `10-static.conf`, генерируемая
-`formatDhcpHostLine`/`dnsmasq.go`)
+**Корень:** `tag:guest` в `dhcp-host` не назначает тег хосту. dnsmasq 2.80
+проверяет, что такой тег уже существует, и отклоняет запись без объявления
+тега. Более новые версии выполняли эту проверку мягче.
 
-**Симптом:** на dnsmasq 2.80 (compat-matrix): restore history-версии
-`10-static.conf` через `POST /api/history/restore` возвращает 500
-`restore_error: dnsmasq_test_failed: ...`, потому что `restoreHistoryVersion`
-(`history.go:245`, уже корректно вызывает `--conf-file=`) падает на
-`dnsmasq --test`. Тот же контент в backup ZIP роняет и `POST /api/backup/
-restore` (400 `dnsmasq_test_failed` через `restoreBackupZip` per-file
-`--conf-file=`) — этот путь был замаскирован A14 (bare `--test` падал раньше,
-не доходя до контента); после фикса A14 (2026-08-02) backup-restore тоже
-проявляет A15 на 2.80. На 2.86 и 2.90 оба пути принимаются без ошибок.
+**Исправление:** `ValidateHostTags` и frontend-проверка разрешают для новых
+host-записей только `set:<name>` и `id:<client-id>`. Та же проверка добавлена
+в bulk JSON endpoint. Smoke и E2E используют `set:iot,set:guest`.
 
-**Корень:** точная причина не триажена (нужен capture stderr с `-v`).
-Подозрение (`логи/quality-sweep.md:227`): dhcp-host tag-set синтаксис
-вида `set:iot,tag:guest` строже валидируется в 2.80; в более поздних
-релизах relaxed. На 2.80 лишний/неподдерживаемый tag-идентификатор →
-exit 1.
-
-**Фикс (пока не применён):** один из двух путов —
-1. ужесточить сериализацию static-host в intermasq до того, что 2.80
-   принимает (требует триажа точного rejection-condition);
-2. объявить dnsmasq ≥2.86 минимально поддерживаемой для history-restore
-   (и обновить `README` + compat-matrix).
-
-**Regression test:** `tests/smoke.sh` —
-`51-history-diff-restore.sh:40`: `check "Restore known version → 200"
-200 "$S" A15 'dnsmasq_test_failed'` (history-restore path). Тот же root
-cause проявляется и на backup-restore path после фикса A14
-(`52-backup-restore.sh:21`: `check "Restore valid ZIP → 200" 200 "$S" A15
-'dnsmasq_test_failed'`) — если backup ZIP содержит `10-static.conf` с
-A15-контентом, per-file `--test` на 2.80 также падает. Оба чека на 2.80
-KNOWN-fail с body-pattern matчем; на 2.86/2.90 — PASS.
+**Regression:** compat-matrix с dnsmasq 2.80/2.86/2.90; history restore и
+backup restore больше не помечены A15 и должны возвращать 200.
 
 ---
 

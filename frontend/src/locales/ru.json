@@ -72,7 +72,7 @@
     "selected": "Выбрано элементов:",
     "deleteSelected": "Удалить выбранные",
     "offlineTooltip": "Офлайн",
-    "tagsPlaceholder": "set:iot,tag:guest",
+    "tagsPlaceholder": "set:iot,set:guest",
     "tagsTitle": "DHCP-теги через запятую",
     "tagsHint": "теги позволяют dhcp-option=tag:... нацеливаться на этот хост",
     "tagsCol": "Теги",
@@ -147,7 +147,7 @@
     "applyReminder": "dnsmasq --test НЕ запускался. Нажмите «Применить», чтобы активировать изменения.",
     "restoreBackupSuccess": "Бэкап успешно восстановлен",
     "restoreBackupError": "Ошибка восстановления бэкапа",
-    "invalidTag": "Неверный тег (нужно set:ИМЯ, tag:ИМЯ или id:ИМЯ)"
+    "invalidTag": "Для хоста используйте set:ИМЯ или id:ИМЯ"
   },
   "api": {
     "already_setup": "Уже настроено",

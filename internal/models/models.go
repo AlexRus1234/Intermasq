@@ -24,9 +24,9 @@ type HostEntry struct {
 	Ip       string `json:"ip"`
 	Hostname string `json:"hostname"`
 	File     string `json:"file"`
-	// Tags holds dhcp-host qualifiers "set:<tag>" and "tag:<tag>" so that
-	// group-based DHCP options (dhcp-option=tag:<tag>,...) can target this
-	// host. Tags are serialized AFTER the IP, in their original form.
+	// Tags holds host-assignment qualifiers such as "set:<tag>" and native
+	// dhcp-host qualifiers such as "id:<client-id>". Tags are serialized
+	// after the IP in their original form.
 	Tags []string `json:"tags,omitempty"`
 }
 

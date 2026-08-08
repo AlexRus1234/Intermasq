@@ -96,16 +96,21 @@ func ValidateHostFields(mac, ip, hostname string) bool {
 	return true
 }
 
-// ValidateHostTags returns false if any tag is not a recognized dhcp-host
-// qualifier ("set:<name>" / "tag:<name>"). "id:<client-id>" is also accepted
-// so existing configs round-trip without being rejected on edit.
+// ValidateHostTags validates qualifiers for newly-created static hosts.
+// A host assigns tags with "set:<name>"; "tag:<name>" is a matching
+// condition for an already-defined tag and is not valid host input here.
+// "id:<client-id>" remains accepted because it is a native dhcp-host
+// qualifier.
 func ValidateHostTags(tags []string) bool {
 	for _, t := range tags {
 		t = strings.TrimSpace(t)
 		if t == "" {
 			continue
 		}
-		if !dhcpTagRegex.MatchString(t) && !strings.HasPrefix(t, "id:") {
+		if !strings.HasPrefix(t, "set:") && !strings.HasPrefix(t, "id:") {
+			return false
+		}
+		if strings.HasPrefix(t, "set:") && !dhcpTagRegex.MatchString(t) {
 			return false
 		}
 	}

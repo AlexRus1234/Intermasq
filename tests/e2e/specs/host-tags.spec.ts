@@ -1,4 +1,4 @@
-// Add a host with DHCP tags (set:iot, tag:guest) and confirm the tags
+// Add a host with DHCP assignment tags (set:iot, set:guest) and confirm them.
 // render as badges in the host row. Exercises the full parse → API →
 // render path for tags (validated client-side and server-side).
 
@@ -17,7 +17,7 @@ test('host with tags renders badges', async ({ page }) => {
   // single-add mode (the bulk textarea lives behind v-if importMode==='text').
   await page
     .locator('.row.g-2 input.form-control.font-monospace')
-    .fill('set:iot,tag:guest')
+    .fill('set:iot,set:guest')
 
   await page.locator('.input-group:has(.btn-success) input.form-control').fill(`${CONF_DIR}/e2e-tags.conf`)
   await page.locator('.btn-success').click()
@@ -25,5 +25,5 @@ test('host with tags renders badges', async ({ page }) => {
   const row = page.locator('tbody tr', { hasText: MAC })
   await expect(row).toBeVisible({ timeout: 10000 })
   await expect(row.locator('span.badge', { hasText: 'set:iot' })).toBeVisible()
-  await expect(row.locator('span.badge', { hasText: 'tag:guest' })).toBeVisible()
+  await expect(row.locator('span.badge', { hasText: 'set:guest' })).toBeVisible()
 })

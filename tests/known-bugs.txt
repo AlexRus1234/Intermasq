@@ -15,12 +15,3 @@
 # Removing a fixed bug: delete the ID here. Update the corresponding
 # check in smoke.sh to expect the fixed behaviour. Pipeline goes green.
 
-# A15 — dnsmasq 2.80 rejects a restored 10-static.conf at `dnsmasq --test
-# --conf-file=<path>` with exit 1, while 2.86/2.90 accept it. Exact
-# rejection reason not triaged (would need -v stderr capture); likely a
-# stricter dhcp-host tag-set/identifier validation in 2.80 that was
-# relaxed in later releases. Found by compat-matrix (этап 2). Fix path:
-# either tighten intermasq's static-host serialisation to what 2.80
-# accepts, or document 2.86 as the minimum supported dnsmasq for
-# history-restore.
-A15  dnsmasq 2.80 rejects restored static.conf at --test (tag-set strictness TBD)

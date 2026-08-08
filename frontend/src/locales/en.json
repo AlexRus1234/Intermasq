@@ -72,7 +72,7 @@
     "selected": "Selected items:",
     "deleteSelected": "Delete selected",
     "offlineTooltip": "Offline",
-    "tagsPlaceholder": "set:iot,tag:guest",
+    "tagsPlaceholder": "set:iot,set:guest",
     "tagsTitle": "DHCP tags, comma separated",
     "tagsHint": "tags let dhcp-option=tag:... target this host",
     "tagsCol": "Tags",
@@ -147,7 +147,7 @@
     "applyReminder": "dnsmasq --test was NOT run. Click \"Apply\" to activate changes.",
     "restoreBackupSuccess": "Backup restored successfully",
     "restoreBackupError": "Failed to restore backup",
-    "invalidTag": "Invalid tag (must be set:NAME, tag:NAME or id:NAME)"
+    "invalidTag": "Host tags must be set:NAME or id:NAME"
   },
   "api": {
     "already_setup": "Already set up",

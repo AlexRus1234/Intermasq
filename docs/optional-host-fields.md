@@ -97,7 +97,7 @@ aa:bb:cc:dd:ee:ff,192.168.1.10,nas
 | `ip` | string (опциональный) | если указан — `net.ParseIP` должен вернуть не-nil |
 | `hostname` | string (опциональный) | если указан — `validHostname` (RFC 952/1123/1034) |
 | `file` | string (обязательный) | путь внутри `-conf-dir` |
-| `tags` | []string (опциональный) | `set:…` / `tag:…` / `id:…` |
+| `tags` | []string (опциональный) | `set:…` / `id:…` |
 
 ### Примеры
 

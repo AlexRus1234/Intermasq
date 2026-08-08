@@ -74,7 +74,7 @@ func addHostHandler(c *gin.Context) {
 		return
 	}
 	if !validate.ValidateHostTags(req.Tags) {
-		c.JSON(400, gin.H{"error": "invalid_tag", "detail": "tags must look like set:iot or tag:guest"})
+		c.JSON(400, gin.H{"error": "invalid_tag", "detail": "host tags must use set:<name> (or id:<client-id>)"})
 		return
 	}
 	req.Tags = validate.NormalizeHostTags(req.Tags)
@@ -177,6 +177,10 @@ func bulkAddHostsHandler(c *gin.Context) {
 	}
 
 	for _, h := range req.Hosts {
+		if !validate.ValidateHostTags(h.Tags) {
+			c.JSON(400, gin.H{"error": "invalid_tag", "mac": h.Mac, "detail": "host tags must use set:<name> (or id:<client-id>)"})
+			return
+		}
 		if h.Ip != "" {
 			conflicts := dnsmasq.FindHostsByIP(h.Ip, h.Mac)
 			if len(conflicts) > 0 {

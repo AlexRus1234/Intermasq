@@ -117,7 +117,7 @@ const showTemplatesModal = ref(false)
 const isEditing = computed(() => originalMac.value !== '')
 
 function parseTagsInput(raw) {
-    // Accept "set:iot,tag:guest" or "set:iot, tag:guest" or newline-separated.
+    // Accept host-assignment tags such as "set:iot" or "set:iot, set:guest".
     return raw
         .split(/[,\n]/)
         .map(s => s.trim())
@@ -214,8 +214,8 @@ async function saveHost() {
   // Валидация формата (если поле заполнено) делается на бэке.
   const tags = parseTagsInput(tagsInput.value)
   for (const tag of tags) {
-    if (!/^(set|tag|id):[a-zA-Z0-9_][a-zA-Z0-9_-]*$/.test(tag)) {
-        toast.error(t('alert.invalidTag', 'Invalid tag (must be set:NAME, tag:NAME or id:NAME)') + ': ' + tag)
+    if (!/^(set|id):[a-zA-Z0-9_][a-zA-Z0-9_-]*$/.test(tag)) {
+        toast.error(t('alert.invalidTag', 'Host tags must be set:NAME or id:NAME') + ': ' + tag)
       return
     }
   }

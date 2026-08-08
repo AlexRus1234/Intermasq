@@ -158,8 +158,8 @@ func TestNormalizeMAC(t *testing.T) {
 	}
 }
 
-// TestValidateHostTags covers every branch: empty (skip), set:/tag: ok,
-// id:-prefixed accepted for round-trip, garbage rejected.
+// TestValidateHostTags covers host tag assignment: set: is accepted, tag: is
+// rejected because it is a matching condition rather than an assignment.
 func TestValidateHostTags(t *testing.T) {
 	cases := []struct {
 		name string
@@ -169,14 +169,14 @@ func TestValidateHostTags(t *testing.T) {
 		{"empty slice", []string{}, true},
 		{"only empties", []string{"", "  ", ""}, true},
 		{"set tag", []string{"set:foo"}, true},
-		{"tag tag", []string{"tag:bar"}, true},
+		{"tag matcher rejected", []string{"tag:bar"}, false},
 		{"id accepted for round-trip", []string{"id:abc"}, true},
-		{"mixed valid", []string{"set:foo", "tag:bar", "id:xyz"}, true},
+		{"mixed valid", []string{"set:foo", "id:xyz"}, true},
 		{"whitespace trimmed valid", []string{"  set:foo  "}, true},
 		{"invalid bareword", []string{"foo"}, false},
 		{"invalid prefix unknown", []string{"foo:bar"}, false},
 		{"one invalid in mix", []string{"set:foo", "BAD"}, false},
-		{"empty inside still ok", []string{"set:foo", "", "tag:bar"}, true},
+		{"empty inside still ok", []string{"set:foo", "", "id:bar"}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
