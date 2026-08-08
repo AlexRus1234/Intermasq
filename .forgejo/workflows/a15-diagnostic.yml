@@ -47,18 +47,16 @@ jobs:
           rm -rf "$CONF_DIR"
           mkdir -p "$CONF_DIR"
 
-          # NB: heredoc with no leading whitespace — dnsmasq does not accept
-          # a line starting with spaces before the directive keyword.
-          cat > "$CONF_DIR/10-static.conf" <<'EOF'
-# Synthetic A15 reproducer — exercises tag-set / id qualifiers that
-# dnsmasq 2.86+ accept but 2.80 may reject (tag-set strictness).
-dhcp-host=aa:bb:cc:dd:ee:01,plain-host,10.0.0.1
-dhcp-host=aa:bb:cc:dd:ee:02,iot-host,10.0.0.2,set:iot
-dhcp-host=aa:bb:cc:dd:ee:03,guest-host,10.0.0.3,tag:guest
-dhcp-host=aa:bb:cc:dd:ee:04,mixed-host,10.0.0.4,set:iot,tag:guest
-dhcp-host=aa:bb:cc:dd:ee:05,client-id-host,10.0.0.5,id:01:02:03:04
-dhcp-host=aa:bb:cc:dd:ee:06,combo-host,10.0.0.6,set:iot,tag:guest,id:aa:bb
-EOF
+          printf '%s\n' \
+            '# Synthetic A15 reproducer — exercises tag-set / id qualifiers that' \
+            '# dnsmasq 2.86+ accept but 2.80 may reject (tag-set strictness).' \
+            'dhcp-host=aa:bb:cc:dd:ee:01,plain-host,10.0.0.1' \
+            'dhcp-host=aa:bb:cc:dd:ee:02,iot-host,10.0.0.2,set:iot' \
+            'dhcp-host=aa:bb:cc:dd:ee:03,guest-host,10.0.0.3,tag:guest' \
+            'dhcp-host=aa:bb:cc:dd:ee:04,mixed-host,10.0.0.4,set:iot,tag:guest' \
+            'dhcp-host=aa:bb:cc:dd:ee:05,client-id-host,10.0.0.5,id:01:02:03:04' \
+            'dhcp-host=aa:bb:cc:dd:ee:06,combo-host,10.0.0.6,set:iot,tag:guest,id:aa:bb' \
+            > "$CONF_DIR/10-static.conf"
 
           echo "=== synthetic 10-static.conf ==="
           cat "$CONF_DIR/10-static.conf"
