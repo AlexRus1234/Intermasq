@@ -1,0 +1,109 @@
+name: A15 dnsmasq 2.80 Diagnostic
+
+# Auto-run on push to any branch, plus manual dispatch.
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  a15-diagnostic:
+    runs-on: docker
+    container:
+      image: fedora:44
+    env:
+      GOPROXY: "https://nora.panelka.yadr01.internal/go,direct"
+      GOSUMDB: "off"
+      GOPRIVATE: "git.yadr00.internal/*"
+      INTERMASQ_SECRET: "ci-test-secret-32-bytes-pad-XXXXXXXX"
+
+    steps:
+      - name: Install git and basics
+        run: dnf install -y --setopt=install_weak_deps=False git curl tar gcc make
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build three dnsmasq versions (2.80 / 2.86 / 2.90)
+        run: |
+          set -e
+          DNSMASQ_COPTS="-std=gnu17 -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration"
+          mkdir -p /tmp/a15-build
+          for V in 2.80 2.86 2.90; do
+            echo "===== build dnsmasq $V ====="
+            TB="/tmp/a15-build/dnsmasq-$V.tar.gz"
+            SRC="/tmp/a15-build/dnsmasq-$V"
+            curl -fsSL "https://thekelleys.org.uk/dnsmasq/dnsmasq-$V.tar.gz" -o "$TB"
+            rm -rf "$SRC"
+            tar -C /tmp/a15-build -xzf "$TB"
+            make -C "$SRC" -j2 COPTS="$DNSMASQ_COPTS"
+            test -x "$SRC/src/dnsmasq" || { echo "::error::no dnsmasq binary for $V"; exit 1; }
+            "$SRC/src/dnsmasq" --version | head -n 1
+          done
+
+      - name: Generate synthetic 10-static.conf (A15 reproducer content)
+        run: |
+          set -e
+          CONF_DIR=/tmp/a15-conf
+          rm -rf "$CONF_DIR"
+          mkdir -p "$CONF_DIR"
+
+          # NB: heredoc with no leading whitespace — dnsmasq does not accept
+          # a line starting with spaces before the directive keyword.
+          cat > "$CONF_DIR/10-static.conf" <<'EOF'
+# Synthetic A15 reproducer — exercises tag-set / id qualifiers that
+# dnsmasq 2.86+ accept but 2.80 may reject (tag-set strictness).
+dhcp-host=aa:bb:cc:dd:ee:01,plain-host,10.0.0.1
+dhcp-host=aa:bb:cc:dd:ee:02,iot-host,10.0.0.2,set:iot
+dhcp-host=aa:bb:cc:dd:ee:03,guest-host,10.0.0.3,tag:guest
+dhcp-host=aa:bb:cc:dd:ee:04,mixed-host,10.0.0.4,set:iot,tag:guest
+dhcp-host=aa:bb:cc:dd:ee:05,client-id-host,10.0.0.5,id:01:02:03:04
+dhcp-host=aa:bb:cc:dd:ee:06,combo-host,10.0.0.6,set:iot,tag:guest,id:aa:bb
+EOF
+
+          echo "=== synthetic 10-static.conf ==="
+          cat "$CONF_DIR/10-static.conf"
+
+      - name: Test synthetic conf against each dnsmasq version
+        id: probe
+        run: |
+          set +e
+          CONF_DIR=/tmp/a15-conf
+          CONF="$CONF_DIR/10-static.conf"
+          WORK=/tmp/a15-out
+          rm -rf "$WORK"
+          mkdir -p "$WORK"
+
+          FAILED=""
+          for V in 2.80 2.86 2.90; do
+            BIN="/tmp/a15-build/dnsmasq-$V/src/dnsmasq"
+            OUT="$WORK/dnsmasq-$V.out"
+            ERR="$WORK/dnsmasq-$V.err"
+            echo "===== dnsmasq $V --test --conf-file=$CONF ====="
+            "$BIN" --test --conf-file="$CONF" > "$OUT" 2> "$ERR"
+            RC=$?
+            echo "exit	code: $RC"
+            echo "--- stdout ---"
+            cat "$OUT"
+            echo "--- stderr ---"
+            cat "$ERR"
+            if [ "$RC" -ne 0 ]; then
+              FAILED="$FAILED $V"
+            fi
+          done
+
+          echo "===== SUMMARY ====="
+          if [ -n "$FAILED" ]; then
+            echo "A15 REPRODUCED on: $FAILED"
+            echo "Files in $WORK:"
+            ls -la "$WORK"
+          else
+            echo "All versions accepted the synthetic config."
+          fi
+
+      - name: Upload diagnostic artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a15-diagnostic-logs
+          path: /tmp/a15-out/
+          retention-days: 14
