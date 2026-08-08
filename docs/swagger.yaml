@@ -1,8 +1,49 @@
 info:
   title: Intermasq API
+  description: HTTP API for managing dnsmasq
+  version: 1.0.0-pre
   license:
     name: AGPL-3.0-only
     url: https://www.gnu.org/licenses/agpl-3.0.html
   contact: {}
-paths: {}
+paths:
+  /api/status:
+    get:
+      summary: Get service status
+      tags: [system]
+      responses:
+        '200':
+          description: Service status
+  /api/login:
+    post:
+      summary: Log in
+      tags: [auth]
+      consumes: [application/json]
+      produces: [application/json]
+      responses:
+        '200':
+          description: JWT token
+        '401':
+          description: Invalid credentials
+  /api/hosts:
+    get:
+      summary: List static hosts
+      tags: [hosts]
+      responses:
+        '200':
+          description: Static hosts
+        '401':
+          description: Authentication required
+    post:
+      summary: Create or update a static host
+      tags: [hosts]
+      consumes: [application/json]
+      produces: [application/json]
+      responses:
+        '200':
+          description: Host saved
+        '400':
+          description: Invalid host
+        '401':
+          description: Authentication required
 swagger: "2.0"

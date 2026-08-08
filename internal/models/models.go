@@ -47,6 +47,17 @@ type AuthReq struct {
 	Password string `json:"password"`
 }
 
+const (
+	RoleAdmin = "admin"
+	RoleUser  = "user"
+)
+
+type User struct {
+	Username     string `json:"username"`
+	PasswordHash string `json:"password_hash"`
+	Role         string `json:"role"`
+}
+
 type Template struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`

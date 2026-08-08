@@ -23,16 +23,27 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"intermask/internal/models"
 )
 
 var TemplatesPath = flag.String("templates", "/etc/intermasq/templates.json", "Path to templates file")
-var templates = make(map[string]models.Template)
+var (
+	mu        sync.RWMutex
+	templates = make(map[string]models.Template)
+)
 
-func Reset() { templates = make(map[string]models.Template) }
+func Reset() {
+	mu.Lock()
+	defer mu.Unlock()
+	templates = make(map[string]models.Template)
+}
 
 func Load() {
+	mu.Lock()
+	defer mu.Unlock()
+
 	if _, err := os.Stat(*TemplatesPath); os.IsNotExist(err) {
 		os.MkdirAll(filepath.Dir(*TemplatesPath), 0700)
 		return
@@ -49,6 +60,9 @@ func Load() {
 }
 
 func Save() error {
+	mu.Lock()
+	defer mu.Unlock()
+
 	data, _ := json.MarshalIndent(templates, "", "  ")
 	dir := filepath.Dir(*TemplatesPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -62,6 +76,9 @@ func Save() error {
 }
 
 func All() []models.Template {
+	mu.RLock()
+	defer mu.RUnlock()
+
 	result := []models.Template{}
 	for _, t := range templates {
 		result = append(result, t)
@@ -69,9 +86,24 @@ func All() []models.Template {
 	return result
 }
 
-func Get(id string) (models.Template, bool) { t, ok := templates[id]; return t, ok }
-func Set(id string, t models.Template)      { templates[id] = t }
-func Delete(id string)                      { delete(templates, id) }
+func Get(id string) (models.Template, bool) {
+	mu.RLock()
+	defer mu.RUnlock()
+	t, ok := templates[id]
+	return t, ok
+}
+
+func Set(id string, t models.Template) {
+	mu.Lock()
+	defer mu.Unlock()
+	templates[id] = t
+}
+
+func Delete(id string) {
+	mu.Lock()
+	defer mu.Unlock()
+	delete(templates, id)
+}
 func GenHostnameFromPattern(pattern string, index int) string {
 	return strings.ReplaceAll(pattern, "{NNN}", fmt.Sprintf("%03d", index))
 }

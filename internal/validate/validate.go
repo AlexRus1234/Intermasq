@@ -24,6 +24,7 @@ package validate
 import (
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -38,9 +39,8 @@ var (
 	dhcpTagRegex = regexp.MustCompile(`^(set|tag):[a-zA-Z0-9_][a-zA-Z0-9_-]*$`)
 )
 
-// ValidMAC reports whether s is a syntactically valid MAC address in the
-// colon- or dash-separated form (case-insensitive).
-func ValidMAC(s string) bool { return macRegex.MatchString(s) }
+// ValidMAC reports whether s can be represented in canonical MAC form.
+func ValidMAC(s string) bool { return NormalizeMAC(s) != "" }
 
 // ValidAliasDomain reports whether s is an acceptable DNS owner name for
 // an address=/ or cname= directive, including underscore-bearing names
@@ -62,13 +62,41 @@ func ValidHostname(s string) bool {
 	return hostnameRegex.MatchString(s)
 }
 
-// NormalizeMAC converts the dash-separated MAC form (common when pasting
-// from Windows `getmac` or some network tools) into the colon-separated
-// form that dnsmasq accepts. dnsmasq --test rejects aa-bb-cc-dd-ee-ff, so
-// every user input path normalises through this helper before validation
-// and before writing. Case is preserved.
+// NormalizeMAC converts a six-octet MAC address to the canonical lowercase,
+// colon-separated form accepted by dnsmasq. Invalid input returns an empty
+// string.
 func NormalizeMAC(mac string) string {
-	return strings.ReplaceAll(mac, "-", ":")
+	mac = strings.TrimSpace(mac)
+	if mac == "" {
+		return ""
+	}
+	parts := strings.Split(strings.ReplaceAll(mac, "-", ":"), ":")
+	if len(parts) != 6 {
+		return ""
+	}
+
+	for i, part := range parts {
+		value, ok := parseHexOctet(part)
+		if !ok {
+			return ""
+		}
+		parts[i] = strconv.FormatUint(uint64(value), 16)
+		if len(parts[i]) == 1 {
+			parts[i] = "0" + parts[i]
+		}
+	}
+	return strings.Join(parts, ":")
+}
+
+func parseHexOctet(s string) (byte, bool) {
+	if len(s) == 0 || len(s) > 2 {
+		return 0, false
+	}
+	value, err := strconv.ParseUint(s, 16, 8)
+	if err != nil {
+		return 0, false
+	}
+	return byte(value), true
 }
 
 // ValidateHostFields проверяет поля dhcp-host записи без требования «все

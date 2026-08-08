@@ -47,9 +47,11 @@ func Register(r *gin.Engine, ciMode bool) {
 		protected := api.Group("/")
 		protected.Use(authpkg.Middleware)
 		auth := protected
+		admin := protected.Group("/")
+		admin.Use(authpkg.AdminMiddleware)
 		{
 			protected.GET("/plugins", func(c *gin.Context) { c.JSON(200, plugins.Loaded()) })
-			protected.POST("/restart-self", func(c *gin.Context) {
+			admin.POST("/restart-self", func(c *gin.Context) {
 				c.JSON(200, gin.H{"status": "restarting"})
 				if !ciMode {
 					go func() {
@@ -87,19 +89,19 @@ func Register(r *gin.Engine, ciMode bool) {
 			auth.POST("/aliases/delete", deleteAliasHandler)
 			auth.GET("/aliases/csv", exportAliasesCSVHandler)
 			auth.POST("/aliases/csv", importAliasesCSVHandler)
-			auth.POST("/rollback", rollbackHandler)
+			admin.POST("/rollback", rollbackHandler)
 			auth.GET("/history", historyListHandler)
 			auth.GET("/history/diff", historyDiffHandler)
-			auth.POST("/history/restore", historyRestoreHandler)
-			auth.POST("/reload", reloadHandler)
+			admin.POST("/history/restore", historyRestoreHandler)
+			admin.POST("/reload", reloadHandler)
 			auth.GET("/backup", backupHandler)
-			auth.POST("/backup/restore", restoreBackupHandler)
+			admin.POST("/backup/restore", restoreBackupHandler)
 			auth.GET("/files/:name", getFileHandler)
-			auth.PUT("/files/:name", putFileHandler)
+			admin.PUT("/files/:name", putFileHandler)
 			auth.GET("/events", eventsHandler)
-			auth.GET("/users", getUsersHandler)
-			auth.POST("/users", createUserHandler)
-			auth.DELETE("/users/:name", deleteUserHandler)
+			admin.GET("/users", getUsersHandler)
+			admin.POST("/users", createUserHandler)
+			admin.DELETE("/users/:name", deleteUserHandler)
 			auth.POST("/users/password", changePasswordHandler)
 			auth.POST("/logout", logoutHandler)
 			auth.GET("/new-devices", getNewDevicesHandler)

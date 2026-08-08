@@ -31,12 +31,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"intermask/internal/models"
 )
 
 var (
 	DBPath    = flag.String("db", "/etc/intermasq/users.json", "Path to user database")
 	SecretKey = []byte(os.Getenv("INTERMASQ_SECRET"))
 	users     = make(map[string]string)
+	userRoles = make(map[string]string)
 	usersMu   sync.RWMutex
 )
 
@@ -179,12 +181,35 @@ func LoadUsers() {
 		fmt.Fprintf(os.Stderr, "[FATAL] Cannot read user database %s: %v\n", *DBPath, err)
 		os.Exit(1)
 	}
-	usersMu.Lock()
-	defer usersMu.Unlock()
-	if err := json.Unmarshal(data, &users); err != nil {
+	var stored map[string]json.RawMessage
+	if err := json.Unmarshal(data, &stored); err != nil {
 		fmt.Fprintf(os.Stderr, "[FATAL] Cannot parse user database %s: %v\n", *DBPath, err)
 		os.Exit(1)
 	}
+	loadedUsers := make(map[string]string, len(stored))
+	loadedRoles := make(map[string]string, len(stored))
+	for name, raw := range stored {
+		var hash string
+		if err := json.Unmarshal(raw, &hash); err == nil {
+			loadedUsers[name] = hash
+			loadedRoles[name] = models.RoleAdmin
+			continue
+		}
+		var user models.User
+		if err := json.Unmarshal(raw, &user); err != nil || user.PasswordHash == "" {
+			fmt.Fprintf(os.Stderr, "[FATAL] Cannot parse user database %s: invalid user %q\n", *DBPath, name)
+			os.Exit(1)
+		}
+		loadedUsers[name] = user.PasswordHash
+		if user.Role == "" {
+			user.Role = models.RoleAdmin
+		}
+		loadedRoles[name] = user.Role
+	}
+	usersMu.Lock()
+	users = loadedUsers
+	userRoles = loadedRoles
+	usersMu.Unlock()
 }
 
 func SaveUsers() error {
@@ -194,7 +219,32 @@ func SaveUsers() error {
 }
 
 func saveUsersLocked() error {
-	data, _ := json.MarshalIndent(users, "", "  ")
+	allAdmins := true
+	stored := make(map[string]models.User, len(users))
+	for name, hash := range users {
+		role := userRoles[name]
+		if role == "" {
+			role = models.RoleAdmin
+		}
+		stored[name] = models.User{Username: name, PasswordHash: hash, Role: role}
+		if role != models.RoleAdmin {
+			allAdmins = false
+		}
+	}
+	var data []byte
+	var err error
+	if allAdmins {
+		legacy := make(map[string]string, len(stored))
+		for name, user := range stored {
+			legacy[name] = user.PasswordHash
+		}
+		data, err = json.MarshalIndent(legacy, "", "  ")
+	} else {
+		data, err = json.MarshalIndent(stored, "", "  ")
+	}
+	if err != nil {
+		return err
+	}
 	dir := filepath.Dir(*DBPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
@@ -241,8 +291,14 @@ func AddUser(name, hash string) error {
 		return ErrUserExists
 	}
 	users[name] = hash
+	role := models.RoleUser
+	if len(users) == 1 {
+		role = models.RoleAdmin
+	}
+	userRoles[name] = role
 	if err := saveUsersLocked(); err != nil {
 		delete(users, name)
+		delete(userRoles, name)
 		return err
 	}
 	return nil
@@ -252,6 +308,9 @@ func UpdateUser(name, hash string) error {
 	usersMu.Lock()
 	defer usersMu.Unlock()
 	users[name] = hash
+	if userRoles[name] == "" {
+		userRoles[name] = models.RoleAdmin
+	}
 	if err := saveUsersLocked(); err != nil {
 		return err
 	}
@@ -263,6 +322,7 @@ func DeleteUser(name string) error {
 	usersMu.Lock()
 	defer usersMu.Unlock()
 	delete(users, name)
+	delete(userRoles, name)
 	if err := saveUsersLocked(); err != nil {
 		return err
 	}
@@ -270,8 +330,34 @@ func DeleteUser(name string) error {
 	return nil
 }
 
-func SetUser(name, hash string) { usersMu.Lock(); users[name] = hash; usersMu.Unlock() }
-func ClearUsers()               { usersMu.Lock(); users = make(map[string]string); usersMu.Unlock() }
+func SetUser(name, hash string) {
+	usersMu.Lock()
+	users[name] = hash
+	if userRoles[name] == "" {
+		userRoles[name] = models.RoleAdmin
+	}
+	usersMu.Unlock()
+}
+
+func ClearUsers() {
+	usersMu.Lock()
+	users = make(map[string]string)
+	userRoles = make(map[string]string)
+	usersMu.Unlock()
+}
+
+func UserRole(name string) string {
+	usersMu.RLock()
+	defer usersMu.RUnlock()
+	if _, ok := users[name]; !ok {
+		return models.RoleAdmin
+	}
+	role := userRoles[name]
+	if role == "" {
+		return models.RoleAdmin
+	}
+	return role
+}
 
 func MakeToken(user string) string {
 	jti := fmt.Sprintf("%s-%d", user, time.Now().UnixNano())
@@ -279,7 +365,7 @@ func MakeToken(user string) string {
 	version := userTokenVersions[user]
 	userTokenMu.RUnlock()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": user, "exp": time.Now().Add(72 * time.Hour).Unix(), "jti": jti, "ver": version,
+		"sub": user, "exp": time.Now().Add(72 * time.Hour).Unix(), "jti": jti, "ver": version, "role": UserRole(user),
 	})
 	s, _ := token.SignedString(SecretKey)
 	return s
@@ -289,6 +375,7 @@ func Middleware(c *gin.Context) {
 	apiKey := c.GetHeader("X-API-Key")
 	if apiKey != "" && subtle.ConstantTimeCompare([]byte(apiKey), SecretKey) == 1 {
 		c.Set("user", "api-key")
+		c.Set("role", models.RoleAdmin)
 		c.Next()
 		return
 	}
@@ -325,7 +412,21 @@ func Middleware(c *gin.Context) {
 				return
 			}
 			c.Set("user", sub)
+			role, _ := claims["role"].(string)
+			if role == "" {
+				role = UserRole(sub)
+			}
+			c.Set("role", role)
 		}
+	}
+	c.Next()
+}
+
+func AdminMiddleware(c *gin.Context) {
+	role, _ := c.Get("role")
+	if role != models.RoleAdmin {
+		c.AbortWithStatusJSON(403, gin.H{"error": "admin only"})
+		return
 	}
 	c.Next()
 }

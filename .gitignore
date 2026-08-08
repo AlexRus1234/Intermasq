@@ -47,3 +47,6 @@ npm-debug.log*
 # Refactoring artifacts (local only)
 рефакторинг/
 логи/
+# Final code-review plan + per-session reports — strictly local, never commit
+рефакторинг/finsmotr/
+логи/finsmotr/

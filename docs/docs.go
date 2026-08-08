@@ -14,17 +14,60 @@ const docTemplate = `{
     },
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
-    "paths": {}
+    "paths": {
+        "/api/status": {
+            "get": {
+                "summary": "Get service status",
+                "tags": ["system"],
+                "responses": {
+                    "200": {"description": "Service status"}
+                }
+            }
+        },
+        "/api/login": {
+            "post": {
+                "summary": "Log in",
+                "tags": ["auth"],
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
+                "responses": {
+                    "200": {"description": "JWT token"},
+                    "401": {"description": "Invalid credentials"}
+                }
+            }
+        },
+        "/api/hosts": {
+            "get": {
+                "summary": "List static hosts",
+                "tags": ["hosts"],
+                "responses": {
+                    "200": {"description": "Static hosts"},
+                    "401": {"description": "Authentication required"}
+                }
+            },
+            "post": {
+                "summary": "Create or update a static host",
+                "tags": ["hosts"],
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
+                "responses": {
+                    "200": {"description": "Host saved"},
+                    "400": {"description": "Invalid host"},
+                    "401": {"description": "Authentication required"}
+                }
+            }
+        }
+    }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "",
+	Version:          "1.0.0-pre",
 	Host:             "",
 	BasePath:         "",
 	Schemes:          []string{},
-	Title:            "",
-	Description:      "",
+	Title:            "Intermasq API",
+	Description:      "HTTP API for managing dnsmasq",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",
