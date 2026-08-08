@@ -105,10 +105,10 @@ func TestParseDhcpHostLine_LeaseTime(t *testing.T) {
 	file := filepath.Join(dir, "test.conf")
 
 	cases := []struct {
-		name   string
-		line   string
-		host   string
-		lease  string
+		name  string
+		line  string
+		host  string
+		lease string
 	}{
 		{"hours", "dhcp-host=aa:bb:cc:dd:ee:ff,192.168.1.10,host1,12h", "host1", "12h"},
 		{"seconds", "dhcp-host=aa:bb:cc:dd:ee:ff,host2,3600", "host2", "3600"},
