@@ -280,8 +280,8 @@ func CreateLocalBackup(filePath string) {
 	}
 }
 
-// RollbackFile restores filePath from its .bak sibling. A fresh .bak is
-// taken first so the rollback itself can be rolled back.
+// RollbackFile restores filePath from its .bak sibling after validating the
+// restored content. The original .bak is kept for retry if validation fails.
 func RollbackFile(filePath string) error {
 	if !IsSafePath(filePath) {
 		return os.ErrPermission
@@ -291,8 +291,35 @@ func RollbackFile(filePath string) error {
 	if err != nil {
 		return err
 	}
-	CreateLocalBackup(filePath)
-	return os.WriteFile(filePath, content, 0644)
+
+	previous, previousErr := os.ReadFile(filePath)
+	hadPrevious := previousErr == nil
+	if previousErr != nil && !os.IsNotExist(previousErr) {
+		return previousErr
+	}
+	if err := os.WriteFile(filePath, content, 0644); err != nil {
+		return err
+	}
+
+	testCmd := exec.Command(bins.Dnsmasq(), "--test", "--conf-file="+filePath)
+	if testOut, testErr := testCmd.CombinedOutput(); testErr != nil {
+		stats.Counters.TestFailures.Add(1)
+
+		var restoreErr error
+		if hadPrevious {
+			restoreErr = os.WriteFile(filePath, previous, 0644)
+		} else {
+			restoreErr = os.Remove(filePath)
+			if os.IsNotExist(restoreErr) {
+				restoreErr = nil
+			}
+		}
+		if restoreErr != nil {
+			return fmt.Errorf("dnsmasq_test_failed: %s; restore failed: %w", testOut, restoreErr)
+		}
+		return fmt.Errorf("dnsmasq_test_failed: %s", testOut)
+	}
+	return nil
 }
 
 // UnifiedDiff produces a minimal unified-style line diff between a and b.
