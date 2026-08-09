@@ -52,14 +52,6 @@ Lightweight, fast, single binary — everything included.
 
 ### Build
 
-Recommended build, which rebuilds the frontend before embedding it:
-
-```bash
-make build
-```
-
-Manual build:
-
 ```bash
 # Build frontend
 cd frontend && npm ci && npm run build && cd ..
@@ -71,11 +63,9 @@ go build -o intermasq .
 ### Run
 
 ```bash
-export INTERMASQ_SECRET="$(openssl rand -hex 32)"
 sudo ./intermasq -port 8081 -conf-dir /etc/dnsmasq.d -leases /var/lib/misc/dnsmasq.leases
 ```
 
-`INTERMASQ_SECRET` is required; the process exits if it is not set.
 On first launch, the admin setup screen appears. After creating an account — full access to the panel.
 
 ### Production build (with version)
@@ -143,11 +133,6 @@ After launch, Swagger documentation is available at: `http://<host>:<port>/swagg
 
 - **Browser**: JWT token in `Authorization: Bearer <token>` header
 - **Scripts/plugins**: static key in `X-API-Key: <INTERMASQ_SECRET>` header
-
-Admin-only operations include raw config writes, reload, rollback, history and
-backup restore, user management and service restarts. Other protected
-operations are available to authenticated users. `/api/*` does not accept
-tokens in the query string; `/metrics` keeps `?token=` support for Prometheus.
 
 ---
 

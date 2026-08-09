@@ -122,14 +122,6 @@
 
 ### Сборка из исходников
 
-Рекомендуемый вариант, который сначала пересобирает frontend:
-
-```bash
-make build
-```
-
-Ручная сборка:
-
 ```bash
 # 1. Сборка фронтенда (результат → frontend/dist/)
 cd frontend && npm ci && npm run build && cd ..
@@ -263,14 +255,6 @@ http://<host>:<port>/swagger/index.html
 | 🌐 **Браузер** | `Authorization: Bearer <JWT>` |
 | 🤖 **Скрипты / плагины** | `X-API-Key: <INTERMASQ_SECRET>` |
 | 📊 **Prometheus / SSE** | `Authorization: Bearer <JWT>` или `X-API-Key: <SECRET>` |
-
-Часть операций требует роль `admin`: запись raw-конфигурации, reload, rollback,
-восстановление history/backup, управление пользователями и перезапуск
-сервисов. Остальные защищённые операции доступны любому аутентифицированному
-пользователю.
-
-Для `/api/*` токен в query string не используется. Исключение — `/metrics`,
-где `?token=` сохранён для клиентов Prometheus, не умеющих задавать заголовки.
 
 ---
 
