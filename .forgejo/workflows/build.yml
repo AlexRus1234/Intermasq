@@ -34,6 +34,11 @@ on:
         required: true
         default: false
         type: boolean
+      publish_moshub:
+        description: "Create Mos.Hub Release and upload binary assets?"
+        required: true
+        default: false
+        type: boolean
       version_tag:
         description: "Fallback version when HEAD has no exact v* tag."
         required: false
@@ -731,6 +736,32 @@ jobs:
               "$API/releases/${RELEASE_ID}/assets?name=${FILE}"
           done
           echo "Published Codeberg Release ${VERSION}"
+
+      - name: Publish Mos.Hub Release
+        if: success() && github.event.inputs.publish_moshub == 'true'
+        env:
+          RELEASE_TOKEN: ${{ secrets.TOKEN_MOSHUB }}
+        run: |
+          if [ "$EXACT_TAG" != "$VERSION" ]; then
+            echo "::error::Mos.Hub Release requires HEAD to have the exact tag $VERSION"
+            exit 1
+          fi
+          ARTIFACT_NAME="intermasq-${VERSION}-linux-amd64"
+          API="https://hub.mos.ru/api/v1/repos/AlexRus1234/Intermasq"
+          BODY="$(jq -n --arg tag "$VERSION" '{tag_name:$tag, name:$tag, draft:false, prerelease:($tag | test("-"))}')"
+          RELEASE="$(curl -kfsSL -X POST \
+            -H "Authorization: token ${RELEASE_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            "$API/releases" -d "$BODY")"
+          RELEASE_ID="$(jq -r '.id' <<<"$RELEASE")"
+          test -n "$RELEASE_ID" && test "$RELEASE_ID" != "null"
+          for FILE in "$ARTIFACT_NAME" "${ARTIFACT_NAME}.sha256"; do
+            curl -kfsSL -X POST \
+              -H "Authorization: token ${RELEASE_TOKEN}" \
+              -F "attachment=@${FILE}" \
+              "$API/releases/${RELEASE_ID}/assets?name=${FILE}"
+          done
+          echo "Published Mos.Hub Release ${VERSION}"
 
       - name: Cleanup
         if: always()
