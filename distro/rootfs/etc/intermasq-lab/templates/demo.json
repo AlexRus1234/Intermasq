@@ -1,0 +1,16 @@
+{
+  "demo-client": {
+    "id": "demo-client",
+    "name": "Demo client template",
+    "ip_range": "10.10.3.20-10.10.3.39",
+    "hostname_pattern": "client-{NNN}",
+    "target_file": "/var/lib/intermasq-lab/demo/conf/demo-devices.conf"
+  },
+  "demo-camera": {
+    "id": "demo-camera",
+    "name": "Demo camera template",
+    "ip_range": "10.10.3.50-10.10.3.59",
+    "hostname_pattern": "camera-{NNN}",
+    "target_file": "/var/lib/intermasq-lab/demo/conf/demo-devices.conf"
+  }
+}

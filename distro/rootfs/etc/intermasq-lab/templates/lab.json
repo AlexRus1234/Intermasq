@@ -1,0 +1,16 @@
+{
+  "lab-workstation": {
+    "id": "lab-workstation",
+    "name": "Lab workstation template",
+    "ip_range": "10.10.2.20-10.10.2.39",
+    "hostname_pattern": "workstation-{NNN}",
+    "target_file": "/var/lib/intermasq-lab/lab/conf/lab-devices.conf"
+  },
+  "lab-sensor": {
+    "id": "lab-sensor",
+    "name": "Lab sensor template",
+    "ip_range": "10.10.2.50-10.10.2.59",
+    "hostname_pattern": "sensor-{NNN}",
+    "target_file": "/var/lib/intermasq-lab/lab/conf/lab-devices.conf"
+  }
+}

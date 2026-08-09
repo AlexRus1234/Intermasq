@@ -26,7 +26,8 @@ instances:
     gateway: 10.10.1.1
     root_bridge_address: 10.10.1.254/24
     domain: office.test
-    device_mac: 02:00:00:01:00:01
+    device_ip: 10.10.1.10
+    device_mac: 02:00:00:01:10:01
 
   - name: lab
     namespace: im2
@@ -37,7 +38,8 @@ instances:
     gateway: 10.10.2.1
     root_bridge_address: 10.10.2.254/24
     domain: lab.test
-    device_mac: 02:00:00:02:00:01
+    device_ip: 10.10.2.10
+    device_mac: 02:00:00:02:10:01
 
   - name: demo
     namespace: im3
@@ -48,4 +50,5 @@ instances:
     gateway: 10.10.3.1
     root_bridge_address: 10.10.3.254/24
     domain: demo.test
-    device_mac: 02:00:00:03:00:01
+    device_ip: 10.10.3.10
+    device_mac: 02:00:00:03:10:01

@@ -1,0 +1,12 @@
+#!/bin/sh
+
+namespace="$1"
+device_ip="$2"
+
+while :; do
+	if ! ip netns exec "$namespace" ping -c 1 -W 1 "$device_ip" >/dev/null 2>&1; then
+		sleep 5
+	else
+		sleep 10
+	fi
+done

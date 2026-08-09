@@ -1,0 +1,16 @@
+{
+  "office-laptop": {
+    "id": "office-laptop",
+    "name": "Office laptop template",
+    "ip_range": "10.10.1.20-10.10.1.29",
+    "hostname_pattern": "office-{NNN}",
+    "target_file": "/var/lib/intermasq-lab/office/conf/office-devices.conf"
+  },
+  "office-iot": {
+    "id": "office-iot",
+    "name": "Office IoT template",
+    "ip_range": "10.10.1.40-10.10.1.49",
+    "hostname_pattern": "iot-{NNN}",
+    "target_file": "/var/lib/intermasq-lab/office/conf/office-devices.conf"
+  }
+}

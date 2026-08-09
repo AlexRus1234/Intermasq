@@ -71,6 +71,29 @@ ensure_device_link() {
 	ip netns exec "$namespace" udhcpc -i eth0 -n -q -p "/var/run/udhcpc-$namespace.pid" >/dev/null 2>&1 || return 1
 }
 
+ensure_static_device_link() {
+	local namespace="$1"
+	local bridge="$2"
+	local host_link="$3"
+	local mac="$4"
+	local ip_address="$5"
+	local peer_link="${host_link}-p"
+
+	if ! ip link show "$host_link" >/dev/null 2>&1; then
+		ip link add "$host_link" type veth peer name "$peer_link" || return 1
+		ip link set "$peer_link" netns "$namespace" || return 1
+		ip netns exec "$namespace" ip link set "$peer_link" name eth0 || return 1
+	fi
+	ip link set "$host_link" master "$bridge" || return 1
+	ip link set "$host_link" up || return 1
+	ip netns exec "$namespace" ip link set lo up || return 1
+	ip netns exec "$namespace" ip link set eth0 address "$mac" || return 1
+	ip netns exec "$namespace" ip link set eth0 up || return 1
+	if ! ip netns exec "$namespace" ip addr show dev eth0 | grep -Fq "$ip_address/24"; then
+		ip netns exec "$namespace" ip addr add "$ip_address/24" dev eth0 || return 1
+	fi
+}
+
 ensure_secret() {
 	local secret_file="$1"
 	if [ ! -s "$secret_file" ]; then
@@ -109,6 +132,28 @@ ensure_admin() {
 	rm -f "$setup_body"
 }
 
+ensure_demo_user() {
+	local dir="$1"
+	local gateway="$2"
+	local secret="$3"
+	local marker="$dir/data/.demo-user-created"
+	local body="$dir/data/demo-user.json"
+
+	if [ -f "$marker" ]; then
+		return 0
+	fi
+	printf '{"username":"%s","password":"%s"}\n' "$LAB_DEMO_USERNAME" "$LAB_DEMO_PASSWORD" > "$body" || return 1
+	until curl --silent --show-error --max-time 5 \
+		-H "X-API-Key: $secret" \
+		-H 'Content-Type: application/json' \
+		--data-binary "@$body" \
+		"http://$gateway:$INTERNAL_PANEL_PORT/api/users" >/dev/null 2>&1; do
+		sleep 1
+	done
+	rm -f "$body"
+	: > "$marker"
+}
+
 start_instance() {
 	local name="$1"
 	local namespace="$2"
@@ -119,23 +164,46 @@ start_instance() {
 	local gateway="$7"
 	local bridge_address="$8"
 	local domain="$9"
-	local device_mac="${10}"
-	local host_link="${11}"
-	local device_host_link="${12}"
+	local device_ip="${10}"
+	local device_mac="${11}"
+	local host_link="${12}"
+	local device_host_link="${13}"
+	local unknown_namespace="${14}"
+	local unknown_ip="${15}"
+	local unknown_mac="${16}"
+	local unknown_host_link="${17}"
+	local unknown_device_host_link="${18}"
+	local lease_namespace="${19}"
+	local lease_mac="${20}"
+	local lease_host_link="${21}"
+	local lease_device_host_link="${22}"
 	local dir
 	local secret
 
 	dir=$(instance_dir "$name")
 	mkdir -p "$dir/conf" "$dir/data" "$dir/history" || return 1
 	chown dnsmasq:dnsmasq "$dir/data" || return 1
+	for seed in /etc/intermasq-lab/seed/"$name"/*.conf; do
+		[ -f "$seed" ] || continue
+		seed_name=$(basename "$seed")
+		if [ ! -f "$dir/conf/$seed_name" ]; then
+			cp "$seed" "$dir/conf/$seed_name" || return 1
+		fi
+	done
 	if [ ! -f "$dir/conf/$name-devices.conf" ]; then
 		cp "/etc/intermasq-lab/devices/$name.conf" "$dir/conf/$name-devices.conf" || return 1
 	fi
+	if [ ! -f "$dir/data/templates.json" ]; then
+		cp "/etc/intermasq-lab/templates/$name.json" "$dir/data/templates.json" || return 1
+	fi
+	mkdir -p "$dir/tftp" || return 1
 	ensure_secret "$dir/data/secret" || return 1
 	secret=$(cat "$dir/data/secret")
 
 	ensure_namespace "$namespace" || return 1
 	ensure_namespace "$device_namespace" || return 1
+	ensure_namespace "$unknown_namespace" || return 1
+	ensure_namespace "$lease_namespace" || return 1
 	ensure_bridge "$bridge" || return 1
 	ensure_namespace_link "$namespace" "$bridge" "$host_link" "$gateway" "$bridge_address" || return 1
 
@@ -147,6 +215,8 @@ start_instance() {
 	fi
 
 	ensure_device_link "$device_namespace" "$bridge" "$device_host_link" "$device_mac" || return 1
+	ensure_static_device_link "$unknown_namespace" "$bridge" "$unknown_device_host_link" "$unknown_mac" "$unknown_ip" || return 1
+	ensure_device_link "$lease_namespace" "$bridge" "$lease_device_host_link" "$lease_mac" || return 1
 
 	if ! ip netns exec "$namespace" ss -ltn | grep -Fq ':8081'; then
 		rm -f "$dir/data/intermasq.pid"
@@ -167,6 +237,21 @@ start_instance() {
 			-ci-mode true || return 1
 	fi
 	ensure_admin "$dir" "$gateway" || return 1
+	ensure_demo_user "$dir" "$gateway" "$secret" || return 1
+	if [ ! -f "$dir/data/heartbeat.pid" ] || ! kill -0 "$(cat "$dir/data/heartbeat.pid")" 2>/dev/null; then
+		rm -f "$dir/data/heartbeat.pid"
+		start-stop-daemon --start --background --make-pidfile \
+			--pidfile "$dir/data/heartbeat.pid" \
+			--exec /usr/local/sbin/intermasq-lab-heartbeat -- \
+			"$namespace" "$device_ip" || return 1
+	fi
+	if [ ! -f "$dir/data/unknown-heartbeat.pid" ] || ! kill -0 "$(cat "$dir/data/unknown-heartbeat.pid")" 2>/dev/null; then
+		rm -f "$dir/data/unknown-heartbeat.pid"
+		start-stop-daemon --start --background --make-pidfile \
+			--pidfile "$dir/data/unknown-heartbeat.pid" \
+			--exec /usr/local/sbin/intermasq-lab-heartbeat -- \
+			"$unknown_namespace" "$unknown_ip" || return 1
+	fi
 
 	if ! ss -ltn | grep -Fq ":$panel_port"; then
 		rm -f "$dir/data/proxy.pid"
@@ -187,9 +272,9 @@ stop_pidfile() {
 
 start() {
 	ebegin "Starting Intermasq lab"
-	start_instance office im1 dev1 lab1-br 8082 10.10.1.0/24 10.10.1.1 10.10.1.254/24 office.test 02:00:00:01:00:01 o-h o-d || { eend 1; return 1; }
-	start_instance lab im2 dev2 lab2-br 8083 10.10.2.0/24 10.10.2.1 10.10.2.254/24 lab.test 02:00:00:02:00:01 l-h l-d || { eend 1; return 1; }
-	start_instance demo im3 dev3 lab3-br 8084 10.10.3.0/24 10.10.3.1 10.10.3.254/24 demo.test 02:00:00:03:00:01 d-h d-d || { eend 1; return 1; }
+	start_instance office im1 dev1 lab1-br 8082 10.10.1.0/24 10.10.1.1 10.10.1.254/24 office.test 10.10.1.10 02:00:00:01:10:01 o-h o-d dev1u 10.10.1.20 00:03:93:00:00:01 o-uh o-ud dev1l 02:00:00:01:20:01 o-l o-ld || { eend 1; return 1; }
+	start_instance lab im2 dev2 lab2-br 8083 10.10.2.0/24 10.10.2.1 10.10.2.254/24 lab.test 10.10.2.10 02:00:00:02:10:01 l-h l-d dev2u 10.10.2.20 00:1e:c2:00:00:01 l-uh l-ud dev2l 02:00:00:02:20:01 l-l l-ld || { eend 1; return 1; }
+	start_instance demo im3 dev3 lab3-br 8084 10.10.3.0/24 10.10.3.1 10.10.3.254/24 demo.test 10.10.3.10 02:00:00:03:10:01 d-h d-d dev3u 10.10.3.20 52:54:00:00:00:01 d-uh d-ud dev3l 02:00:00:03:20:01 d-l d-ld || { eend 1; return 1; }
 	eend 0
 }
 
@@ -197,11 +282,13 @@ stop() {
 	ebegin "Stopping Intermasq lab"
 	for name in office lab demo; do
 		dir=$(instance_dir "$name")
+		stop_pidfile "$dir/data/heartbeat.pid"
+		stop_pidfile "$dir/data/unknown-heartbeat.pid"
 		stop_pidfile "$dir/data/proxy.pid"
 		stop_pidfile "$dir/data/intermasq.pid"
 		stop_pidfile "$dir/data/dnsmasq.pid"
 	done
-	for namespace in dev1 im1 dev2 im2 dev3 im3; do
+	for namespace in dev1 dev1u dev1l im1 dev2 dev2u dev2l im2 dev3 dev3u dev3l im3; do
 		ip netns del "$namespace" 2>/dev/null || true
 	done
 	for bridge in lab1-br lab2-br lab3-br; do
