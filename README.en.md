@@ -23,6 +23,7 @@ infrastructure is required.
 
 ## Contents
 
+- [Screenshots](#screenshots)
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
@@ -38,6 +39,24 @@ infrastructure is required.
 
 The project was developed according to a predefined architecture; an AI
 assistant was used while preparing the source code.[^1]
+
+---
+
+## Screenshots
+
+A few screens from the web panel in the English localization:
+
+<p>
+  <img src="скрин/en/Снимок%20экрана%202026-08-09%20152137.png" alt="Intermasq panel" width="49%">
+  <img src="скрин/en/Снимок%20экрана%202026-08-09%20152151.png" alt="Intermasq settings" width="49%">
+</p>
+<p>
+  <img src="скрин/en/Снимок%20экрана%202026-08-09%20152217.png" alt="dnsmasq configuration" width="49%">
+  <img src="скрин/en/Снимок%20экрана%202026-08-09%20152228.png" alt="File management" width="49%">
+</p>
+<p>
+  <img src="скрин/en/Снимок%20экрана%202026-08-09%20152241.png" alt="Device list" width="49%">
+</p>
 
 ---
 
