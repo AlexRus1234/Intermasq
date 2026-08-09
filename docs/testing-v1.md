@@ -99,7 +99,7 @@ BASE=http://localhost:18081 CONF_DIR=/tmp/conf ./tests/smoke.sh
 
 `workflow_dispatch` в Forgejo UI:
 - `push_to_registry=false`, `run_race_tests=true` — стандартный прогон
-- `push_to_registry=true` — загрузить binary в Forgejo Packages и локальный Forgejo Release (только для точного `v*`-тега)
+- `push_to_registry=true` — загрузить binary в Forgejo Packages и локальный Forgejo Release
 - После зелёного — binary доступен в job artifacts (можно скачать из UI)
 
 ---
@@ -204,7 +204,7 @@ or add A2 to tests/known-bugs.txt (new bug found).
 
 | Параметр | Default | Описание |
 |---|---|---|
-| `push_to_registry` | `false` | Опубликовать binary в Forgejo Packages и локальный Forgejo Release после зелёного прогона; релиз только для точного `v*`-тега |
+| `push_to_registry` | `false` | Опубликовать binary в Forgejo Packages и локальный Forgejo Release после зелёного прогона |
 | `version_tag` | `""` (→ `sha-<short>`) | Версия в registry |
 | `run_race_tests` | `true` | Включить `-race` для Go test (медленнее, но ловит data races) |
 | `run_perf_tests` | `false` | Gap 5: perf/stress (`tests/perf.sh`, отдельная инстанция `:18082`) |

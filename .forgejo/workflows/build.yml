@@ -667,11 +667,6 @@ jobs:
         env:
           RELEASE_TOKEN: ${{ secrets.UPLOAD_TOKEN }}
         run: |
-          # Releases are tied to real version tags; sha-* builds remain Packages-only.
-          if [ "$EXACT_TAG" != "$VERSION" ]; then
-            echo "Skipping local Forgejo Release: HEAD has no exact tag $VERSION"
-            exit 0
-          fi
           ARTIFACT_NAME="intermasq-${VERSION}-linux-amd64"
           API="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
           BODY="$(jq -n --arg tag "$VERSION" '{tag_name:$tag, name:$tag, draft:false, prerelease:($tag | test("-"))}')"
