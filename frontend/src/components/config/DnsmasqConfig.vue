@@ -13,14 +13,14 @@
         </li>
       </ul>
       <div class="d-flex gap-2">
-        <div v-if="currentFile" class="btn-group btn-group-sm" role="group">
+        <div v-if="currentFile && store.isAdmin" class="btn-group btn-group-sm" role="group">
           <button type="button" :class="['btn', editMode === 'visual' ? 'btn-primary' : 'btn-outline-primary']" @click="switchMode('visual')">🎨 {{ $t('config.modeVisual') }}</button>
           <button type="button" :class="['btn', editMode === 'raw' ? 'btn-primary' : 'btn-outline-primary']" @click="switchMode('raw')">📝 {{ $t('config.modeRaw') }}</button>
         </div>
         <button v-if="currentFile" @click="showHistory = true" class="btn btn-sm btn-outline-secondary" :title="$t('history.iconTooltip')">
           🕒 {{ $t('history.icon') }}
         </button>
-        <button v-if="currentFile && currentFile.has_bak" @click="rollback" class="btn btn-sm btn-outline-warning">
+        <button v-if="currentFile && currentFile.has_bak && store.isAdmin" @click="rollback" class="btn btn-sm btn-outline-warning">
           ⏪ {{ $t('config.rollback') }}
         </button>
         <button v-if="currentFile" @click="deleteFile" class="btn btn-sm btn-outline-danger" :title="$t('config.delete', 'Delete file')">

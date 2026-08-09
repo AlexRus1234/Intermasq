@@ -9,7 +9,7 @@
         <p class="text-muted small mb-3">{{ $t('safety.backupHint', 'A live snapshot of every .conf file in /etc/dnsmasq.d, downloaded as a ZIP. Restoring validates the archive with dnsmasq --test and backs up current files as .restore.bak before overwriting.') }}</p>
         <div class="d-flex gap-2 flex-wrap">
           <button @click="actions.downloadBackup()" class="btn btn-info fw-bold">💾 {{ $t('app.backup') }}</button>
-          <button @click="uploadRestore()" class="btn btn-outline-warning fw-bold">📤 {{ $t('app.restore') }}</button>
+          <button v-if="store.isAdmin" @click="uploadRestore()" class="btn btn-outline-warning fw-bold">📤 {{ $t('app.restore') }}</button>
         </div>
       </div>
     </div>

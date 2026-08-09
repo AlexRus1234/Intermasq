@@ -127,9 +127,9 @@ onUnmounted(clearPluginFrame)
                 <li><a class="dropdown-item" href="#" @click.prevent="switchLocale">🌐 {{ locale === 'ru' ? 'English' : 'Русский' }}</a></li>
                 <li><a class="dropdown-item" href="#" @click.prevent="toggleTheme">🌓 {{ $t('app.toggleTheme') }}</a></li>
                 <li><a class="dropdown-item" href="/swagger/index.html" target="_blank">📖 {{ $t('app.apiDocs') }}</a></li>
-                <li><a class="dropdown-item" href="#" @click.prevent="actions.restartSystem()">🔄 {{ $t('app.restart') }}</a></li>
+                <li v-if="store.isAdmin"><a class="dropdown-item" href="#" @click.prevent="actions.restartSystem()">🔄 {{ $t('app.restart') }}</a></li>
                 <li><hr class="dropdown-divider"></li>
-                <li><a class="dropdown-item text-danger" href="#" @click.prevent="actions.logoutRequest()">🚪 {{ $t('app.logout') }}</a></li>
+                <li><a class="dropdown-item text-danger" href="#" @click.prevent="actions.logout()">🚪 {{ $t('app.logout') }}</a></li>
             </ul>
         </div>
     </div>
@@ -152,7 +152,7 @@ onUnmounted(clearPluginFrame)
                         <button @click="store.tab='discovery'; actions.loadNewDevices()" :class="['btn', store.tab==='discovery' ? 'btn-primary' : 'btn-outline-primary']">🔍 {{ $t('app.tabDiscovery') }}</button>
                         <button @click="store.tab='config'" :class="['btn', store.tab==='config' ? 'btn-primary' : 'btn-outline-primary']">⚙️ {{ $t('app.tabConfig') }}</button>
                         <button @click="store.tab='safety'" :class="['btn', store.tab==='safety' ? 'btn-primary' : 'btn-outline-primary']">🛡️ {{ $t('app.tabSafety') }}</button>
-                        <button @click="store.tab='users'; actions.loadUsers()" :class="['btn', store.tab==='users' ? 'btn-primary' : 'btn-outline-primary']">👥 {{ $t('app.tabUsers') }}</button>
+                        <button @click="store.tab='users'; actions.loadUsers()" v-if="store.isAdmin" :class="['btn', store.tab==='users' ? 'btn-primary' : 'btn-outline-primary']">👥 {{ $t('app.tabUsers') }}</button>
                     </div>
                 </div>
                 <div v-if="store.tab !== 'config'" class="col-12 col-md">
@@ -160,9 +160,9 @@ onUnmounted(clearPluginFrame)
                 </div>
                 <div class="col-12 col-md-auto text-md-end d-flex gap-2 justify-content-end">
                     <button @click="actions.downloadBackup()" class="btn btn-outline-info fw-bold" :title="$t('app.downloadArchive')">💾 {{ $t('app.backup') }}</button>
-                    <button @click="uploadRestore()" class="btn btn-outline-warning fw-bold" :title="$t('app.restoreArchive')">📤 {{ $t('app.restore') }}</button>
+                    <button v-if="store.isAdmin" @click="uploadRestore()" class="btn btn-outline-warning fw-bold" :title="$t('app.restoreArchive')">📤 {{ $t('app.restore') }}</button>
                     <button @click="downloadCSV()" class="btn btn-outline-success fw-bold" :title="$t('app.csvExportTooltip')">📥 {{ $t('app.csvExport') }}</button>
-                    <button @click="actions.applyConfig()" class="btn btn-warning fw-bold text-dark">🔄 {{ $t('app.apply') }}</button>
+                    <button v-if="store.isAdmin" @click="actions.applyConfig()" class="btn btn-warning fw-bold text-dark">🔄 {{ $t('app.apply') }}</button>
                 </div>
             </div>
 

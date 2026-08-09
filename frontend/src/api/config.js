@@ -1,7 +1,7 @@
 // dnsmasq config editor + versioned history + file deletion actions.
 // Backed by handlers_config.go and handlers_safety.go.
 
-import { store, api } from '../store.js'
+import { store, api, actions } from '../store.js'
 import i18n, { translateApiError } from '../i18n.js'
 
 const { t } = i18n.global
@@ -13,12 +13,7 @@ export async function loadConfig() {
         const rRes = await api.get('/templates/ranges')
         store.dhcpRanges = rRes.data.ranges || []
     } catch (e) {
-        if (e.response?.status === 401) {
-            // Defer to store.js: clear token + bounce to login.
-            store.token = ''
-            localStorage.removeItem('token')
-            store.view = 'login'
-        }
+        if (e.response?.status === 401) actions.logout()
     }
 }
 

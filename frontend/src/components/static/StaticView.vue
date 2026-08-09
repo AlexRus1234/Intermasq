@@ -22,7 +22,7 @@
             <button v-if="selectedFile !== 'all'" @click="showHistory = true" class="btn btn-sm btn-outline-secondary" :title="$t('history.iconTooltip')">
                 🕒 {{ $t('history.icon') }}
             </button>
-            <button v-if="selectedFile !== 'all' && hasBackup" @click="rollbackFile" class="btn btn-sm btn-outline-warning" :title="$t('hosts.rollbackTooltip')">
+            <button v-if="selectedFile !== 'all' && hasBackup && store.isAdmin" @click="rollbackFile" class="btn btn-sm btn-outline-warning" :title="$t('hosts.rollbackTooltip')">
                 ⏪ {{ $t('hosts.rollback') }}
             </button>
         </div>

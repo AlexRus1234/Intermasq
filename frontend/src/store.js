@@ -24,6 +24,24 @@ import * as systemApi from './api/system.js'
 
 const { t } = i18n.global
 
+// decodeRole reads the `role` claim out of the JWT without verifying its
+// signature. The backend re-checks role server-side on every admin request
+// (AdminMiddleware in internal/auth), so a tampered client-side role only
+// buys a misleading UI, not actual privilege — we trust it purely to decide
+// which controls to render. Defaults to 'user' for missing/old/malformed
+// tokens so a stale session degrades gracefully (admin controls hidden)
+// rather than silently escalating.
+function decodeRole(token) {
+    if (!token) return 'user'
+    try {
+        let p = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+        while (p.length % 4) p += '='
+        return JSON.parse(atob(p)).role || 'user'
+    } catch (_) {
+        return 'user'
+    }
+}
+
 export const store = reactive({
     token: localStorage.getItem('token') || '',
     view: 'loading',
@@ -47,7 +65,14 @@ export const store = reactive({
     transferData: null,
     history: [],
     historyDiff: '',
-    selectedLeases: []
+    selectedLeases: [],
+
+    // role/isAdmin derive from the JWT `role` claim (see decodeRole). As
+    // getters on a reactive object they re-evaluate whenever `token`
+    // changes, so templates gating on store.isAdmin refresh on login,
+    // logout and role switches without any manual wiring.
+    get role() { return decodeRole(this.token) },
+    get isAdmin() { return this.role === 'admin' },
 })
 
 export const api = axios.create({ baseURL: '/api' })
@@ -64,6 +89,13 @@ export const actions = {
     },
 
     logout() {
+        // Best-effort server-side JWT revocation (POST /api/logout → jti
+        // blacklist). Fire-and-forget: local clear must happen regardless
+        // — this is also the path taken on a 401 during loadData, where
+        // the token is already invalid and the POST will 4xx harmlessly.
+        // Consolidates the old store.logout() (local-only) and the old
+        // system.logoutRequest() (POST + clear) into one canonical action.
+        api.post('/logout').catch(() => {})
         store.token = ''
         localStorage.removeItem('token')
         store.view = 'login'

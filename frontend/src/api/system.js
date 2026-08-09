@@ -93,12 +93,9 @@ export async function changePassword(oldPassword, newPassword) {
 }
 
 // ===== Session =====
-
-export async function logoutRequest() {
-    try {
-        await api.post('/logout')
-    } catch (e) {}
-    store.token = ''
-    localStorage.removeItem('token')
-    store.view = 'login'
-}
+//
+// Logout lives in store.js (actions.logout) — it POSTs /api/logout
+// (best-effort revocation) and clears local state. It used to be split
+// between store.logout() (local clear, used on 401) and a duplicate
+// logoutRequest() here (POST + clear, wired to the menu). The single
+// canonical action is imported everywhere via `actions`.

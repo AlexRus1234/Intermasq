@@ -18,7 +18,7 @@
             </li>
         </ul>
 
-        <button v-if="selectedFile !== 'all' && hasBackup" @click="rollbackFile" class="btn btn-sm btn-outline-warning ms-2" :title="$t('dns.rollbackTooltip')">
+        <button v-if="selectedFile !== 'all' && hasBackup && store.isAdmin" @click="rollbackFile" class="btn btn-sm btn-outline-warning ms-2" :title="$t('dns.rollbackTooltip')">
             ⏪ {{ $t('dns.rollback') }}
         </button>
         <button v-if="selectedFile !== 'all'" @click="showHistory = true" class="btn btn-sm btn-outline-secondary ms-2" :title="$t('history.iconTooltip')">

@@ -31,7 +31,7 @@
                       <button class="btn btn-sm btn-outline-primary me-1" @click="diffCurrent(v.version)" :title="$t('history.diffVsCurrent')">
                         ≠
                       </button>
-                      <button class="btn btn-sm btn-outline-warning" @click="restore(v.version)" :title="$t('history.restore')">
+                      <button v-if="store.isAdmin" class="btn btn-sm btn-outline-warning" @click="restore(v.version)" :title="$t('history.restore')">
                         ⏪
                       </button>
                     </td>
