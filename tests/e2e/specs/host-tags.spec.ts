@@ -13,10 +13,11 @@ test('host with tags renders badges', async ({ page }) => {
 
   await page.locator('input[placeholder="MAC (aa:bb...)"]').fill(MAC)
 
-  // The tags input is the only .font-monospace input rendered in
-  // single-add mode (the bulk textarea lives behind v-if importMode==='text').
+  // Target the tags input by its stable placeholder (same in ru/en). It is
+  // no longer the only .font-monospace input in the row — the lease_time
+  // field shares that class — so the old class-only selector is ambiguous.
   await page
-    .locator('.row.g-2 input.form-control.font-monospace')
+    .locator('input[placeholder="set:iot,set:guest"]')
     .fill('set:iot,set:guest')
 
   await page.locator('.input-group:has(.btn-success) input.form-control').fill(`${CONF_DIR}/e2e-tags.conf`)
