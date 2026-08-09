@@ -1,0 +1,47 @@
+version: 1
+
+vm:
+  base: alpine
+  architecture: amd64
+  memory: 512M
+  cpus: 2
+
+defaults:
+  intermasq_binary: /usr/local/lib/intermasq
+  internal_panel_port: 8081
+  init_system: none
+  ci_mode: true
+
+instances:
+  - name: office
+    namespace: im1
+    device_namespace: dev1
+    bridge: lab1-br
+    panel_port: 8082
+    network: 10.10.1.0/24
+    gateway: 10.10.1.1
+    root_bridge_address: 10.10.1.254/24
+    domain: office.test
+    device_mac: 02:00:00:01:00:01
+
+  - name: lab
+    namespace: im2
+    device_namespace: dev2
+    bridge: lab2-br
+    panel_port: 8083
+    network: 10.10.2.0/24
+    gateway: 10.10.2.1
+    root_bridge_address: 10.10.2.254/24
+    domain: lab.test
+    device_mac: 02:00:00:02:00:01
+
+  - name: demo
+    namespace: im3
+    device_namespace: dev3
+    bridge: lab3-br
+    panel_port: 8084
+    network: 10.10.3.0/24
+    gateway: 10.10.3.1
+    root_bridge_address: 10.10.3.254/24
+    domain: demo.test
+    device_mac: 02:00:00:03:00:01
