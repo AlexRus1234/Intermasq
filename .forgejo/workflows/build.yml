@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       push_to_registry:
-        description: "Upload binary to Forgejo Packages on success?"
+        description: "Upload binary to Forgejo Packages and Release on success?"
         required: true
         default: false
         type: boolean
@@ -661,6 +661,33 @@ jobs:
                 "https://git.yadr00.internal/api/packages/AlexRus1234/generic/intermasq/${VERSION}/${ARTIFACT_NAME}.sha256"
 
            echo "Published Forgejo package ${ARTIFACT_NAME}"
+
+      - name: Publish local Forgejo Release
+        if: success() && github.event.inputs.push_to_registry == 'true'
+        env:
+          RELEASE_TOKEN: ${{ secrets.UPLOAD_TOKEN }}
+        run: |
+          # Releases are tied to real version tags; sha-* builds remain Packages-only.
+          if [ "$EXACT_TAG" != "$VERSION" ]; then
+            echo "Skipping local Forgejo Release: HEAD has no exact tag $VERSION"
+            exit 0
+          fi
+          ARTIFACT_NAME="intermasq-${VERSION}-linux-amd64"
+          API="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
+          BODY="$(jq -n --arg tag "$VERSION" '{tag_name:$tag, name:$tag, draft:false, prerelease:($tag | test("-"))}')"
+          RELEASE="$(curl -fsSL -X POST \
+            -H "Authorization: token ${RELEASE_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            "$API/releases" -d "$BODY")"
+          RELEASE_ID="$(jq -r '.id' <<<"$RELEASE")"
+          test -n "$RELEASE_ID" && test "$RELEASE_ID" != "null"
+          for FILE in "$ARTIFACT_NAME" "${ARTIFACT_NAME}.sha256"; do
+            curl -fsSL -X POST \
+              -H "Authorization: token ${RELEASE_TOKEN}" \
+              -F "attachment=@${FILE}" \
+              "$API/releases/${RELEASE_ID}/assets?name=${FILE}"
+          done
+          echo "Published local Forgejo Release ${VERSION}"
 
       - name: Publish GitHub Release
         if: success() && github.event.inputs.publish_github == 'true'
