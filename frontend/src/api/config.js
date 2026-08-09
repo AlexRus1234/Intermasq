@@ -85,6 +85,49 @@ export async function loadDhcpRanges() {
     } catch (e) {}
 }
 
+// ===== Raw text editor (GET/PUT /api/files/:name) =====
+//
+// The visual editor (saveConfig above) round-trips through a directive
+// model — fine for known keys, but it cannot represent arbitrary raw
+// lines a power user might want (comments, ordering, unsupported
+// directives). The raw path hands the file contents to the backend as
+// plain text; writeFileRaw still runs `dnsmasq --test` + .bak rollback,
+// so the safety guarantee is identical to the visual path. PUT is
+// admin-only on the backend; a non-admin gets 403, surfaced via alert.
+//
+// Unlike the snapshot-based helpers above, raw content is transient
+// per-edit, so we return it to the caller instead of parking it in
+// store — the textarea lives entirely inside DnsmasqConfig.vue.
+
+export async function loadRawFile(name) {
+    try {
+        const res = await api.get(`/files/${encodeURIComponent(name)}`)
+        return res.data.content
+    } catch (e) {
+        const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.rawLoadError')
+        alert(msg)
+        return null
+    }
+}
+
+export async function saveRawFile(name, content) {
+    try {
+        await api.put(`/files/${encodeURIComponent(name)}`, { content })
+        return true
+    } catch (e) {
+        // dnsmasq_test_failed comes back with a `detail` field carrying the
+        // raw dnsmasq output — show it so the user can see WHICH line
+        // dnsmasq rejected. Mirrors saveConfig's error shape exactly.
+        const msg = e.response?.data?.error ? translateApiError(e.response.data.error) : t('alert.rawSaveError')
+        if (e.response?.data?.detail) {
+            alert(msg + '\n\n' + e.response.data.detail)
+        } else {
+            alert(msg)
+        }
+        return false
+    }
+}
+
 // ===== Versioned history =====
 
 export async function loadHistory(file) {

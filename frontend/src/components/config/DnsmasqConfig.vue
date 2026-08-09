@@ -13,6 +13,10 @@
         </li>
       </ul>
       <div class="d-flex gap-2">
+        <div v-if="currentFile" class="btn-group btn-group-sm" role="group">
+          <button type="button" :class="['btn', editMode === 'visual' ? 'btn-primary' : 'btn-outline-primary']" @click="switchMode('visual')">🎨 {{ $t('config.modeVisual') }}</button>
+          <button type="button" :class="['btn', editMode === 'raw' ? 'btn-primary' : 'btn-outline-primary']" @click="switchMode('raw')">📝 {{ $t('config.modeRaw') }}</button>
+        </div>
         <button v-if="currentFile" @click="showHistory = true" class="btn btn-sm btn-outline-secondary" :title="$t('history.iconTooltip')">
           🕒 {{ $t('history.icon') }}
         </button>
@@ -46,6 +50,7 @@
     <div v-if="!currentFile" class="alert alert-secondary">{{ $t('config.selectFile') }}</div>
 
     <div v-if="currentFile">
+      <template v-if="editMode === 'visual'">
       <div v-if="groupedDirectives.length === 0" class="alert alert-light">{{ $t('config.noDirectives') }}</div>
 
       <div v-for="g in groupedDirectives" :key="g.group" class="card mb-3 shadow-sm">
@@ -129,9 +134,28 @@
           </div>
         </div>
       </div>
+      </template>
+
+      <!-- RAW: plain-text editor. Backend PUT runs `dnsmasq --test` with
+           .bak rollback, identical guarantee to the visual path. -->
+      <div v-else class="card shadow-sm">
+        <div class="card-header bg-light small text-muted">
+          {{ $t('config.rawHint') }}
+        </div>
+        <div class="card-body p-0">
+          <textarea
+            v-model="rawContent"
+            class="form-control font-monospace border-0 rounded-0"
+            style="min-height: 420px; font-size: 0.85rem; tab-size: 2;"
+            spellcheck="false"
+            :disabled="rawLoading"
+            :placeholder="$t('config.rawPlaceholder')"
+          ></textarea>
+        </div>
+      </div>
     </div>
 
-    <div v-if="addingKey" class="card mb-3 border-primary">
+    <div v-if="addingKey && editMode === 'visual'" class="card mb-3 border-primary">
       <div class="card-body d-flex gap-2 align-items-center">
         <select v-model="addingKeyName" class="form-select form-select-sm" style="max-width: 250px;">
           <option v-for="k in availableSchemaKeys(addingGroup)" :key="k" :value="k">{{ k }}</option>
@@ -177,6 +201,13 @@ const addingKeyName = ref('')
 const addingCustomKey = ref('')
 const showHistory = ref(false)
 
+// editMode toggles between the directive editor ('visual') and the plain-
+// text editor ('raw'). Raw content is local (not in store) — the textarea
+// is the single source of truth while in raw mode.
+const editMode = ref('visual')
+const rawContent = ref('')
+const rawLoading = ref(false)
+
 const files = computed(() => store.configSnapshot?.files || [])
 
 const currentFile = computed(() => files.value.find(f => f.path === selectedFile.value))
@@ -195,6 +226,8 @@ function selectFile(path) {
 watch(currentFile, (f) => {
   if (!f) { localDirectives.value = []; return }
   localDirectives.value = f.directives.map(d => ({ ...d, _uid: ++uidCounter }))
+  // File switched while in raw mode → load the new file's raw text.
+  if (editMode.value === 'raw') loadRaw()
 }, { immediate: true })
 
 watch(() => store.configSnapshot, () => {
@@ -258,6 +291,13 @@ function addDhcpOption() {
 
 async function save() {
   if (!currentFile.value) return
+  // The shared 💾 button dispatches on editMode so the toolbar doesn't
+  // need a second save control.
+  if (editMode.value === 'raw') return saveRaw()
+  return saveVisual()
+}
+
+async function saveVisual() {
   if (!confirm(t('config.saveConfirm'))) return
   const payload = localDirectives.value.map(d => ({
     key: d.key,
@@ -272,6 +312,47 @@ async function save() {
     }
         toast.success(t('alert.configSaveSuccess'))
   }
+}
+
+// saveRaw PUTs the textarea contents. The backend runs `dnsmasq --test`
+// and rolls back from .bak on failure (A13 fix), identical guarantee to
+// the visual path — only the editing surface differs.
+async function saveRaw() {
+  if (!confirm(t('config.rawSaveConfirm'))) return
+  const ok = await actions.saveRawFile(currentFile.value.name, rawContent.value)
+  if (ok) {
+    // PUT returns only {status:"ok"}; refresh the snapshot so the `has_bak`
+    // badge and the visual editor see the new state on the next switch.
+    await actions.loadConfig()
+        toast.success(t('alert.rawSaveSuccess'))
+  }
+}
+
+// loadRaw fetches the file's plain-text contents for the textarea. On
+// failure the helper already alerted; we bounce back to visual so the
+// user isn't stuck on an empty textarea.
+async function loadRaw() {
+  if (!currentFile.value) return
+  rawLoading.value = true
+  const content = await actions.loadRawFile(currentFile.value.name)
+  rawLoading.value = false
+  if (content === null) {
+    editMode.value = 'visual'
+  } else {
+    rawContent.value = content
+  }
+}
+
+// switchMode flips visual<->raw. Leaving raw for visual re-reads the
+// snapshot (a raw save may have changed it); entering raw loads the
+// current file's text.
+async function switchMode(mode) {
+  if (editMode.value === mode) return
+  if (editMode.value === 'raw' && mode === 'visual') {
+    await actions.loadConfig()
+  }
+  editMode.value = mode
+  if (mode === 'raw') await loadRaw()
 }
 
 async function rollback() {

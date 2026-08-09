@@ -150,7 +150,10 @@
     "applyReminder": "dnsmasq --test НЕ запускался. Нажмите «Применить», чтобы активировать изменения.",
     "restoreBackupSuccess": "Бэкап успешно восстановлен",
     "restoreBackupError": "Ошибка восстановления бэкапа",
-    "invalidTag": "Для хоста используйте set:ИМЯ или id:ИМЯ"
+    "invalidTag": "Для хоста используйте set:ИМЯ или id:ИМЯ",
+    "rawSaveSuccess": "Файл сохранён и проверен через dnsmasq --test",
+    "rawLoadError": "Ошибка загрузки файла",
+    "rawSaveError": "Ошибка сохранения файла"
   },
   "api": {
     "already_setup": "Уже настроено",
@@ -225,7 +228,12 @@
     "optionCustom": "другая опция...",
     "forwardDomainHint": "домен (пусто = глобальный)",
     "forwardUpstreamHint": "upstream IP или #",
-    "delete": "Удалить файл"
+    "delete": "Удалить файл",
+    "modeVisual": "Визуально",
+    "modeRaw": "Raw",
+    "rawHint": "Прямое редактирование .conf. При сохранении запускается dnsmasq --test; при ошибке файл откатывается из .bak.",
+    "rawPlaceholder": "domain-needed\nbogus-priv\ndhcp-range=...",
+    "rawSaveConfirm": "Применить raw-изменения и проверить через dnsmasq --test?"
   },
   "audit": {
     "title": "История изменений",

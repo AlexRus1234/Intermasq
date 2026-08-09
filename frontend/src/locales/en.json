@@ -150,7 +150,10 @@
     "applyReminder": "dnsmasq --test was NOT run. Click \"Apply\" to activate changes.",
     "restoreBackupSuccess": "Backup restored successfully",
     "restoreBackupError": "Failed to restore backup",
-    "invalidTag": "Host tags must be set:NAME or id:NAME"
+    "invalidTag": "Host tags must be set:NAME or id:NAME",
+    "rawSaveSuccess": "File saved and verified via dnsmasq --test",
+    "rawLoadError": "Failed to load file",
+    "rawSaveError": "Failed to save file"
   },
   "api": {
     "already_setup": "Already set up",
@@ -225,7 +228,12 @@
     "optionCustom": "custom option...",
     "forwardDomainHint": "domain (empty = global)",
     "forwardUpstreamHint": "upstream IP or #",
-    "delete": "Delete file"
+    "delete": "Delete file",
+    "modeVisual": "Visual",
+    "modeRaw": "Raw",
+    "rawHint": "Direct .conf editing. Saving runs dnsmasq --test; on failure the file is rolled back from .bak.",
+    "rawPlaceholder": "domain-needed\nbogus-priv\ndhcp-range=...",
+    "rawSaveConfirm": "Apply raw changes and verify via dnsmasq --test?"
   },
   "audit": {
     "title": "Change history",
