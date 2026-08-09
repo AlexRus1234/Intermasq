@@ -669,14 +669,14 @@ jobs:
            API="https://git.yadr00.internal/api/v1/repos/AlexRus1234/Intermasq"
            BODY="$(jq -n --arg tag "$VERSION" '{tag_name:$tag, name:$tag, draft:false, prerelease:($tag | test("-"))}')"
            RELEASE="$(curl -fsSL -X POST \
-             -H "Authorization: token ${UPLOAD_TOKEN}" \
+             --user "alexrus:${UPLOAD_TOKEN}" \
              -H 'Content-Type: application/json' \
              "$API/releases" -d "$BODY")"
            RELEASE_ID="$(jq -r '.id' <<<"$RELEASE")"
            test -n "$RELEASE_ID" && test "$RELEASE_ID" != "null"
            for FILE in "$ARTIFACT_NAME" "${ARTIFACT_NAME}.sha256"; do
              curl -fsSL -X POST \
-               -H "Authorization: token ${UPLOAD_TOKEN}" \
+               --user "alexrus:${UPLOAD_TOKEN}" \
                -F "attachment=@${FILE}" \
                "$API/releases/${RELEASE_ID}/assets?name=${FILE}"
            done
