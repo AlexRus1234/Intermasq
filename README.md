@@ -23,90 +23,55 @@
 ## 📑 Содержание
 
 - [✨ Возможности](#-возможности)
-- [📸 Скриншоты](#-скриншоты)
 - [🚀 Быстрый старт](#-быстрый-старт)
 - [⚙️ Конфигурация](#️-конфигурация)
-- [🔌 API и Swagger](#-api-и-swagger)
-- [🧩 Плагины](#-плагины)
-- [📊 Метрики для Prometheus](#-метрики-для-prometheus)
+- [🔑 Sudo и права](#-sudo-и-права)
+- [🔌 API, плагины, метрики](#-api-плагины-метрики)
 - [📁 Структура проекта](#-структура-проекта)
 - [🛠 Стек технологий](#-стек-технологий)
 - [📄 Лицензия](#-лицензия)
+
+> 📚 **Подробная документация** (по API, sudo/init, плагинам, метрикам,
+> фичам) — в каталоге [`docs/func/ru/`](docs/func/ru/README.md). Этот README —
+> только выжимка и быстрый старт.
 
 ---
 
 ## ✨ Возможности
 
-<table>
-<tr>
-<td width="50%" valign="top">
+**DHCP и DNS**
+- CRUD `dhcp-host=` с валидацией MAC/IP/hostname, теги `set:` и `lease-time`
+- Подсказка следующего свободного IP из `dhcp-range`
+- Шаблоны хостов (ip-диапазон + hostname-паттерн + target-файл)
+- DNS-записи `A` / `CNAME` / `PTR` / `TXT` + CSV импорт/экспорт
+- Просмотр аренд, ARP-онлайн, конвертация lease → static (массово)
+- Обнаружение неизвестных ARP-устройств с **определением вендора** (OUI)
 
-### 🖥 DHCP и DNS
-- **Статические хосты** — CRUD `dhcp-host=` с валидацией MAC/IP/hostname
-- **DHCP-теги** — `set:` на хостах для таргетинга `dhcp-option`
-- **DNS-записи** — `A` / `CNAME` / `PTR` / `TXT` в отдельной вкладке
-- **Аренды** — просмотр DHCP-leases, ARP-онлайн, конвертация в статику
-- **Обнаружение** — неизвестные ARP-устройства с **определением вендора** (OUI)
+**Конфигурация dnsmasq**
+- Визуальный редактор `dhcp-range`, `dhcp-option` (пресеты RFC 2132),
+  `server=`, PXE/сетевая загрузка
+- Raw-редактор произвольного `.conf` с проверкой `dnsmasq --test`
+- Многофайловость: создание / удаление / пресеты конфигов (`basic-dhcp`,
+  `forwarder`, `pxe`, `aliases`)
 
-</td>
-<td width="50%" valign="top">
+**Безопасность и история**
+- Многоуровневая история (N версий/файл) с diff и восстановлением
+- Быстрый откат по `.bak`, ZIP backup/restore с pre-flight валидацией
+- Аудит-лог: кто/что/когда, с цветными метками
+- Защита от path traversal: запись только внутри `-conf-dir`
 
-### ⚙️ Конфигурация
-- **Визуальный редактор** — `dhcp-range`, `dhcp-option` (с пресетами RFC 2132),
-  `server=` форвардинг, PXE/сетевая загрузка
-- **Raw-редактор** — прямое редактирование любого `.conf` с проверкой `dnsmasq --test`
-- **Многофайловость** — работа с несколькими `.conf` одновременно
-- **Шаблоны** — пресеты hostname/IP-диапазона для быстрого добавления
+**Эксплуатация и UX**
+- Один бинарник (`go:embed`), мульти-init: systemd / systemd-user / OpenRC /
+  runit / sysvinit — автоопределение
+- SSE-пуш ARP и статуса dnsmasq в реальном времени (без опроса)
+- Двойная аутентификация: JWT для браузера, `X-API-Key` для скриптов/плагинов
+- **RBAC**: роли `admin` / `user`, destructive-операции только для admin
+- Rate-limit на `/api/login`, отзыв JWT при logout, отзыв всех токенов при
+  смене пароля / удалении пользователя
+- Плагины через Unix-сокеты, `/metrics` для Prometheus, Swagger UI из коробки
+- Двуязычный UI 🇷🇺/🇬🇧, тёмная/светлая тема
 
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### 🛡 Безопасность и надёжность
-- **Многоуровневая история** — N версий каждого файла с **diff** и восстановлением
-- **Быстрый откат** — `.bak` на одно действие назад
-- **ZIP backup/restore** — архив всех `.conf` с pre-flight валидацией
-- **Аудит-лог** — все действия с цветными метками (кто, что, когда)
-- **Защита путей** — path traversal невозможен, запись только внутри `conf-dir`
-
-</td>
-<td width="50%" valign="top">
-
-### 🚀 Массовые операции
-- **Bulk-импорт** — вставка списка устройств текстом или CSV
-- **Bulk-редактирование** — массовое изменение и перемещение хостов
-- **CSV-экспорт** — выгрузка хостов и DNS-записей
-- **Lease → static** — массовый перенос аренд в статику одним кликом
-- **Массовое удаление** — выбор чекбоксами
-
-</td>
-</tr>
-<tr>
-<td colspan="2" valign="top">
-
-### 🔧 Эксплуатация и UX
-- **Один бинарник** — фронтенд встроен через `go:embed`, ничего ставить не нужно
-- **Мульти-init** — автоопределение `systemd` / `systemd-user` / `OpenRC` / `runit` / `sysvinit`
-- **Мониторинг в реальном времени** — SSE-пуш ARP и статуса dnsmasq (без опроса)
-- **Метрики Prometheus** — `/metrics` с health-check'ом DNS-доменов
-- **Двойная аутентификация** — JWT для браузера, `X-API-Key` для скриптов и плагинов
-- **Rate-limit** на вход + сброс счётчика при успехе, **отзыв JWT** при logout
-- **Обязательный `INTERMASQ_SECRET`** — процесс не стартует с дефолтным ключом
-- **Плагины** — расширения через Unix-сокеты, проксируются в iframe
-- **Swagger UI** — интерактивная API-документация из коробки
-- **Двуязычный UI** — 🇷🇺 Русский / 🇬🇧 English в один клик
-- **🌙 Тёмная / ☀️ светлая тема** с сохранением выбора
-
-</td>
-</tr>
-</table>
-
----
-
-## 📸 Скриншоты
-
-> *Скриншоты интерфейса будут добавлены позже.*
+Подробнее — в [`docs/func/ru/features.md`](docs/func/ru/features.md).
 
 ---
 
@@ -120,26 +85,31 @@
 | **Node.js** | 22+ | Сборка фронтенда |
 | **dnsmasq** | любой | На целевой машине |
 
-### Сборка из исходников
+### Сборка
 
 ```bash
-# 1. Сборка фронтенда (результат → frontend/dist/)
-cd frontend && npm ci && npm run build && cd ..
+# Простой путь — пересобирает фронтенд, потом бэкенд (зеркалит порядок CI):
+make build
 
-# 2. Сборка бинарника
+# …или вручную:
+cd frontend && npm ci && npm run build && cd ..
 go build -o intermasq .
 ```
 
-### Production-сборка (оптимизированная, с версией)
+Production-сборка (статический линк, без symbols, с версией):
 
 ```bash
-CGO_ENABLED=0 go build -ldflags="-s -w -X intermask/internal/version.Version=1.0.0-pre" -o intermasq .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+  go build -trimpath -ldflags="-s -w \
+  -X intermask/internal/version.Version=1.0.0" -o intermasq .
 ```
+
+> Готовых pre-built бинарников в публичном registry нет — собирайте из исходников.
 
 ### Запуск
 
 ```bash
-# Обязательно: задайте секретный ключ (иначе процесс упадёт при старте)
+# Обязательно: секретный ключ (без него процесс упадёт при старте)
 export INTERMASQ_SECRET="$(openssl rand -hex 32)"
 
 sudo ./intermasq \
@@ -151,8 +121,10 @@ sudo ./intermasq \
 При первом запуске откроется экран **настройки администратора**. После создания
 учётной записи — полный доступ ко всем вкладкам панели.
 
-> 💡 **Совет:** для production пропишите `INTERMASQ_SECRET` в systemd-unit через
-> drop-in: `systemctl edit intermasq` → `Environment="INTERMASQ_SECRET=<hex>"`.
+> 💡 Для production задавайте `INTERMASQ_SECRET` через drop-in к systemd-юниту
+> (права `0600`, не попадает в git): `systemctl edit intermasq`.
+> Полный пример юнита и запуск от выделенного пользователя — в
+> [`docs/func/ru/os-setup.md`](docs/func/ru/os-setup.md).
 
 ---
 
@@ -163,38 +135,55 @@ sudo ./intermasq \
 | Флаг | По умолчанию | Описание |
 |---|---|---|
 | `-port` | `8081` | Порт для прослушивания |
-| `-db` | `/etc/intermasq/users.json` | Путь к базе пользователей |
 | `-conf-dir` | `/etc/dnsmasq.d` | Директория конфигов dnsmasq |
 | `-leases` | `/var/lib/misc/dnsmasq.leases` | Путь к файлу аренд dnsmasq |
 | `-arp-file` | `/proc/net/arp` | Путь к ARP-таблице |
-| `-init-system` | `auto` | Init-система: `auto`, `systemd`, `systemd-user`, `openrc`, `runit`, `sysvinit`, `none` |
-| `-systemd-scope` | — | *(устаревший)* `auto`, `system`, `user`, `none` |
-| `-ci-mode` | `false` | Отключает саморестарт (для CI/тестов) |
-| `-audit-log` | `/etc/intermasq/audit.log` | Путь к файлу аудита |
-| `-templates` | `/etc/intermasq/templates.json` | Путь к файлу шаблонов |
-| `-history-dir` | `/etc/intermasq/history` | Директория для версий конфигов |
+| `-db` | `/etc/intermasq/users.json` | База пользователей |
+| `-audit-log` | `/etc/intermasq/audit.log` | Файл аудита |
+| `-templates` | `/etc/intermasq/templates.json` | Файл шаблонов хостов |
+| `-history-dir` | `/etc/intermasq/history` | Директория версий конфигов |
 | `-history-depth` | `10` | Сколько версий каждого файла хранить |
-| `-dnsmasq-bin` | *(авто)* | Путь к `dnsmasq` (авто-resolve через `$PATH`) |
-| `-sudo-bin` | *(авто)* | Путь к `sudo` |
-| `-systemctl-bin` | *(авто)* | Путь к `systemctl` |
-| `-service-bin` | *(авто)* | Путь к `service` (sysvinit) |
-| `-rc-service-bin` | *(авто)* | Путь к `rc-service` (OpenRC) |
-| `-sv-bin` | *(авто)* | Путь к `sv` (runit) |
+| `-init-system` | `auto` | `auto` / `systemd` / `systemd-user` / `openrc` / `runit` / `sysvinit` / `none` |
+| `-ci-mode` | `false` | Отключает self-restart (для CI/тестов) |
+| `-dnsmasq-bin`<br>`-sudo-bin`<br>`-systemctl-bin`<br>`-service-bin`<br>`-rc-service-bin`<br>`-sv-bin` | *(авто)* | Переопределение путей к системным бинарникам (`dnsmasq`, `sudo`, `systemctl`, `service`, `rc-service`, `sv`). Пусто = resolve через `$PATH` + well-known абсолютные пути (Alpine/Debian). См. `internal/bins`. |
+| `-systemd-scope` | — | *(устаревший)* `auto`/`system`/`user`/`none` → мапится в `-init-system` |
 
-> **Почему порт `8081`?** Начиная с v3.0 порт по умолчанию изменён с `8080`.
-> Порт `8080` часто занят другими сервисами (например, Crowdsec слушает на
-> `127.0.0.1:8080`), что приводило к молчаливому падению службы. Для старого
-> порта указывайте его явно: `-port 8080`.
+> **Почему порт `8081`?** С v3.0 порт по умолчанию изменён с `8080` (часто занят
+> другими сервисами, напр. Crowdsec). Для старого порта указывайте `-port 8080`.
 
 ### Переменные окружения
 
 | Переменная | Обязательная | Описание |
 |---|---|---|
-| `INTERMASQ_SECRET` | ✅ **Да** | Секретный ключ для подписи JWT и `X-API-Key`. Сгенерируйте: `openssl rand -hex 32` |
+| `INTERMASQ_SECRET` | ✅ **Да** | Секрет для подписи JWT и значение `X-API-Key`. Сгенерируйте: `openssl rand -hex 32` |
 
 ---
 
-## 🔌 API и Swagger
+## 🔑 Sudo и права
+
+Панель **сама решает**, нужен ли `sudo`, по `getuid()`:
+
+- **Запуск от `root`** → `systemctl` / `dnsmasq --test` вызываются напрямую, sudo **не нужен**. Так работает `sudo ./intermasq` из быстрого старта.
+- **Запуск от обычного пользователя** → управление сервисом идёт через `sudo -n` (non-interactive). Нужно настроить passwordless-sudo на конкретные команды `systemctl` / `rc-service` / `sv` / `service` **и** дать права на чтение/запись `conf-dir` и файла аренд.
+
+Пример `/etc/sudoers.d/intermasq` (systemd, пользователь `intermasq`):
+
+```sudoers
+intermasq ALL=(root) NOPASSWD: /usr/bin/systemctl is-active dnsmasq
+intermasq ALL=(root) NOPASSWD: /usr/bin/systemctl restart dnsmasq
+intermasq ALL=(root) NOPASSWD: /usr/bin/systemctl restart intermasq
+```
+
+В логе стартовая строка подскажет выбранный режим: `[INIT] System: systemd (root)`
+или `[INIT] System: systemd (via sudo)`.
+
+**Полное руководство** (sudo для всех init-систем, файловые права, пример
+systemd-юнита, выделенный пользователь) — в
+[`docs/func/ru/os-setup.md`](docs/func/ru/os-setup.md).
+
+---
+
+## 🔌 API, плагины, метрики
 
 После запуска доступна интерактивная документация:
 
@@ -202,121 +191,13 @@ sudo ./intermasq \
 http://<host>:<port>/swagger/index.html
 ```
 
-<details>
-<summary><b>📋 Основные эндпоинты (нажмите, чтобы развернуть)</b></summary>
-
-| Метод | Путь | Описание | Auth |
-|---|---|---|---|
-| `GET` | `/api/status` | Статус dnsmasq + флаг первичной настройки | — |
-| `POST` | `/api/setup` | Создание администратора | — |
-| `POST` | `/api/login` | Вход, получение JWT (с rate-limit) | — |
-| `GET` | `/api/hosts` | Список статических хостов | ✅ |
-| `POST` | `/api/hosts` | Добавить / обновить хост | ✅ |
-| `POST` | `/api/hosts/bulk` | Массовый импорт хостов | ✅ |
-| `POST` | `/api/hosts/bulk-move` | Переместить хосты в другой файл | ✅ |
-| `POST` | `/api/hosts/bulk-edit` | Массовое редактирование | ✅ |
-| `GET` / `POST` | `/api/hosts/csv` | Экспорт / импорт CSV | ✅ |
-| `DELETE` | `/api/hosts/:mac` | Удалить хост | ✅ |
-| `GET` | `/api/aliases` | DNS-записи (A/CNAME/PTR/TXT) | ✅ |
-| `POST` | `/api/aliases` | Добавить DNS-запись | ✅ |
-| `POST` | `/api/aliases/bulk` | Массовый импорт DNS-записей | ✅ |
-| `GET` / `POST` | `/api/aliases/csv` | Экспорт / импорт DNS в CSV | ✅ |
-| `GET` | `/api/leases` | DHCP-аренды | ✅ |
-| `GET` | `/api/arp` | ARP-таблица (онлайн MAC) | ✅ |
-| `POST` | `/api/leases/to-static` | Массовый перенос аренд в статику | ✅ |
-| `GET` | `/api/new-devices` | Неизвестные устройства (ARP + OUI) | ✅ |
-| `GET` / `PUT` | `/api/config` | Снимок конфигурации dnsmasq | ✅ |
-| `POST` / `DELETE` | `/api/config/file` | Создать / удалить `.conf`-файл | ✅ |
-| `GET` / `PUT` | `/api/files/:name` | Raw-чтение / запись `.conf`-файла | ✅ |
-| `GET` | `/api/templates` | Шаблоны хостов | ✅ |
-| `POST` | `/api/rollback` | Быстрый откат файла до `.bak` | ✅ |
-| `GET` | `/api/history` | Список версий файла | ✅ |
-| `GET` | `/api/history/diff` | Diff между версиями | ✅ |
-| `POST` | `/api/history/restore` | Восстановить файл из версии | ✅ |
-| `GET` | `/api/backup` | Скачать ZIP-архив всех `.conf` | ✅ |
-| `POST` | `/api/backup/restore` | Восстановить из ZIP | ✅ |
-| `GET` | `/api/audit` | Журнал аудита | ✅ |
-| `GET` | `/api/users` | Список пользователей | ✅ |
-| `POST` | `/api/users` | Создать пользователя | ✅ |
-| `DELETE` | `/api/users/:name` | Удалить пользователя | ✅ |
-| `POST` | `/api/users/password` | Смена пароля | ✅ |
-| `POST` | `/api/reload` | Проверка конфига + перезапуск dnsmasq | ✅ |
-| `POST` | `/api/restart-self` | Перезапуск сервиса Intermasq | ✅ |
-| `POST` | `/api/logout` | Выход + отзыв JWT | ✅ |
-| `GET` | `/api/events` | SSE-стрим (ARP, статус dnsmasq) | ✅ |
-| `GET` | `/api/plugins` | Список загруженных плагинов | ✅ |
-
-</details>
-
-### Аутентификация
-
-| Сценарий | Способ |
-|---|---|
-| 🌐 **Браузер** | `Authorization: Bearer <JWT>` |
-| 🤖 **Скрипты / плагины** | `X-API-Key: <INTERMASQ_SECRET>` |
-| 📊 **Prometheus / SSE** | `Authorization: Bearer <JWT>` или `X-API-Key: <SECRET>` |
-
----
-
-## 🧩 Плагины
-
-Intermasq расширяется через **Unix-сокеты**. Каждый плагин — это каталог в
-`/etc/intermasq/plugins/` с `manifest.json`:
-
-```json
-{
-  "id": "my-plugin",
-  "name": "My Plugin",
-  "bin": "./plugin-binary"
-}
-```
-
-При старте Intermasq:
-
-1. Читает `/etc/intermasq/plugins/<id>/manifest.json`
-2. Запускает бинарник, передавая переменные окружения:
-   - `INTERMASQ_KEY` — секрет для API-запросов
-   - `PLUGIN_SOCKET` — путь к Unix-сокету (`/run/intermasq/sockets/<id>.sock`)
-3. Проксирует все запросы `/plugins/<id>/*` на Unix-сокет плагина
-4. Отображает плагин в **iframe** в полноэкранном overlay
-
-> 🔄 Добавление плагина «на лету» → `Меню → 🔄 Рестарт Intermasq`.
-
----
-
-## 📊 Метрики для Prometheus
-
-Эндпоинт `/metrics` отдаёт operational-метрики в exposition-формате:
-
-| Метрика | Описание |
-|---|---|
-| `intermasq_hosts_total` | Кол-во управляемых dhcp-host записей |
-| `intermasq_leases_active` | Текущее кол-во активных DHCP-аренд |
-| `intermasq_arp_online_total` | Устройств онлайн по ARP |
-| `intermasq_dnsmasq_active` | `1` если dnsmasq активен, иначе `0` |
-| `intermasq_reloads_total` | Успешных reload'ов через панель |
-| `intermasq_dnsmasq_test_failures_total` | Сколько раз `dnsmasq --test` отклонил изменение |
-| `intermasq_uptime_seconds` | Аптайм процесса |
-| `intermasq_domain_up{domain=…}` | Резолвится ли домен (health-check каждые 60с) |
-| `intermasq_domain_resolve_seconds{domain=…}` | Latency последнего резолва |
-
-Пример `scrape_config`:
-
-```yaml
-scrape_configs:
-  - job_name: intermasq
-    scrape_interval: 30s
-    metrics_path: /metrics
-    bearer_token: '<JWT>'
-    static_configs:
-      - targets: ['172.20.0.1:8081']
-```
-
-Пример алерта в Grafana/Alertmanager:
-
-```promql
-intermasq_domain_up{domain="wiki.lan"} == 0
-```
+| Что | Кратко | Подробности |
+|---|---|---|
+| **Аутентификация** | `Authorization: Bearer <JWT>` (браузер) или `X-API-Key: <INTERMASQ_SECRET>` (скрипты) | [`docs/func/ru/api.md`](docs/func/ru/api.md) |
+| **Эндпоинты** | `/api/hosts`, `/api/aliases`, `/api/config`, `/api/files/:name`, `/api/history`, `/api/backup`, `/api/reload`, `/api/events`, … | полный список + RBAC в [`api.md`](docs/func/ru/api.md) |
+| **RBAC** | роль `admin` (reload/rollback/raw-запись/users/restart) vs `user` (чтение + добавление) | [`api.md`](docs/func/ru/api.md) |
+| **Плагины** | sidecar-процессы через Unix-сокеты, manifest в `/etc/intermasq/plugins/`, проксируются в iframe | [`docs/func/ru/plugins.md`](docs/func/ru/plugins.md) |
+| **Метрики** | `/metrics` для Prometheus: хосты/аренды/ARP/статус dnsmasq/health-check доменов | [`docs/func/ru/metrics.md`](docs/func/ru/metrics.md) |
 
 ---
 
@@ -325,36 +206,27 @@ intermasq_domain_up{domain="wiki.lan"} == 0
 ```
 .
 ├── main.go                 # Точка входа: флаги, bootstrap, gin engine, статика/swagger (тонкий)
-├── internal/               # Вся бизнес-логика (раньше — плоский package main)
+├── internal/
 │   ├── models/             # Типы данных (HostEntry, DnsAliasEntry, …)
 │   ├── validate/           # Валидаторы MAC/IP/hostname/tag + нормализаторы
 │   ├── oui/                # Таблица OUI (определение вендора по MAC)
-│   ├── stats/              # Счётчики stats
+│   ├── stats/              # Счётчики для /metrics
 │   ├── bins/               # Авто-resolve путей к системным бинарникам
 │   ├── initd/              # SystemCaller — детект и управление init-системами
 │   ├── dnsmasq/            # Ядро dhcp-host: парсинг/запись, алиасы, конфиг, история, backup
 │   ├── netstate/           # ARP, leases, обнаружение устройств
 │   ├── templates/          # Шаблоны хостов (создание/применение)
-│   ├── auth/               # Пользователи, JWT, rate-limit, middleware (bcrypt)
+│   ├── auth/               # Пользователи, JWT, rate-limit, RBAC middleware (bcrypt)
 │   ├── audit/              # Журнал аудита
 │   ├── control/            # SSE broadcaster, статус/reload dnsmasq
 │   ├── metrics/            # /metrics для Prometheus + DNS health-check
 │   ├── plugins/            # Загрузка/проксирование плагинов (Unix-сокеты)
+│   ├── version/            # Версия сборки (ldflags)
 │   └── webapi/             # HTTP-обработчики + регистрация роутов (/api/*)
-├── docs/                   # OpenAPI-спецификация + документация фич
-│   ├── swagger.yaml / swagger.json
-│   └── docs.go
-├── frontend/               # Vue 3 SPA
-│   ├── src/
-│   │   ├── App.vue             # Корневой компонент (навбар, табы, темы, меню)
-│   │   ├── store.js            # Реактивное хранилище + axios
-│   │   ├── api/                # API-клиенты по доменам (hosts, dns, config, system)
-│   │   ├── i18n.js             # vue-i18n (RU/EN)
-│   │   ├── locales/            # ru.json, en.json
-│   │   └── components/         # static/ dns/ config/ safety/ history/ audit/ …
-│   └── vite.config.js
-├── .forgejo/workflows/     # CI: сборка, тесты, smoke
-├── tests/                  # Smoke-сьюты, Playwright E2E, L5 (живые ВМ)
+├── docs/                   # OpenAPI + docs/func/ru/ (пользовательская документация)
+├── frontend/               # Vue 3 SPA (Vite, Bootstrap 5, vue-i18n)
+├── .forgejo/workflows/     # CI: сборка, тесты, smoke, опц. fuzz/e2e/L5-ВМ
+├── tests/                  # Smoke-сьюты, Playwright E2E, perf, L5 (живые ВМ)
 ├── LICENSE                 # GNU AGPL v3
 └── README.md               # Этот файл
 ```
@@ -368,39 +240,15 @@ intermasq_domain_up{domain="wiki.lan"} == 0
 
 ## 🛠 Стек технологий
 
-<details open>
-<summary><b>⚙️ Бэкенд</b></summary>
+**Бэкенд:** Go 1.25 · Gin · golang-jwt/v5 · golang.org/x/crypto (bcrypt) ·
+gin-swagger · `go:embed`.
 
-- **Go 1.25** — язык, один статический бинарник
-- **Gin** — HTTP-фреймворк
-- **golang-jwt/v5** — JWT-токены
-- **golang.org/x/crypto** — bcrypt для паролей
-- **gin-swagger** — Swagger UI из OpenAPI-спецификации
-- **go:embed** — встраивание фронтенда в бинарник
+**Фронтенд:** Vue 3 (Composition API) · Vite 7 · Bootstrap 5 (dark/light) ·
+vue-i18n 9 (RU/EN) · Axios · event-source-polyfill (SSE).
 
-</details>
-
-<details open>
-<summary><b>🎨 Фронтенд</b></summary>
-
-- **Vue 3** — Composition API, `<script setup>`
-- **Vite 7** — дев-сервер и сборка
-- **Bootstrap 5** — UI-компоненты, темизация (dark/light)
-- **vue-i18n 9** — локализация (🇷🇺 RU / 🇬🇧 EN)
-- **Axios** — HTTP-клиент
-- **event-source-polyfill** — SSE-клиент
-
-</details>
-
-<details open>
-<summary><b>🔧 Инфраструктура и качество</b></summary>
-
-- **Forgejo Actions** — CI/CD (сборка, линтеры, тесты)
-- **go vet / gofmt** — статический анализ и форматирование Go
-- **go test** — unit-тесты (включая `-race`)
-- **Playwright** — E2E-тесты фронтенда
-
-</details>
+**Инфраструктура и качество:** Forgejo Actions (CI) · `go vet` / `gofmt` ·
+`go test` (включая `-race`) · fuzz-таргеты · Playwright E2E · smoke-сьюты ·
+L5-тесты на живых ВМ (systemd + OpenRC).
 
 ---
 
