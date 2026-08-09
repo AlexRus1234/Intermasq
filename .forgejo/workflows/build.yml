@@ -164,6 +164,7 @@ jobs:
 
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "APP_VERSION=${VERSION#v}" >> "$GITHUB_ENV"
+          echo "EXACT_TAG=$TAG_VERSION" >> "$GITHUB_ENV"
 
       - name: Build frontend
         run: cd frontend && npm ci && npm run build
@@ -666,10 +667,10 @@ jobs:
         env:
           RELEASE_TOKEN: ${{ secrets.TOKEN_GITHUB }}
         run: |
-          case "$VERSION" in
-            v*) ;;
-            *) echo "::error::GitHub Release requires an exact v* Git tag"; exit 1 ;;
-          esac
+          if [ "$EXACT_TAG" != "$VERSION" ]; then
+            echo "::error::GitHub Release requires HEAD to have the exact tag $VERSION"
+            exit 1
+          fi
           ARTIFACT_NAME="intermasq-${VERSION}-linux-amd64"
           API="https://api.github.com/repos/AlexRus1234/Intermasq"
           BODY="$(jq -n --arg tag "$VERSION" '{tag_name:$tag, name:$tag, draft:false, prerelease:($tag | test("-"))}')"
@@ -695,10 +696,10 @@ jobs:
         env:
           RELEASE_TOKEN: ${{ secrets.TOKEN_CODEBERG }}
         run: |
-          case "$VERSION" in
-            v*) ;;
-            *) echo "::error::Codeberg Release requires an exact v* Git tag"; exit 1 ;;
-          esac
+          if [ "$EXACT_TAG" != "$VERSION" ]; then
+            echo "::error::Codeberg Release requires HEAD to have the exact tag $VERSION"
+            exit 1
+          fi
           ARTIFACT_NAME="intermasq-${VERSION}-linux-amd64"
           API="https://codeberg.org/api/v1/repos/AlexRus1234/Intermasq"
           BODY="$(jq -n --arg tag "$VERSION" '{tag_name:$tag, name:$tag, draft:false, prerelease:($tag | test("-"))}')"
