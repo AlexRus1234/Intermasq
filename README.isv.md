@@ -1,4 +1,4 @@
-[**Interslavjanski (lat.)**] | [**Кирилица**](README.isv-cyrl.md)
+[ISV latinica] | [Русский](README.md) | [English](README.en.md) | [ISV кирилица](README.isv-cyrl.md)
 
 <div align="center">
 
