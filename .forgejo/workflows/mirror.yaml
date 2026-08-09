@@ -22,6 +22,8 @@ on:
     branches:
       - main
       - master
+    tags:
+      - 'v*'
 
 jobs:
   sync-mirrors:
@@ -53,7 +55,10 @@ jobs:
           TOKEN_GITHUB: ${{ secrets.TOKEN_GITHUB }}
         run: |
           echo "Синхронизация с GitHub..."
-          git push --force https://AlexRus1234:${TOKEN_GITHUB}@github.com/AlexRus1234/Intermasq.git HEAD:main
+          case "$GITHUB_REF" in
+            refs/heads/*) git push --force https://AlexRus1234:${TOKEN_GITHUB}@github.com/AlexRus1234/Intermasq.git HEAD:main ;;
+          esac
+          git push https://AlexRus1234:${TOKEN_GITHUB}@github.com/AlexRus1234/Intermasq.git --tags
 
       - name: Отправка на Codeberg
         continue-on-error: true
@@ -61,4 +66,7 @@ jobs:
           TOKEN_CODEBERG: ${{ secrets.TOKEN_CODEBERG }}
         run: |
           echo "Синхронизация с Codeberg..."
-          git push --force https://AlexRus1234:${TOKEN_CODEBERG}@codeberg.org/AlexRus1234/Intermasq.git HEAD:main
+          case "$GITHUB_REF" in
+            refs/heads/*) git push --force https://AlexRus1234:${TOKEN_CODEBERG}@codeberg.org/AlexRus1234/Intermasq.git HEAD:main ;;
+          esac
+          git push https://AlexRus1234:${TOKEN_CODEBERG}@codeberg.org/AlexRus1234/Intermasq.git --tags

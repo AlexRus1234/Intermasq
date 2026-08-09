@@ -141,7 +141,8 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
   -X intermask/internal/version.Version=1.0.0" -o intermasq .
 ```
 
-> Prebuilt binaries are not published in a public registry. Build from source.
+> Release binaries are uploaded manually from CI as Release Assets on the
+> enabled public mirrors. Development builds are made from source.
 
 ### Run
 

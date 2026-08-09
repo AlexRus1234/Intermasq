@@ -24,8 +24,18 @@ on:
         required: true
         default: false
         type: boolean
+      publish_github:
+        description: "Create GitHub Release and upload binary assets?"
+        required: true
+        default: false
+        type: boolean
+      publish_codeberg:
+        description: "Create Codeberg Release and upload binary assets?"
+        required: true
+        default: false
+        type: boolean
       version_tag:
-        description: "Version tag for registry (e.g. v1.0-pre1). Defaults to sha-<short> if empty."
+        description: "Fallback version when HEAD has no exact v* tag."
         required: false
         default: ""
         type: string
@@ -125,6 +135,35 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Run the manual workflow from the selected tag/ref and keep tags
+          # available for exact version detection below.
+          fetch-depth: 0
+
+      - name: Determine build version
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version_tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          TAG_VERSION="$(git describe --exact-match --tags --match='v*' HEAD 2>/dev/null || true)"
+          if [ -n "$TAG_VERSION" ]; then
+            VERSION="$TAG_VERSION"
+            echo "Using exact Git tag: $VERSION"
+          elif [ -n "$VERSION_INPUT" ]; then
+            VERSION="$VERSION_INPUT"
+            echo "HEAD has no exact v* tag; using workflow input: $VERSION"
+          else
+            VERSION="sha-${SHA:0:8}"
+            echo "HEAD has no exact v* tag and no input; using: $VERSION"
+          fi
+
+          case "$VERSION" in
+            v[0-9]*|sha-[0-9a-f]*) ;;
+            *) echo "::error::invalid version '$VERSION' (expected v* or sha-<hex>)"; exit 1 ;;
+          esac
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "APP_VERSION=${VERSION#v}" >> "$GITHUB_ENV"
 
       - name: Build frontend
         run: cd frontend && npm ci && npm run build
@@ -132,7 +171,9 @@ jobs:
       - name: Build binary
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-          go build -trimpath -ldflags="-s -w" -o intermasq-ci .
+          go build -trimpath \
+            -ldflags="-s -w -X intermask/internal/version.Version=${APP_VERSION}" \
+            -o intermasq-ci .
 
       - name: go vet
         run: go vet ./...
@@ -596,33 +637,85 @@ jobs:
       - name: Show binary info
         run: |
           ls -lh intermasq-ci
-          sha256sum intermasq-ci | tee intermasq-ci.sha256
+          ARTIFACT_NAME="intermasq-${VERSION}-linux-amd64"
+          cp intermasq-ci "$ARTIFACT_NAME"
+          sha256sum "$ARTIFACT_NAME" | tee "${ARTIFACT_NAME}.sha256"
 
       - name: Publish to Forgejo Packages
         if: success() && github.event.inputs.push_to_registry == 'true'
         env:
-          VERSION_INPUT: ${{ github.event.inputs.version_tag }}
-          SHA: ${{ github.sha }}
+          UPLOAD_TOKEN: ${{ secrets.UPLOAD_TOKEN }}
         run: |
-          if [ -z "$VERSION_INPUT" ]; then
-            VERSION="sha-${SHA:0:8}"
-          else
-            VERSION="$VERSION_INPUT"
-          fi
           echo "Publishing as version: $VERSION"
+          ARTIFACT_NAME="intermasq-${VERSION}-linux-amd64"
 
-          curl -fSR --cacert /etc/pki/ca-trust/source/anchors/step-ca.crt \
-               --user "alexrus:${{ secrets.UPLOAD_TOKEN }}" \
-               --upload-file ./intermasq-ci \
-               "https://git.yadr00.internal/api/packages/AlexRus1234/generic/intermasq/${VERSION}/intermasq-ci"
+           curl -fSR --cacert /etc/pki/ca-trust/source/anchors/step-ca.crt \
+                --user "alexrus:${UPLOAD_TOKEN}" \
+                --upload-file "./${ARTIFACT_NAME}" \
+                "https://git.yadr00.internal/api/packages/AlexRus1234/generic/intermasq/${VERSION}/${ARTIFACT_NAME}"
 
-          curl -fSR --cacert /etc/pki/ca-trust/source/anchors/step-ca.crt \
-               --user "alexrus:${{ secrets.UPLOAD_TOKEN }}" \
-               --upload-file ./intermasq-ci.sha256 \
-               "https://git.yadr00.internal/api/packages/AlexRus1234/generic/intermasq/${VERSION}/intermasq-ci.sha256"
+           curl -fSR --cacert /etc/pki/ca-trust/source/anchors/step-ca.crt \
+                --user "alexrus:${UPLOAD_TOKEN}" \
+                --upload-file "./${ARTIFACT_NAME}.sha256" \
+                "https://git.yadr00.internal/api/packages/AlexRus1234/generic/intermasq/${VERSION}/${ARTIFACT_NAME}.sha256"
 
-          echo "✅ Published intermasq-ci v${VERSION}"
+           echo "Published Forgejo package ${ARTIFACT_NAME}"
+
+      - name: Publish GitHub Release
+        if: success() && github.event.inputs.publish_github == 'true'
+        env:
+          RELEASE_TOKEN: ${{ secrets.TOKEN_GITHUB }}
+        run: |
+          case "$VERSION" in
+            v*) ;;
+            *) echo "::error::GitHub Release requires an exact v* Git tag"; exit 1 ;;
+          esac
+          ARTIFACT_NAME="intermasq-${VERSION}-linux-amd64"
+          API="https://api.github.com/repos/AlexRus1234/Intermasq"
+          BODY="$(jq -n --arg tag "$VERSION" '{tag_name:$tag, name:$tag, draft:false, prerelease:($tag | test("-"))}')"
+          RELEASE="$(curl -fsSL -X POST \
+            -H "Authorization: Bearer ${RELEASE_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'Content-Type: application/json' \
+            "$API/releases" -d "$BODY")"
+          UPLOAD_URL="$(jq -r '.upload_url' <<<"$RELEASE" | sed 's/{?name,label}//')"
+          test -n "$UPLOAD_URL" && test "$UPLOAD_URL" != "null"
+          for FILE in "$ARTIFACT_NAME" "${ARTIFACT_NAME}.sha256"; do
+            curl -fsSL -X POST \
+              -H "Authorization: Bearer ${RELEASE_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'Content-Type: application/octet-stream' \
+              --data-binary "@${FILE}" \
+              "${UPLOAD_URL}?name=${FILE}"
+          done
+          echo "Published GitHub Release ${VERSION}"
+
+      - name: Publish Codeberg Release
+        if: success() && github.event.inputs.publish_codeberg == 'true'
+        env:
+          RELEASE_TOKEN: ${{ secrets.TOKEN_CODEBERG }}
+        run: |
+          case "$VERSION" in
+            v*) ;;
+            *) echo "::error::Codeberg Release requires an exact v* Git tag"; exit 1 ;;
+          esac
+          ARTIFACT_NAME="intermasq-${VERSION}-linux-amd64"
+          API="https://codeberg.org/api/v1/repos/AlexRus1234/Intermasq"
+          BODY="$(jq -n --arg tag "$VERSION" '{tag_name:$tag, name:$tag, draft:false, prerelease:($tag | test("-"))}')"
+          RELEASE="$(curl -fsSL -X POST \
+            -H "Authorization: token ${RELEASE_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            "$API/releases" -d "$BODY")"
+          RELEASE_ID="$(jq -r '.id' <<<"$RELEASE")"
+          test -n "$RELEASE_ID" && test "$RELEASE_ID" != "null"
+          for FILE in "$ARTIFACT_NAME" "${ARTIFACT_NAME}.sha256"; do
+            curl -fsSL -X POST \
+              -H "Authorization: token ${RELEASE_TOKEN}" \
+              -F "attachment=@${FILE}" \
+              "$API/releases/${RELEASE_ID}/assets?name=${FILE}"
+          done
+          echo "Published Codeberg Release ${VERSION}"
 
       - name: Cleanup
         if: always()
-        run: rm -f intermasq-ci intermasq-ci.sha256
+        run: rm -f intermasq-ci intermasq-*linux-amd64 intermasq-*linux-amd64.sha256
