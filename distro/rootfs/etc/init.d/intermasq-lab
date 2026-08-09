@@ -79,6 +79,36 @@ ensure_secret() {
 	fi
 }
 
+ensure_admin() {
+	local dir="$1"
+	local gateway="$2"
+	local credentials="$dir/data/credentials.txt"
+	local setup_body="$dir/data/setup.json"
+	local password
+	local username="$LAB_ADMIN_USERNAME"
+
+	if [ -f "$dir/data/users.json" ]; then
+		return 0
+	fi
+	if [ ! -s "$credentials" ]; then
+		password="$LAB_ADMIN_PASSWORD"
+		umask 077
+		printf 'username=%s\npassword=%s\n' "$username" "$password" > "$credentials" || return 1
+	else
+		username=$(sed -n 's/^username=//p' "$credentials")
+		password=$(sed -n 's/^password=//p' "$credentials")
+	fi
+
+	printf '{"username":"%s","password":"%s"}\n' "$username" "$password" > "$setup_body" || return 1
+	until curl --silent --show-error --fail --max-time 5 \
+		-H 'Content-Type: application/json' \
+		--data-binary "@$setup_body" \
+		"http://$gateway:$INTERNAL_PANEL_PORT/api/setup" >/dev/null 2>&1; do
+		sleep 1
+	done
+	rm -f "$setup_body"
+}
+
 start_instance() {
 	local name="$1"
 	local namespace="$2"
@@ -136,6 +166,7 @@ start_instance() {
 			-init-system none \
 			-ci-mode true || return 1
 	fi
+	ensure_admin "$dir" "$gateway" || return 1
 
 	if ! ss -ltn | grep -Fq ":$panel_port"; then
 		rm -f "$dir/data/proxy.pid"

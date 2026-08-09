@@ -167,6 +167,9 @@ func Load(r *gin.Engine) {
 // the /api/plugins handler; the returned slice aliases the package state
 // (it is not a copy), matching the pre-modularization behaviour.
 func Loaded() []PluginManifest {
+	if loadedPlugins == nil {
+		return []PluginManifest{}
+	}
 	return loadedPlugins
 }
 

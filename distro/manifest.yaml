@@ -12,6 +12,10 @@ defaults:
   init_system: none
   ci_mode: true
 
+bootstrap:
+  username: admin
+  password: intermasq-lab
+
 instances:
   - name: office
     namespace: im1

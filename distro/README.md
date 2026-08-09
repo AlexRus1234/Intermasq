@@ -16,6 +16,10 @@ and the Intermasq binary installed at `/usr/local/lib/intermasq`.
 
 The service is designed for a disposable VM. It generates per-instance secrets
 on first start and keeps all mutable state below `/var/lib/intermasq-lab`.
+It also creates the first `admin` user automatically. Generated credentials are
+stored in `/var/lib/intermasq-lab/<instance>/data/credentials.txt` with mode
+`0600`. This disposable lab intentionally uses public test credentials:
+`admin` / `intermasq-lab`.
 
 ## Planned build flow
 
