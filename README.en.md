@@ -1,237 +1,267 @@
-**English** | [**Русский**](README.md)
+**English** | [**Russian**](README.md)
 
 <div align="center">
 
-# 🛡️ Intermasq
+<h1>Intermasq</h1>
 
 **Web panel for dnsmasq management**
 
-Lightweight, fast, single binary — everything included.
+Intermasq is a self-contained web application for administering `dnsmasq`.
+The frontend, server logic, and API are combined into a single executable.
+Data is stored in the filesystem; no external database or container
+infrastructure is required.
 
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.25-00ADD8.svg)](https://go.dev/)
-[![Vue](https://img.shields.io/badge/Vue-3-4FC08D.svg)](https://vuejs.org/)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg?style=flat-square)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.25-00ADD8.svg?style=flat-square)](https://go.dev/)
+[![Vue](https://img.shields.io/badge/Vue-3-4FC08D.svg?style=flat-square)](https://vuejs.org/)
+[![Bootstrap](https://img.shields.io/badge/Bootstrap-5-7952B3.svg?style=flat-square)](https://getbootstrap.com/)
+[![Platform](https://img.shields.io/badge/Linux-any-1793D1.svg?style=flat-square)](#quick-start)
 
 </div>
 
 ---
 
-## 📸 Screenshots
+## Contents
 
-> *Screenshots will be added later.*
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Access control](#access-control)
+- [API, plugins, and metrics](#api-plugins-and-metrics)
+- [Project structure](#project-structure)
+- [Technology stack](#technology-stack)
+- [License](#license)
 
----
+> Extended documentation for the API, access control, system services, plugins,
+> and metrics is available in [`docs/func/EN/`](docs/func/EN/README.md).
+> This file provides a system overview and initial setup instructions.
 
-## ✨ Key Features
-
-- **Static DHCP entry management** — add, edit, delete hosts via web interface
-- **Device monitoring** — online/offline status via ARP table (auto-refresh every 30 sec)
-- **Lease-to-static conversion** — promote a DHCP lease to a static entry in one click
-- **Bulk import** — paste a list of devices from text (MAC IP Hostname)
-- **Backup & rollback** — download ZIP archive of configs, quick `.bak` rollback and multi-level version history (N latest snapshots under `/etc/intermasq/history/`)
-- **Multi-init** — auto-detection and support: systemd, systemd-user, OpenRC, runit, sysvinit
-- **Plugin system** — extend functionality via Unix sockets
-- **Single binary** — frontend embedded into Go binary via `go:embed`
-- **Bilingual interface** — Russian / English, switch in one click
-- **Dark / light theme** — choice persisted in localStorage
-- **Dual authentication** — JWT for browsers, `X-API-Key` for scripts and plugins
-- **Swagger UI** — interactive API documentation out of the box (`/swagger/index.html`)
-- **Bulk deletion** — select multiple hosts with checkboxes and delete at once
-- **Sorting & search** — by MAC, IP, Hostname with smart IP-address sorting
-- **Path safety** — path traversal protection, writes only inside `conf-dir`
+The project was developed according to a predefined architecture; an AI
+assistant was used while preparing the source code.[^1]
 
 ---
 
-## 🚀 Quick Start
+## Features
+
+### DHCP and DNS
+- Operations on `dhcp-host=` entries with MAC/IP/hostname, tag `set:`, and `lease-time` validation
+- Suggestion of the next free IP from `dhcp-range`
+- Host templates (IP range + hostname pattern + target file)
+- `A` / `CNAME` / `PTR` / `TXT` DNS records with CSV import/export
+- Lease viewer, online ARP devices, and bulk lease-to-static conversion
+- Unknown ARP device detection with **vendor identification** (OUI)
+
+### dnsmasq configuration
+- Visual editor for `dhcp-range`, `dhcp-option` (RFC 2132 presets), `server=`, and PXE/network boot
+- Raw `.conf` editor with `dnsmasq --test` validation
+- Multiple files: create, delete, and use configuration presets (`basic-dhcp`, `forwarder`, `pxe`, `aliases`)
+
+### Security and history
+- Multi-level history (N versions per file) with diff and restore
+- `.bak` rollback, ZIP backup, and restore with pre-validation
+- Audit log: who did what and when, with colored labels
+- Path traversal protection: writes are limited to `-conf-dir`
+
+### Operations and user interface
+- Single binary (`go:embed`), multi-init support: systemd / systemd-user / OpenRC / runit / sysvinit with auto-detection
+- Real-time SSE updates for ARP and dnsmasq status without polling
+- Dual authentication: JWT for browsers, `X-API-Key` for scripts and plugins
+- **RBAC**: `admin` / `user` roles; destructive operations are admin-only
+- Rate limiting on `/api/login`, JWT revocation on logout, and revocation of all tokens when a password changes or a user is deleted
+- Unix-socket plugins, `/metrics` for Prometheus, and Swagger documentation
+- Russian and English interface languages, dark and light themes
+
+See [`docs/func/EN/features.md`](docs/func/EN/features.md) for details.
+
+---
+
+## Quick start
 
 ### Requirements
 
-- Go 1.25+
-- Node.js 22+ (for frontend build)
-- dnsmasq (on the target machine)
+| Component | Version | Purpose |
+|---|---|---|
+| **Go** | 1.25+ | Build the binary |
+| **Node.js** | 22+ | Build the frontend |
+| **dnsmasq** | any | On the target machine |
 
 ### Build
 
 ```bash
-# Build frontend
-cd frontend && npm ci && npm run build && cd ..
+# Build the frontend and server in the order used by CI:
+make build
 
-# Build binary
+# Alternative manual build:
+cd frontend && npm ci && npm run build && cd ..
 go build -o intermasq .
 ```
+
+Production build (static linking, without symbol tables, with a version):
+
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+  go build -trimpath -ldflags="-s -w \
+  -X intermask/internal/version.Version=1.0.0" -o intermasq .
+```
+
+> Prebuilt binaries are not published in a public registry. Build from source.
 
 ### Run
 
 ```bash
-sudo ./intermasq -port 8081 -conf-dir /etc/dnsmasq.d -leases /var/lib/misc/dnsmasq.leases
+# Required: the process exits at startup without this secret
+export INTERMASQ_SECRET="$(openssl rand -hex 32)"
+
+sudo ./intermasq \
+  -port 8081 \
+  -conf-dir /etc/dnsmasq.d \
+  -leases /var/lib/misc/dnsmasq.leases
 ```
 
-On first launch, the admin setup screen appears. After creating an account — full access to the panel.
+On the first launch, the admin account creation form is displayed. After it is
+completed, the panel becomes available.
 
-### Production build (with version)
-
-```bash
-CGO_ENABLED=0 go build -ldflags="-s -w -X intermask/internal/version.Version=1.0.0-pre" -o intermasq .
-```
+> In production, set `INTERMASQ_SECRET` in a systemd unit drop-in with mode
+> `0600`. A complete unit example and instructions for running as a dedicated
+> user are available in [`docs/func/EN/os-setup.md`](docs/func/EN/os-setup.md).
 
 ---
 
-## ⚙️ CLI Flags
+## Configuration
+
+### Command-line flags
 
 | Flag | Default | Description |
 |---|---|---|
-| `-port` | `8081` | Port to listen on |
-| `-db` | `/etc/intermasq/users.json` | Path to user database |
-| `-conf-dir` | `/etc/dnsmasq.d` | Directory with dnsmasq configs |
-| `-leases` | `/var/lib/misc/dnsmasq.leases` | Path to dnsmasq leases file |
-| `-arp-file` | `/proc/net/arp` | Path to ARP table file |
-| `-init-system` | `auto` | Init system: `auto`, `systemd`, `systemd-user`, `openrc`, `runit`, `sysvinit`, `none` |
-| `-systemd-scope` | — | *(deprecated)* `auto`, `system`, `user`, `none` |
-| `-ci-mode` | `false` | Disables self-restart (for CI) |
-| `-audit-log` | `/etc/intermasq/audit.log` | Path to audit log file |
-| `-templates` | `/etc/intermasq/templates.json` | Path to templates file |
-| `-history-dir` | `/etc/intermasq/history` | Directory for config version history |
-| `-history-depth` | `10` | Number of latest versions to keep per file |
+| `-port` | `8081` | Listening port |
+| `-conf-dir` | `/etc/dnsmasq.d` | dnsmasq configuration directory |
+| `-leases` | `/var/lib/misc/dnsmasq.leases` | dnsmasq lease file |
+| `-arp-file` | `/proc/net/arp` | ARP table path |
+| `-db` | `/etc/intermasq/users.json` | User database |
+| `-audit-log` | `/etc/intermasq/audit.log` | Audit log file |
+| `-templates` | `/etc/intermasq/templates.json` | Host templates file |
+| `-history-dir` | `/etc/intermasq/history` | Configuration version directory |
+| `-history-depth` | `10` | Number of versions retained per file |
+| `-init-system` | `auto` | `auto` / `systemd` / `systemd-user` / `openrc` / `runit` / `sysvinit` / `none` |
+| `-ci-mode` | `false` | Disables self-restart (for CI/tests) |
+| `-dnsmasq-bin`<br>`-sudo-bin`<br>`-systemctl-bin`<br>`-service-bin`<br>`-rc-service-bin`<br>`-sv-bin` | *(auto)* | Override paths to system binaries (`dnsmasq`, `sudo`, `systemctl`, `service`, `rc-service`, `sv`). Empty means resolve through `$PATH` and well-known absolute paths. See `internal/bins`. |
+| `-systemd-scope` | -- | *(deprecated)* `auto`/`system`/`user`/`none`; mapped to `-init-system` |
 
-> **Default port note:** As of v3.0 the default port changed from `8080` to `8081`. Port `8080` is frequently occupied by other services (e.g. Crowdsec listens on `127.0.0.1:8080`), which caused binding conflicts and silent service crashes. To use the old port, pass it explicitly via `-port 8080`.
+### Environment variables
 
-### Environment Variables
-
-| Variable | Description |
-|---|---|
-| `INTERMASQ_SECRET` | Required secret key for JWT and API-Key. The process exits if it is not set |
-
----
-
-## 🔌 API
-
-After launch, Swagger documentation is available at: `http://<host>:<port>/swagger/index.html`
-
-### Core Endpoints
-
-| Method | Path | Description | Auth |
-|---|---|---|---|
-| `GET` | `/api/status` | dnsmasq status + setup requirement | No |
-| `POST` | `/api/setup` | Initial admin setup | No |
-| `POST` | `/api/login` | Login, get JWT | No |
-| `GET` | `/api/hosts` | List static hosts | Yes |
-| `POST` | `/api/hosts` | Add/update a host | Yes |
-| `POST` | `/api/hosts/bulk` | Bulk import hosts | Yes |
-| `DELETE` | `/api/hosts/:mac` | Delete a host | Yes |
-| `GET` | `/api/leases` | DHCP leases | Yes |
-| `GET` | `/api/arp` | ARP table (online MACs) | Yes |
-| `POST` | `/api/reload` | Validate config + restart dnsmasq | Yes |
-| `POST` | `/api/rollback` | Rollback file to `.bak` version | Yes |
-| `GET` | `/api/history?file=<path>` | List stored versions of a file | Yes |
-| `GET` | `/api/history/diff?file=<path>&from=<v>&to=<v\|current>` | Diff between versions | Yes |
-| `POST` | `/api/history/restore` | Restore file from a version | Yes |
-| `GET` | `/api/backup` | Download ZIP archive of all `.conf` | Yes |
-| `POST` | `/api/restart-self` | Restart Intermasq service | Yes |
-| `GET` | `/api/plugins` | List loaded plugins | Yes |
-
-### Authentication
-
-- **Browser**: JWT token in `Authorization: Bearer <token>` header
-- **Scripts/plugins**: static key in `X-API-Key: <INTERMASQ_SECRET>` header
+| Variable | Required | Description |
+|---|---|---|
+| `INTERMASQ_SECRET` | **Yes** | Secret used to sign JWTs and as the `X-API-Key` value. Generate it with `openssl rand -hex 32`. |
 
 ---
 
-## 🧩 Plugin System
+## Access control
 
-Intermasq supports extensions via Unix sockets. Each plugin is a directory in `/etc/intermasq/plugins/` with a `manifest.json`:
+System command execution is determined by `getuid()`:
 
-```json
-{
-  "id": "my-plugin",
-  "name": "My Plugin",
-  "bin": "./plugin-binary"
-}
+- **Running as `root`**: `systemctl` and `dnsmasq --test` are called directly.
+- **Running as a regular user**: service management uses `sudo -n`. Allow the
+  required commands and grant read/write access to `conf-dir` and read access
+  to the lease file.
+
+Example `/etc/sudoers.d/intermasq` for systemd and user `intermasq`:
+
+```sudoers
+intermasq ALL=(root) NOPASSWD: /usr/bin/systemctl is-active dnsmasq
+intermasq ALL=(root) NOPASSWD: /usr/bin/systemctl restart dnsmasq
+intermasq ALL=(root) NOPASSWD: /usr/bin/systemctl restart intermasq
 ```
 
-On startup, Intermasq:
-1. Reads `/etc/intermasq/plugins/<id>/manifest.json`
-2. Launches the binary with environment variables:
-   - `INTERMASQ_KEY` — secret for API requests
-   - `PLUGIN_SOCKET` — path to Unix socket (`/run/intermasq/sockets/<id>.sock`)
-3. Proxies all requests to `/plugins/<id>/*` to the plugin's Unix socket
-4. UI renders the plugin in an iframe
+The startup log indicates the selected mode: `[INIT] System: systemd (root)`
+or `[INIT] System: systemd (via sudo)`.
+
+See [`docs/func/EN/os-setup.md`](docs/func/EN/os-setup.md) for sudo rules for
+all supported init systems, filesystem permissions, a systemd unit example,
+and dedicated-user deployment.
 
 ---
 
-## 📁 Project Structure
+## API, plugins, and metrics
+
+Interactive documentation is available after startup:
+
+```
+http://<host>:<port>/swagger/index.html
+```
+
+| Area | Summary | Details |
+|---|---|---|
+| **Authentication** | `Authorization: Bearer <JWT>` (browser) or `X-API-Key: <INTERMASQ_SECRET>` (scripts) | [`docs/func/EN/api.md`](docs/func/EN/api.md) |
+| **Endpoints** | `/api/hosts`, `/api/aliases`, `/api/config`, `/api/files/:name`, `/api/history`, `/api/backup`, `/api/reload`, `/api/events`, ... | Full list and RBAC in [`api.md`](docs/func/EN/api.md) |
+| **RBAC** | `admin` (reload/rollback/raw writes/users/restart) and `user` (read and add) | [`api.md`](docs/func/EN/api.md) |
+| **Plugins** | Sidecar processes over Unix sockets, manifest in `/etc/intermasq/plugins/`, iframe proxying | [`docs/func/EN/plugins.md`](docs/func/EN/plugins.md) |
+| **Metrics** | `/metrics` for Prometheus: hosts/leases/ARP/dnsmasq status/domain health checks | [`docs/func/EN/metrics.md`](docs/func/EN/metrics.md) |
+
+---
+
+## Project structure
 
 ```
 .
-├── main.go              # Entry point, Gin routing, plugin loading
-├── auth.go              # JWT, authentication, users (bcrypt)
-├── handlers.go          # HTTP API handlers
-├── models.go            # Data structures (HostEntry, LeaseEntry, etc.)
-├── dnsmasq.go           # dnsmasq config handling, ARP, backups, rollback
-├── system.go            # Init system abstraction (SystemCaller interface)
-├── dnsmasq_test.go      # Unit tests (ARP, paths, init systems)
-├── go.mod / go.sum      # Go dependencies
-├── docs/
-│   ├── swagger.yaml     # OpenAPI specification
-│   ├── swagger.json     # OpenAPI specification (JSON)
-│   └── docs.go          # Generated code for gin-swagger
-├── frontend/
-│   ├── package.json     # Node.js dependencies
-│   ├── vite.config.js   # Vite configuration
-│   ├── index.html       # HTML entry point
-│   └── src/
-│       ├── main.js          # Vue + i18n initialization
-│       ├── App.vue          # Root component (navbar, tabs, themes)
-│       ├── store.js         # Reactive store + API client (axios)
-│       ├── i18n.js          # vue-i18n setup + API error translation
-│       ├── style.css        # Global styles
-│       ├── locales/
-│       │   ├── ru.json      # Russian locale
-│       │   └── en.json      # English locale
-│       └── components/
-│           ├── AuthScreen.vue       # Login / setup screen
-│           ├── static/
-│           │   ├── StaticView.vue  # Static hosts tab
-│           │   ├── HostForm.vue     # Add/edit form + bulk import
-│           │   ├── HostTable.vue    # Hosts table (sorting, selection)
-│           │   └── BulkImport.vue   # Bulk import component
-│           └── leases/
-│               └── LeasesTab.vue    # DHCP leases tab
-├── .forgejo/
-│   └── workflows/
-│       ├── build.yml       # CI: build, tests, smoke test
-│       └── release.yml     # Release: build, sha256, upload to Forgejo Packages
-├── LICENSE               # GNU AGPL v3
-└── README.md             # Documentation
+├── main.go                 # Entry point: flags, initialization, Gin, static files, Swagger
+├── internal/
+│   ├── models/             # Data types (HostEntry, DnsAliasEntry, ...)
+│   ├── validate/           # MAC/IP/hostname/tag validators and normalizers
+│   ├── oui/                # OUI table (vendor lookup by MAC)
+│   ├── stats/              # Counters for /metrics
+│   ├── bins/               # Automatic system binary path resolution
+│   ├── initd/              # SystemCaller: init detection and management
+│   ├── dnsmasq/            # dhcp-host parsing/writing, aliases, config, history, backup
+│   ├── netstate/           # ARP, leases, device discovery
+│   ├── templates/          # Host template creation and application
+│   ├── auth/               # Users, JWT, rate limiting, RBAC middleware (bcrypt)
+│   ├── audit/              # Audit log
+│   ├── control/            # SSE broadcaster, dnsmasq status/reload
+│   ├── metrics/             # Prometheus /metrics and DNS health checks
+│   ├── plugins/            # Plugin loading/proxying (Unix sockets)
+│   ├── version/            # Build version (ldflags)
+│   └── webapi/             # HTTP handlers and /api/* route registration
+├── docs/                   # OpenAPI and user documentation
+├── frontend/               # Vue 3 SPA (Vite, Bootstrap 5, vue-i18n)
+├── .forgejo/workflows/     # CI: build, tests, smoke, optional fuzz/e2e/L5 VM
+├── tests/                  # Smoke suites, Playwright E2E, performance, L5 VMs
+├── LICENSE                 # GNU AGPL v3
+└── README.md               # Main documentation
 ```
 
----
-
-## 🛠 Tech Stack
-
-### Backend
-- **Go 1.25** — language, single binary
-- **Gin** — HTTP framework
-- **jwt/v5** — JWT tokens
-- **bcrypt** (golang.org/x/crypto) — password hashing
-- **gin-swagger** — Swagger UI
-- **go:embed** — frontend embedding into binary
-
-### Frontend
-- **Vue 3** — Composition API, `<script setup>`
-- **Vite 7** — build tool
-- **Bootstrap 5** — UI components and theming
-- **vue-i18n 9** — localization (RU / EN)
-- **Axios** — HTTP client
-
-### Infrastructure
-- **Forgejo Actions** — CI/CD
-- **Go vet + gofmt** — static analysis and formatting
-- **go test** — unit tests
+`main.go` is located in the root because `//go:embed frontend/dist/*` cannot
+refer to parent directories. This keeps `go build -o intermasq .` working.
 
 ---
 
-## 📄 License
+## Technology stack
 
-This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+**Backend:** Go 1.25, Gin, golang-jwt/v5, golang.org/x/crypto (bcrypt),
+gin-swagger, `go:embed`.
 
-Copyright (C) 2026 AlexRus1234
+**Frontend:** Vue 3 (Composition API), Vite 7, Bootstrap 5 (dark/light),
+vue-i18n 9 (RU/EN), Axios, event-source-polyfill (SSE).
+
+**Infrastructure and quality:** Forgejo Actions (CI), `go vet` / `gofmt`,
+`go test` (including `-race`), fuzz targets, Playwright E2E, smoke suites,
+and L5 tests on live VMs (systemd + OpenRC).
+
+---
+
+## License
+
+The project is distributed under the **[GNU Affero General Public License v3.0](LICENSE)**.
+
+```
+Intermasq - Web panel for dnsmasq
+Copyright (C) 2026  AlexRus1234
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+```
+
+[^1]: The source code was developed with an AI assistant according to a
+predefined project architecture; the author made the architectural decisions,
+verified the results, and performed the final integration.
