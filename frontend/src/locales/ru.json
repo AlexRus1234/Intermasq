@@ -52,7 +52,7 @@
     "filePlaceholder": "Файл (/etc/...)",
     "save": "Сохранить",
     "add": "Добавить",
-    "bulkPlaceholder": "Вставьте текст (MAC [IP] [Hostname]) через пробел. Каждое устройство с новой строки. IP и hostname опциональны.",
+    "bulkPlaceholder": "Вставьте текст (MAC [IP] [Hostname] [lease-time]) через пробел. Каждое устройство с новой строки. IP, hostname и lease-time (напр. 12h, infinite) опциональны.",
     "parsed": "Распознано:",
     "devices": "устройств",
     "destFile": "Файл назначения",
@@ -77,7 +77,10 @@
     "tagsHint": "теги позволяют dhcp-option=tag:... нацеливаться на этот хост",
     "tagsCol": "Теги",
     "ipOptional": "IP (опц.)",
-    "hostnameOptional": "Имя (опц.)"
+    "hostnameOptional": "Имя (опц.)",
+    "leaseTimePlaceholder": "12h / infinite (опц.)",
+    "leaseTimeTitle": "Персональный lease-time для хоста, дописывается после IP (напр. 12h, 3600, infinite)",
+    "leaseTimeHint": "перекрывает глобальный lease-time из dhcp-range"
   },
   "leases": {
     "title": "Активные устройства в сети (DHCP Leases)",
@@ -192,7 +195,8 @@
     "invalid_zip": "Неверный ZIP-архив",
     "password_too_long": "Пароль длиннее 72 байт — bcrypt не поддерживает такой",
     "username_too_long": "Имя пользователя длиннее 64 символов",
-    "missing_fields": "Заполните все обязательные поля"
+    "missing_fields": "Заполните все обязательные поля",
+    "invalid_lease_time": "Неверный lease-time (примеры: 12h, 3600, infinite)"
   },
   "config": {
     "groupDns": "DNS / Сеть",

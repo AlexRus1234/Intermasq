@@ -1033,6 +1033,53 @@ func TestAddHostHandlerRejectsBadIP(t *testing.T) {
 	}
 }
 
+// TestAddHostHandlerAcceptsLeaseTime — валидный lease_time принимается и
+// дописывается в dhcp-host последним полем.
+func TestAddHostHandlerAcceptsLeaseTime(t *testing.T) {
+	dir := t.TempDir()
+	*dnsmasq.ConfigDir = dir
+	file := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(file, []byte(""), 0644)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := fmt.Sprintf(`{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.0.5","hostname":"phone","lease_time":"12h","file":%q}`, file)
+	c.Request = httptest.NewRequest("POST", "/api/hosts", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	addHostHandler(c)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for host with lease_time, got %d: %s", w.Code, w.Body.String())
+	}
+	content, _ := os.ReadFile(file)
+	if !strings.Contains(string(content), "dhcp-host=aa:bb:cc:dd:ee:ff,phone,10.0.0.5,12h\n") {
+		t.Errorf("lease_time not written as trailing field:\n%s", content)
+	}
+}
+
+// TestAddHostHandlerRejectsBadLeaseTime — мусорный lease_time отвергается
+// (валидация формата, как и для IP).
+func TestAddHostHandlerRejectsBadLeaseTime(t *testing.T) {
+	dir := t.TempDir()
+	*dnsmasq.ConfigDir = dir
+	file := filepath.Join(dir, "hosts.conf")
+	os.WriteFile(file, []byte(""), 0644)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := fmt.Sprintf(`{"mac":"aa:bb:cc:dd:ee:ff","lease_time":"not-a-lease","file":%q}`, file)
+	c.Request = httptest.NewRequest("POST", "/api/hosts", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user", "admin")
+	addHostHandler(c)
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for invalid lease_time, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "invalid_lease_time") {
+		t.Errorf("expected invalid_lease_time error, got: %s", w.Body.String())
+	}
+}
+
 // TestAddHostHandlerIPDuplicateStillChecked — если IP указан, duplicate check
 // работает как раньше.
 func TestAddHostHandlerIPDuplicateStillChecked(t *testing.T) {

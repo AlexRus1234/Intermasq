@@ -217,6 +217,91 @@ func TestParseCSVHostsMACPlusHostname(t *testing.T) {
 	}
 }
 
+// TestParseCSVHostsLeaseTime — 4-я колонка lease_time подхватывается парсером.
+func TestParseCSVHostsLeaseTime(t *testing.T) {
+	csv := "mac,ip,hostname,lease_time\naa:bb:cc:dd:ee:ff,10.0.0.5,phone,12h\n"
+	hosts, err := ParseCSVHosts(strings.NewReader(csv), "/tmp/x.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	}
+	if hosts[0].LeaseTime != "12h" {
+		t.Errorf("lease_time: got %q, want 12h", hosts[0].LeaseTime)
+	}
+}
+
+// TestParseCSVHostsLegacy3ColNoLeaseTime — старые 3-колонные CSV (без
+// lease_time) остаются совместимы: поле пустое.
+func TestParseCSVHostsLegacy3ColNoLeaseTime(t *testing.T) {
+	csv := "mac,ip,hostname\naa:bb:cc:dd:ee:ff,10.0.0.5,phone\n"
+	hosts, err := ParseCSVHosts(strings.NewReader(csv), "/tmp/x.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	}
+	if hosts[0].LeaseTime != "" {
+		t.Errorf("legacy 3-col CSV should give empty lease_time, got %q", hosts[0].LeaseTime)
+	}
+}
+
+// TestParseCSVHostsIgnoresInvalidLeaseTime — мусор в 4-й колонке не роняет
+// строку, а молча игнорируется (хост импортируется без lease_time).
+func TestParseCSVHostsIgnoresInvalidLeaseTime(t *testing.T) {
+	csv := "mac,ip,hostname,lease_time\naa:bb:cc:dd:ee:ff,10.0.0.5,phone,garbage\n"
+	hosts, err := ParseCSVHosts(strings.NewReader(csv), "/tmp/x.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	}
+	if hosts[0].LeaseTime != "" {
+		t.Errorf("invalid lease_time should be ignored, got %q", hosts[0].LeaseTime)
+	}
+}
+
+// TestHostsToCSVIncludesLeaseTimeColumn — экспорт пишет заголовок из 4 колонок
+// и lease_time в каждой строке (пустой — для хостов без него).
+func TestHostsToCSVIncludesLeaseTimeColumn(t *testing.T) {
+	hosts := []models.HostEntry{
+		{Mac: "aa:bb:cc:dd:ee:01", Ip: "10.0.0.1", Hostname: "h1"},
+		{Mac: "aa:bb:cc:dd:ee:02", Ip: "10.0.0.2", Hostname: "h2", LeaseTime: "12h"},
+	}
+	out := string(HostsToCSV(hosts))
+	if !strings.HasPrefix(out, "mac,ip,hostname,lease_time\n") {
+		t.Errorf("expected 4-col header, got: %s", out)
+	}
+	if !strings.Contains(out, "aa:bb:cc:dd:ee:02,10.0.0.2,h2,12h") {
+		t.Errorf("expected lease_time in row, got: %s", out)
+	}
+	// empty lease_time renders as a trailing empty field on the row
+	if !strings.Contains(out, "aa:bb:cc:dd:ee:01,10.0.0.1,h1,") {
+		t.Errorf("expected empty lease_time field, got: %s", out)
+	}
+}
+
+// TestHostsCSVRoundTripLeaseTime — экспорт → импорт сохраняет lease_time.
+func TestHostsCSVRoundTripLeaseTime(t *testing.T) {
+	original := []models.HostEntry{
+		{Mac: "aa:bb:cc:dd:ee:02", Ip: "10.0.0.2", Hostname: "h2", LeaseTime: "infinite", File: "/tmp/x.conf"},
+	}
+	csvData := HostsToCSV(original)
+	hosts, err := ParseCSVHosts(strings.NewReader(string(csvData)), "/tmp/x.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	}
+	if hosts[0].LeaseTime != "infinite" {
+		t.Errorf("round-trip lease_time: got %q, want infinite", hosts[0].LeaseTime)
+	}
+}
+
 // ========== IP transforms (bulk-edit) ==========
 
 // TestParseIPTransform covers every error branch and the two success modes

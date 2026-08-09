@@ -365,13 +365,15 @@ func ReadAllHostsLocked() []models.HostEntry {
 }
 
 // HostsToCSV serialises a slice of HostEntry into a CSV with the header
-// mac,ip,hostname (one row per host). Tags are not part of the CSV format.
+// mac,ip,hostname,lease_time (one row per host). Tags are not part of the
+// CSV format. lease_time is emitted as the 4th column (empty when unset) so
+// bulk export/import round-trips it instead of dropping it.
 func HostsToCSV(hosts []models.HostEntry) []byte {
 	buf := new(bytes.Buffer)
 	w := csv.NewWriter(buf)
-	w.Write([]string{"mac", "ip", "hostname"})
+	w.Write([]string{"mac", "ip", "hostname", "lease_time"})
 	for _, h := range hosts {
-		w.Write([]string{h.Mac, h.Ip, h.Hostname})
+		w.Write([]string{h.Mac, h.Ip, h.Hostname, h.LeaseTime})
 	}
 	w.Flush()
 	return buf.Bytes()
@@ -380,10 +382,12 @@ func HostsToCSV(hosts []models.HostEntry) []byte {
 // validateHostFields / normalizeMAC live in internal/validate; the dhcp-host
 // parsers below call them as validate.ValidateHostFields / validate.NormalizeMAC.
 
-// ParseCSVHosts reads a CSV (with header row "mac,ip,hostname") and returns
-// every row that normalises to a valid host (MAC normalised, fields pass
-// validate.ValidateHostFields). targetFile is stamped onto every returned
-// entry so the handler routes the add to the right .conf file.
+// ParseCSVHosts reads a CSV (header row "mac,ip,hostname[,lease_time]") and
+// returns every row that normalises to a valid host (MAC normalised, fields
+// pass validate.ValidateHostFields). targetFile is stamped onto every
+// returned entry so the handler routes the add to the right .conf file.
+// The 4th lease_time column is optional (legacy 3-column CSVs still parse);
+// when present it must pass IsLeaseTime, otherwise it is ignored.
 func ParseCSVHosts(r io.Reader, targetFile string) ([]models.HostEntry, error) {
 	reader := csv.NewReader(r)
 	records, err := reader.ReadAll()
@@ -402,8 +406,15 @@ func ParseCSVHosts(r io.Reader, targetFile string) ([]models.HostEntry, error) {
 		mac := validate.NormalizeMAC(strings.TrimSpace(row[0]))
 		ip := strings.TrimSpace(row[1])
 		hostname := strings.TrimSpace(row[2])
+		leaseTime := ""
+		if len(row) >= 4 {
+			lt := strings.TrimSpace(row[3])
+			if lt != "" && IsLeaseTime(lt) {
+				leaseTime = lt
+			}
+		}
 		if validate.ValidateHostFields(mac, ip, hostname) {
-			hosts = append(hosts, models.HostEntry{Mac: mac, Ip: ip, Hostname: hostname, File: targetFile})
+			hosts = append(hosts, models.HostEntry{Mac: mac, Ip: ip, Hostname: hostname, File: targetFile, LeaseTime: leaseTime})
 		}
 	}
 	return hosts, nil

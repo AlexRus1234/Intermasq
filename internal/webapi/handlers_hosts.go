@@ -81,6 +81,10 @@ func addHostHandler(c *gin.Context) {
 		return
 	}
 	req.Tags = validate.NormalizeHostTags(req.Tags)
+	if req.LeaseTime != "" && !dnsmasq.IsLeaseTime(req.LeaseTime) {
+		c.JSON(400, gin.H{"error": "invalid_lease_time"})
+		return
+	}
 
 	dnsmasq.Mu.Lock()
 	defer dnsmasq.Mu.Unlock()
@@ -169,6 +173,10 @@ func bulkAddHostsHandler(c *gin.Context) {
 		}
 		if h1.Hostname != "" && !validate.ValidHostname(h1.Hostname) {
 			c.JSON(400, gin.H{"error": "invalid_hostname", "mac": h1.Mac})
+			return
+		}
+		if h1.LeaseTime != "" && !dnsmasq.IsLeaseTime(h1.LeaseTime) {
+			c.JSON(400, gin.H{"error": "invalid_lease_time", "mac": h1.Mac})
 			return
 		}
 		for j, h2 := range req.Hosts {

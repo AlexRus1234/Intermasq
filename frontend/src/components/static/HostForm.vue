@@ -41,6 +41,10 @@
                </div>
            </div>
            <div class="col-md-3"><input v-model="form.hostname" :placeholder="$t('hosts.hostnameOptional', 'Hostname (optional)')" class="form-control"></div>
+           <div class="col-md-3">
+               <input v-model="form.lease_time" :placeholder="$t('hosts.leaseTimePlaceholder', '12h / infinite (optional)')" class="form-control font-monospace" :title="$t('hosts.leaseTimeTitle', 'Per-host lease time suffix written after the IP, e.g. 12h, 3600, infinite')">
+               <div class="form-text small">{{ $t('hosts.leaseTimeHint', 'overrides the global dhcp-range lease time') }}</div>
+           </div>
           <div class="col-md-3">
               <input v-model="tagsInput" :placeholder="$t('hosts.tagsPlaceholder', 'set:iot,set:guest')" class="form-control font-monospace" :title="$t('hosts.tagsTitle', 'DHCP tags (comma separated)')">
               <div class="form-text small">{{ $t('hosts.tagsHint', 'tags let dhcp-option=tag:... target this host') }}</div>
@@ -105,7 +109,7 @@ const csvInput = ref(null)
 const bulkText = ref('')
 const originalMac = ref('')
 const originalFile = ref('')
-const form = ref({ mac: '', ip: '', hostname: '', file: '', tags: [] })
+const form = ref({ mac: '', ip: '', hostname: '', lease_time: '', file: '', tags: [] })
 const tagsInput = ref('')
 const ipRange = ref('')
 const manualRange = ref('')
@@ -115,6 +119,12 @@ const selectedTemplateId = ref('')
 const showTemplatesModal = ref(false)
 
 const isEditing = computed(() => originalMac.value !== '')
+
+// leaseRe mirrors internal/dnsmasq.IsLeaseTime: "infinite" or a positive
+// integer with an optional single unit (s/m/h/d/w), requiring len>=2 so a
+// bare "1" (and hostnames like it) don't match. Used by the bulk-text parser
+// to peel a trailing lease-time token off each line.
+const leaseRe = /^(\d{2,}[smhdw]?|\d[smhdw]|infinite)$/
 
 function parseTagsInput(raw) {
     // Accept host-assignment tags such as "set:iot" or "set:iot, set:guest".
@@ -135,12 +145,12 @@ watch(() => props.editData, (newData) => {
         importMode.value = 'single'
         originalMac.value = newData.mac
         originalFile.value = newData.file
-        form.value = { mac: newData.mac, ip: newData.ip, hostname: newData.hostname, file: newData.file, tags: [...(newData.tags || [])] }
+        form.value = { mac: newData.mac, ip: newData.ip, hostname: newData.hostname, file: newData.file, tags: [...(newData.tags || [])], lease_time: newData.lease_time || '' }
         tagsInput.value = (newData.tags || []).join(',')
     } else {
         originalMac.value = ''
         originalFile.value = ''
-        form.value.mac = ''; form.value.ip = ''; form.value.hostname = ''
+        form.value.mac = ''; form.value.ip = ''; form.value.hostname = ''; form.value.lease_time = ''
         form.value.tags = []
         tagsInput.value = ''
         form.value.file = props.selectedFile === 'all' ? (store.hosts[0]?.file.split('|')[0] || '') : props.selectedFile
@@ -154,6 +164,7 @@ watch(() => store.transferData, (data) => {
         form.value.mac = data.mac
         form.value.ip = data.ip
         form.value.hostname = data.hostname
+        form.value.lease_time = ''
         form.value.tags = []
         tagsInput.value = ''
         store.transferData = null
@@ -227,7 +238,7 @@ async function saveHost() {
     await api.post('/hosts', { ...form.value, tags })
 
     emit('cancel-edit')
-    form.value.mac = ''; form.value.ip = ''; form.value.hostname = ''
+    form.value.mac = ''; form.value.ip = ''; form.value.hostname = ''; form.value.lease_time = ''
     form.value.tags = []
     tagsInput.value = ''
     actions.loadData()
@@ -245,6 +256,8 @@ const parsedBulkHosts = computed(() => {
     //   <mac> <hostname> <ip>                → полная запись (порядок любой,
     //                                            но hostname без точек/двоеточий)
     //   <mac> <ip> <hostname>                → то же самое
+    //   …и опциональный trailing lease-time токен (12h / 3600 / infinite),
+    //   который отслаивается от остальных.
     return bulkText.value.split('\n').map(line => {
         const p = line.trim().split(/\s+/).filter(Boolean)
         if (p.length === 0) return null
@@ -252,8 +265,9 @@ const parsedBulkHosts = computed(() => {
         if (!mac) return null
         const ip = p.find(x => x !== mac && /^(\d{1,3}\.){3}\d{1,3}$/.test(x))
         const remaining = p.filter(x => x !== mac && x !== ip)
-        const hostname = remaining.length > 0 ? remaining[0] : ''
-        return { mac, ip: ip || '', hostname: hostname || '' }
+        const lease_time = remaining.find(x => leaseRe.test(x)) || ''
+        const hostname = remaining.find(x => x !== lease_time) || ''
+        return { mac, ip: ip || '', hostname: hostname || '', lease_time }
     }).filter(e => e && e.mac)
 })
 

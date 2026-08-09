@@ -52,7 +52,7 @@
     "filePlaceholder": "File (/etc/...)",
     "save": "Save",
     "add": "Add",
-    "bulkPlaceholder": "Paste text (MAC [IP] [Hostname]) separated by space. One device per line. IP and hostname are optional.",
+    "bulkPlaceholder": "Paste text (MAC [IP] [Hostname] [lease-time]) separated by space. One device per line. IP, hostname and lease-time (e.g. 12h, infinite) are optional.",
     "parsed": "Parsed:",
     "devices": "devices",
     "destFile": "Destination file",
@@ -77,7 +77,10 @@
     "tagsHint": "tags let dhcp-option=tag:... target this host",
     "tagsCol": "Tags",
     "ipOptional": "IP (optional)",
-    "hostnameOptional": "Hostname (optional)"
+    "hostnameOptional": "Hostname (optional)",
+    "leaseTimePlaceholder": "12h / infinite (optional)",
+    "leaseTimeTitle": "Per-host lease time written after the IP (e.g. 12h, 3600, infinite)",
+    "leaseTimeHint": "overrides the global dhcp-range lease time"
   },
   "leases": {
     "title": "Active network devices (DHCP Leases)",
@@ -192,7 +195,8 @@
     "invalid_zip": "Invalid ZIP archive",
     "password_too_long": "Password longer than 72 bytes — bcrypt does not support it",
     "username_too_long": "Username longer than 64 characters",
-    "missing_fields": "Please fill in all required fields"
+    "missing_fields": "Please fill in all required fields",
+    "invalid_lease_time": "Invalid lease time (examples: 12h, 3600, infinite)"
   },
   "config": {
     "groupDns": "DNS / Network",

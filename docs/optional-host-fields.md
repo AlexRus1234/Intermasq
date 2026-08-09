@@ -73,15 +73,23 @@ aa:bb:cc:dd:ee:ff 192.168.1.10 phone           # MAC + IP + hostname (поряд
 
 ## CSV-импорт
 
-CSV-формат прежний (3 колонки), но IP и hostname могут быть пустыми:
+CSV-формат: 3 обязательные колонки + опциональная 4-я `lease_time`.
+IP и hostname могут быть пустыми. Старые 3-колонные CSV (без `lease_time`)
+по-прежнему импортируются — поле просто остаётся пустым:
 
 ```csv
-mac,ip,hostname
+mac,ip,hostname,lease_time
 aa:bb:cc:dd:ee:ff,,
 aa:bb:cc:dd:ee:ff,,phone
 aa:bb:cc:dd:ee:ff,192.168.1.10,
 aa:bb:cc:dd:ee:ff,192.168.1.10,nas
+aa:bb:cc:dd:ee:ff,192.168.1.10,nas,12h
+aa:bb:cc:dd:ee:ff,192.168.1.10,nas,infinite
 ```
+
+Экспорт (`GET /api/hosts/csv`) всегда пишет заголовок из 4 колонок, так что
+экспорт → импорт сохраняет `lease_time`. Мусор в 4-й колонке (не `IsLeaseTime`)
+молча игнорируется — хост импортируется без lease-time.
 
 ---
 
@@ -98,6 +106,7 @@ aa:bb:cc:dd:ee:ff,192.168.1.10,nas
 | `hostname` | string (опциональный) | если указан — `validHostname` (RFC 952/1123/1034) |
 | `file` | string (обязательный) | путь внутри `-conf-dir` |
 | `tags` | []string (опциональный) | `set:…` / `id:…` |
+| `lease_time` | string (опциональный) | если указан — `IsLeaseTime` (`12h`, `3600`, `infinite`, …); дописывается в `dhcp-host` последним полем |
 
 ### Примеры
 
@@ -125,6 +134,20 @@ POST /api/hosts
 
 → 200, в файле `dhcp-host=aa:bb:cc:dd:ee:ff` (только MAC).
 
+```http
+POST /api/hosts
+{
+  "mac": "aa:bb:cc:dd:ee:ff",
+  "ip": "192.168.1.10",
+  "hostname": "phone",
+  "lease_time": "12h",
+  "file": "/etc/dnsmasq.d/hosts.conf"
+}
+```
+
+→ 200, в файле `dhcp-host=aa:bb:cc:dd:ee:ff,phone,192.168.1.10,12h` (lease-time
+последним полем, перекрывает глобальный `dhcp-range`).
+
 ### Duplicate-проверка
 
 - **MAC-дубли** проверяются всегда (включая MAC-only хосты).
@@ -138,11 +161,12 @@ POST /api/hosts
 - `validateHostFields(mac, ip, hostname string) bool` в `dnsmasq.go` —
   единый хелпер валидации. Используется в `addHostHandler`,
   `bulkAddHostsHandler`, `parseCSVHosts`.
-- `formatDhcpHostLine(h HostEntry) string` — unchanged. Уже давно
-  пропускал пустые `Ip` / `Hostname`, поэтому round-trip сохраняется для
-  всех 4 форм.
+- `formatDhcpHostLine(h HostEntry) string` — порядок `mac[, hostname][, ip][, tags...][, lease-time]`;
+  пустые поля пропускаются, lease-time (если задан) дописывается последним.
+  Round-trip parse→format сохраняет все поля, включая lease-time.
 - `addHostHandler` — `findHostsByIP(req.Ip, req.Mac)` вызывается только
-  если `req.Ip != ""`. `findHostsByMac` — всегда.
+  если `req.Ip != ""`. `findHostsByMac` — всегда. `lease_time` (если задан)
+  валидируется через `IsLeaseTime` → иначе 400 `invalid_lease_time`.
 - `bulkAddHostsHandler` — внутри-batch cross-check IP пропускается если
   IP пустой. Раньше невалидные строки silently skip'ались через
   `continue`; теперь — 400 с указанием проблемного MAC.
