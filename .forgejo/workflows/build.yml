@@ -747,19 +747,27 @@ jobs:
             exit 1
           fi
           ARTIFACT_NAME="intermasq-${VERSION}-linux-amd64"
-          API="https://hub.mos.ru/api/v1/repos/AlexRus1234/Intermasq"
-          BODY="$(jq -n --arg tag "$VERSION" '{tag_name:$tag, name:$tag, draft:false, prerelease:($tag | test("-"))}')"
+          API="https://hub.mos.ru/api/v4/projects/AlexRUS1234%2Fintermasq"
           RELEASE="$(curl -kfsSL -X POST \
-            -H "Authorization: token ${RELEASE_TOKEN}" \
+            -H "PRIVATE-TOKEN: ${RELEASE_TOKEN}" \
             -H 'Content-Type: application/json' \
-            "$API/releases" -d "$BODY")"
-          RELEASE_ID="$(jq -r '.id' <<<"$RELEASE")"
-          test -n "$RELEASE_ID" && test "$RELEASE_ID" != "null"
+            "$API/releases" \
+            -d "$(jq -n --arg tag "$VERSION" --arg name "$VERSION" \
+              '{tag_name:$tag, name:$name, description:(if ($tag | test("-")) then "Prerelease" else "" end)}')")"
+          echo "$RELEASE" | jq -e --arg tag "$VERSION" '.tag_name == $tag' >/dev/null
           for FILE in "$ARTIFACT_NAME" "${ARTIFACT_NAME}.sha256"; do
+            UPLOAD="$(curl -kfsSL -X POST \
+              -H "PRIVATE-TOKEN: ${RELEASE_TOKEN}" \
+              -F "file=@${FILE}" \
+              "$API/uploads")"
+            UPLOAD_URL="$(jq -r '.url' <<<"$UPLOAD")"
+            test -n "$UPLOAD_URL" && test "$UPLOAD_URL" != "null"
             curl -kfsSL -X POST \
-              -H "Authorization: token ${RELEASE_TOKEN}" \
-              -F "attachment=@${FILE}" \
-              "$API/releases/${RELEASE_ID}/assets?name=${FILE}"
+              -H "PRIVATE-TOKEN: ${RELEASE_TOKEN}" \
+              -H 'Content-Type: application/json' \
+              "$API/releases/${VERSION}/assets/links" \
+              -d "$(jq -n --arg name "$FILE" --arg url "https://hub.mos.ru${UPLOAD_URL}" \
+                '{name:$name, url:$url, link_type:"package"}')" >/dev/null
           done
           echo "Published Mos.Hub Release ${VERSION}"
 
