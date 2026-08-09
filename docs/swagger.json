@@ -1,51 +1,51 @@
 {
-    "swagger": "2.0",
-    "info": {
-        "title": "Intermasq API",
-        "description": "HTTP API for managing dnsmasq",
-        "version": "1.0.0-pre",
-        "contact": {}
-    },
-    "paths": {
-        "/api/status": {
-            "get": {
-                "summary": "Get service status",
-                "tags": ["system"],
-                "responses": {"200": {"description": "Service status"}}
-            }
-        },
-        "/api/login": {
-            "post": {
-                "summary": "Log in",
-                "tags": ["auth"],
-                "consumes": ["application/json"],
-                "produces": ["application/json"],
-                "responses": {
-                    "200": {"description": "JWT token"},
-                    "401": {"description": "Invalid credentials"}
-                }
-            }
-        },
-        "/api/hosts": {
-            "get": {
-                "summary": "List static hosts",
-                "tags": ["hosts"],
-                "responses": {
-                    "200": {"description": "Static hosts"},
-                    "401": {"description": "Authentication required"}
-                }
-            },
-            "post": {
-                "summary": "Create or update a static host",
-                "tags": ["hosts"],
-                "consumes": ["application/json"],
-                "produces": ["application/json"],
-                "responses": {
-                    "200": {"description": "Host saved"},
-                    "400": {"description": "Invalid host"},
-                    "401": {"description": "Authentication required"}
-                }
-            }
-        }
-    }
+  "swagger": "2.0",
+  "info": {"title": "Intermasq API", "description": "HTTP API for managing dnsmasq", "version": "1.0.0-pre"},
+  "securityDefinitions": {
+    "BearerAuth": {"type": "apiKey", "name": "Authorization", "in": "header"},
+    "ApiKeyAuth": {"type": "apiKey", "name": "X-API-Key", "in": "header"}
+  },
+  "paths": {
+    "/api/status": {"get": {"summary": "Get service status"}},
+    "/api/setup": {"post": {"summary": "Create the first administrator"}},
+    "/api/login": {"post": {"summary": "Log in"}},
+    "/api/plugins": {"get": {"summary": "List loaded plugins"}},
+    "/api/hosts": {"get": {"summary": "List static hosts"}, "post": {"summary": "Create or update a static host"}},
+    "/api/hosts/next-ip": {"get": {"summary": "Suggest the next free IP"}},
+    "/api/hosts/apply-template": {"post": {"summary": "Apply a host template"}},
+    "/api/hosts/bulk": {"post": {"summary": "Import hosts in bulk"}},
+    "/api/hosts/bulk-move": {"post": {"summary": "Move hosts to another file"}},
+    "/api/hosts/bulk-edit": {"post": {"summary": "Edit hosts in bulk"}},
+    "/api/hosts/csv": {"get": {"summary": "Export hosts as CSV"}, "post": {"summary": "Import hosts from CSV"}},
+    "/api/hosts/{mac}": {"delete": {"summary": "Delete a static host", "parameters": [{"name": "mac", "in": "path", "required": true, "type": "string"}]}},
+    "/api/leases": {"get": {"summary": "List DHCP leases"}},
+    "/api/arp": {"get": {"summary": "Get ARP table"}},
+    "/api/new-devices": {"get": {"summary": "List newly detected devices"}},
+    "/api/leases/to-static": {"post": {"summary": "Move leases to static hosts"}},
+    "/api/aliases": {"get": {"summary": "List DNS records"}, "post": {"summary": "Create a DNS record"}},
+    "/api/aliases/bulk": {"post": {"summary": "Import DNS records in bulk"}},
+    "/api/aliases/delete": {"post": {"summary": "Delete a DNS record"}},
+    "/api/aliases/csv": {"get": {"summary": "Export DNS records as CSV"}, "post": {"summary": "Import DNS records from CSV"}},
+    "/api/templates": {"get": {"summary": "List host templates"}, "post": {"summary": "Create a host template"}},
+    "/api/templates/{id}": {"delete": {"summary": "Delete a host template", "parameters": [{"name": "id", "in": "path", "required": true, "type": "string"}]}},
+    "/api/templates/ranges": {"get": {"summary": "List DHCP ranges"}},
+    "/api/config": {"get": {"summary": "Get dnsmasq configuration"}, "put": {"summary": "Update dnsmasq configuration"}},
+    "/api/config/file": {"post": {"summary": "Create a configuration file"}, "delete": {"summary": "Delete a configuration file"}},
+    "/api/config/templates": {"get": {"summary": "List configuration templates"}},
+    "/api/files/{name}": {"get": {"summary": "Read a configuration file"}, "put": {"summary": "Write a configuration file"}},
+    "/api/history": {"get": {"summary": "List configuration history"}},
+    "/api/history/diff": {"get": {"summary": "Compare configuration versions"}},
+    "/api/history/restore": {"post": {"summary": "Restore a configuration version"}},
+    "/api/rollback": {"post": {"summary": "Roll back the last configuration change"}},
+    "/api/reload": {"post": {"summary": "Validate and reload dnsmasq"}},
+    "/api/backup": {"get": {"summary": "Download a configuration backup"}},
+    "/api/backup/restore": {"post": {"summary": "Restore a configuration backup"}},
+    "/api/users": {"get": {"summary": "List users"}, "post": {"summary": "Create a user"}},
+    "/api/users/{name}": {"delete": {"summary": "Delete a user", "parameters": [{"name": "name", "in": "path", "required": true, "type": "string"}]}},
+    "/api/users/password": {"post": {"summary": "Change the current user's password"}},
+    "/api/logout": {"post": {"summary": "Log out and revoke the current token"}},
+    "/api/events": {"get": {"summary": "Subscribe to server-sent events"}},
+    "/api/audit": {"get": {"summary": "Read the audit log"}},
+    "/api/restart-self": {"post": {"summary": "Restart Intermasq"}}
+  }
 }

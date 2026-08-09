@@ -14,49 +14,52 @@ const docTemplate = `{
     },
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
+    "securityDefinitions": {
+        "BearerAuth": {"type": "apiKey", "name": "Authorization", "in": "header"},
+        "ApiKeyAuth": {"type": "apiKey", "name": "X-API-Key", "in": "header"}
+    },
     "paths": {
-        "/api/status": {
-            "get": {
-                "summary": "Get service status",
-                "tags": ["system"],
-                "responses": {
-                    "200": {"description": "Service status"}
-                }
-            }
-        },
-        "/api/login": {
-            "post": {
-                "summary": "Log in",
-                "tags": ["auth"],
-                "consumes": ["application/json"],
-                "produces": ["application/json"],
-                "responses": {
-                    "200": {"description": "JWT token"},
-                    "401": {"description": "Invalid credentials"}
-                }
-            }
-        },
-        "/api/hosts": {
-            "get": {
-                "summary": "List static hosts",
-                "tags": ["hosts"],
-                "responses": {
-                    "200": {"description": "Static hosts"},
-                    "401": {"description": "Authentication required"}
-                }
-            },
-            "post": {
-                "summary": "Create or update a static host",
-                "tags": ["hosts"],
-                "consumes": ["application/json"],
-                "produces": ["application/json"],
-                "responses": {
-                    "200": {"description": "Host saved"},
-                    "400": {"description": "Invalid host"},
-                    "401": {"description": "Authentication required"}
-                }
-            }
-        }
+        "/api/status": {"get": {"summary": "Get service status", "tags": ["system"], "responses": {"200": {"description": "Service status"}}}},
+        "/api/setup": {"post": {"summary": "Create the first administrator", "tags": ["auth"], "responses": {"200": {"description": "User created"}, "400": {"description": "Setup is not available"}}}},
+        "/api/login": {"post": {"summary": "Log in", "tags": ["auth"], "consumes": ["application/json"], "produces": ["application/json"], "responses": {"200": {"description": "JWT token"}, "401": {"description": "Invalid credentials"}}}},
+        "/api/plugins": {"get": {"summary": "List loaded plugins", "tags": ["system"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Loaded plugins"}}}},
+        "/api/hosts": {"get": {"summary": "List static hosts", "tags": ["hosts"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Static hosts"}}}, "post": {"summary": "Create or update a static host", "tags": ["hosts"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Host saved"}}}},
+        "/api/hosts/next-ip": {"get": {"summary": "Suggest the next free IP", "tags": ["hosts"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Next IP"}}}},
+        "/api/hosts/apply-template": {"post": {"summary": "Apply a host template", "tags": ["hosts"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Host updated"}}}},
+        "/api/hosts/bulk": {"post": {"summary": "Import hosts in bulk", "tags": ["hosts"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Hosts imported"}}}},
+        "/api/hosts/bulk-move": {"post": {"summary": "Move hosts to another file", "tags": ["hosts"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Hosts moved"}}}},
+        "/api/hosts/bulk-edit": {"post": {"summary": "Edit hosts in bulk", "tags": ["hosts"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Hosts updated"}}}},
+        "/api/hosts/csv": {"get": {"summary": "Export hosts as CSV", "tags": ["hosts"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "CSV file"}}}, "post": {"summary": "Import hosts from CSV", "tags": ["hosts"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Hosts imported"}}}},
+        "/api/hosts/{mac}": {"delete": {"summary": "Delete a static host", "tags": ["hosts"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "parameters": [{"name": "mac", "in": "path", "required": true, "type": "string"}], "responses": {"200": {"description": "Host deleted"}}}},
+        "/api/leases": {"get": {"summary": "List DHCP leases", "tags": ["network"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "DHCP leases"}}}},
+        "/api/arp": {"get": {"summary": "Get ARP table", "tags": ["network"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "ARP table"}}}},
+        "/api/new-devices": {"get": {"summary": "List newly detected devices", "tags": ["network"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Unknown devices"}}}},
+        "/api/leases/to-static": {"post": {"summary": "Move leases to static hosts", "tags": ["network"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Leases converted"}}}},
+        "/api/aliases": {"get": {"summary": "List DNS records", "tags": ["dns"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "DNS records"}}}, "post": {"summary": "Create a DNS record", "tags": ["dns"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Record saved"}}}},
+        "/api/aliases/bulk": {"post": {"summary": "Import DNS records in bulk", "tags": ["dns"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Records imported"}}}},
+        "/api/aliases/delete": {"post": {"summary": "Delete a DNS record", "tags": ["dns"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Record deleted"}}}},
+        "/api/aliases/csv": {"get": {"summary": "Export DNS records as CSV", "tags": ["dns"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "CSV file"}}}, "post": {"summary": "Import DNS records from CSV", "tags": ["dns"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Records imported"}}}},
+        "/api/templates": {"get": {"summary": "List host templates", "tags": ["templates"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Templates"}}}, "post": {"summary": "Create a host template", "tags": ["templates"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Template created"}}}},
+        "/api/templates/{id}": {"delete": {"summary": "Delete a host template", "tags": ["templates"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "parameters": [{"name": "id", "in": "path", "required": true, "type": "string"}], "responses": {"200": {"description": "Template deleted"}}}},
+        "/api/templates/ranges": {"get": {"summary": "List DHCP ranges", "tags": ["templates"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "DHCP ranges"}}}},
+        "/api/config": {"get": {"summary": "Get dnsmasq configuration", "tags": ["config"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Configuration"}}}, "put": {"summary": "Update dnsmasq configuration", "tags": ["config"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Configuration updated"}}}},
+        "/api/config/file": {"post": {"summary": "Create a configuration file", "tags": ["config"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "File created"}}}, "delete": {"summary": "Delete a configuration file", "tags": ["config"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "File deleted"}}}},
+        "/api/config/templates": {"get": {"summary": "List configuration templates", "tags": ["config"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Configuration templates"}}}},
+        "/api/files/{name}": {"get": {"summary": "Read a configuration file", "tags": ["config"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "parameters": [{"name": "name", "in": "path", "required": true, "type": "string"}], "responses": {"200": {"description": "File contents"}}}, "put": {"summary": "Write a configuration file", "tags": ["config"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "parameters": [{"name": "name", "in": "path", "required": true, "type": "string"}], "responses": {"200": {"description": "File updated"}}}},
+        "/api/history": {"get": {"summary": "List configuration history", "tags": ["config"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "History"}}}},
+        "/api/history/diff": {"get": {"summary": "Compare configuration versions", "tags": ["config"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Diff"}}}},
+        "/api/history/restore": {"post": {"summary": "Restore a configuration version", "tags": ["config"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Version restored"}}}},
+        "/api/rollback": {"post": {"summary": "Roll back the last configuration change", "tags": ["config"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Configuration rolled back"}}}},
+        "/api/reload": {"post": {"summary": "Validate and reload dnsmasq", "tags": ["system"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Reload completed"}}}},
+        "/api/backup": {"get": {"summary": "Download a configuration backup", "tags": ["config"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "ZIP archive"}}}},
+        "/api/backup/restore": {"post": {"summary": "Restore a configuration backup", "tags": ["config"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Backup restored"}}}},
+        "/api/users": {"get": {"summary": "List users", "tags": ["users"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Users"}}}, "post": {"summary": "Create a user", "tags": ["users"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "User created"}}}},
+        "/api/users/{name}": {"delete": {"summary": "Delete a user", "tags": ["users"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "parameters": [{"name": "name", "in": "path", "required": true, "type": "string"}], "responses": {"200": {"description": "User deleted"}}}},
+        "/api/users/password": {"post": {"summary": "Change the current user's password", "tags": ["users"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Password changed"}}}},
+        "/api/logout": {"post": {"summary": "Log out and revoke the current token", "tags": ["auth"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Logged out"}}}},
+        "/api/events": {"get": {"summary": "Subscribe to server-sent events", "tags": ["system"], "produces": ["text/event-stream"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "SSE event stream"}}}},
+        "/api/audit": {"get": {"summary": "Read the audit log", "tags": ["system"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Audit events"}}}},
+        "/api/restart-self": {"post": {"summary": "Restart Intermasq", "tags": ["system"], "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}], "responses": {"200": {"description": "Restart scheduled"}}}}
     }
 }`
 
