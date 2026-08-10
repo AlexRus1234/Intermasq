@@ -60,7 +60,11 @@ for f in isolinux.bin ldlinux.c32 isohdpfx.bin; do
 done
 if [ "$need_syslinux" -eq 1 ]; then
 	SYSLINUX_TMP="$(mktemp -d)"
-	apk add --allow-untrusted --no-cache --root "$SYSLINUX_TMP" --initdb \
+	# --no-scripts: на не-Alpine хосте apk исполняет post-install в chroot
+	# rootfs, где /bin/sh ещё не установлен → execve ENOENT. Для syslinux
+	# скрипты не нужны — нужны только статические файлы изолинукса.
+	apk add --allow-untrusted --no-scripts --no-cache \
+		--root "$SYSLINUX_TMP" --initdb \
 		--keys-dir /etc/apk/keys \
 		--repositories-file /etc/apk/repositories syslinux
 	mkdir -p /usr/share/syslinux
@@ -88,12 +92,16 @@ echo "  INTERMASQ_ALLOW_UNTRUSTED=1 (apk --keys-dir is root-relative," \
 	"so host keyring is invisible to --root; CDN trust is sufficient)"
 
 # build.env теперь использует ${VAR:-default} → env-вары перебивают дефолты.
-# INTERMASQ_ALLOW_UNTRUSTED включает ${VAR:+--allow-untrusted} в build-inside.sh
-# (для обычного podman-билда на Alpine переменная не задана → поведение то же).
+# INTERMASQ_ALLOW_UNTRUSTED: apk --keys-dir разрешается относительно --root,
+#   хостовый keyring невидим → верим CDN.
+# INTERMASQ_NO_SCRIPTS: на fedora post-install скрипты падают (apk запускает
+#   их в chroot, где /bin/sh ещё не существует до установки busybox-binsh).
+#   build-inside.sh после apk вручную делает `busybox --install -s`.
 INTERMASQ_RELEASE="$RELEASE" \
 INTERMASQ_BINARY_URL="file:///src/$BINARY_BASENAME" \
 INTERMASQ_BINARY_SHA256="$BINARY_SHA256" \
 INTERMASQ_ALLOW_UNTRUSTED=1 \
+INTERMASQ_NO_SCRIPTS=1 \
 ALPINE_ARCH=x86_64 \
 sh /src/distro/build-inside.sh
 echo "::endgroup::"

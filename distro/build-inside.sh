@@ -13,12 +13,21 @@ ISO_ROOT="$BUILD_DIR/iso"
 rm -rf "$BUILD_DIR"
 mkdir -p "$ROOTFS" "$INITRAMFS" "$ISO_ROOT/boot" "$ISO_ROOT/isolinux" "$OUTPUT_DIR"
 
-apk --root "$ROOTFS" --initdb ${INTERMASQ_ALLOW_UNTRUSTED:+--allow-untrusted} \
+apk --root "$ROOTFS" --initdb \
+	${INTERMASQ_ALLOW_UNTRUSTED:+--allow-untrusted} \
+	${INTERMASQ_NO_SCRIPTS:+--no-scripts} \
 	--keys-dir /etc/apk/keys \
 	--repositories-file /etc/apk/repositories \
 	add --no-cache \
 	alpine-base apk-tools bash ca-certificates curl dnsmasq iproute2 \
 	linux-virt mkinitfs openssh openssl openrc socat
+
+# При --no-scripts (CI на не-Alpine хосте) applet-симлинки busybox
+# (включая /bin/sh) не создаются post-install'ом. Восстанавливаем вручную:
+# musl уже в rootfs, поэтому chroot + busybox запустится.
+if [ -n "${INTERMASQ_NO_SCRIPTS:-}" ] && [ -x "$ROOTFS/bin/busybox" ]; then
+	chroot "$ROOTFS" /bin/busybox --install -s
+fi
 
 cp -a "$SCRIPT_DIR/rootfs/." "$ROOTFS/"
 install -d -m 0755 "$ROOTFS/usr/local/lib" "$ROOTFS/usr/local/sbin"
