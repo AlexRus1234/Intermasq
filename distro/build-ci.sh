@@ -63,7 +63,7 @@ if [ "$need_syslinux" -eq 1 ]; then
 	# --no-scripts: на не-Alpine хосте apk исполняет post-install в chroot
 	# rootfs, где /bin/sh ещё не установлен → execve ENOENT. Для syslinux
 	# скрипты не нужны — нужны только статические файлы изолинукса.
-	apk add --allow-untrusted --no-scripts --no-cache \
+	apk --allow-untrusted add --no-scripts --no-cache \
 		--root "$SYSLINUX_TMP" --initdb \
 		--keys-dir /etc/apk/keys \
 		--repositories-file /etc/apk/repositories syslinux
