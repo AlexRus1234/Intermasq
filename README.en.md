@@ -47,6 +47,7 @@ infrastructure is required.
 - [Configuration](#configuration)
 - [Access control](#access-control)
 - [API, plugins, and metrics](#api-plugins-and-metrics)
+- [Training lab (ISO)](#training-lab-iso)
 - [Project structure](#project-structure)
 - [Technology stack](#technology-stack)
 - [License](#license)
@@ -237,6 +238,67 @@ http://<host>:<port>/swagger/index.html
 
 ---
 
+## Training lab (ISO)
+
+The [`distro/`](distro/) directory contains a disposable training VM with three
+independent Intermasq instances — each with its own network, dnsmasq,
+mock devices, leases, and DNS records. The lab is built with a single Podman
+command and produces a bootable ISO (~88 MB).
+
+### Requirements
+
+| Component | Version | Purpose |
+|---|---|---|
+| **Podman** | 6.0.2+ | Build the ISO |
+| **WSL2** | — | Windows only |
+
+Go, Node.js, Packer, Docker, and a local Alpine SDK are **not required** — the
+build downloads a verified release binary and uses only open tools.
+
+### Build
+
+```bash
+# Linux / macOS
+./distro/build.sh
+
+# Windows PowerShell (uses WSL, not Hyper-V)
+.\distro\build.ps1
+```
+
+Result: `distro/output/intermasq-lab-<version>-x86_64.iso`.
+
+### Run
+
+Boot the ISO in any hypervisor. The network adapter must be paravirtualized:
+
+| Hypervisor | Adapter type |
+|---|---|
+| Proxmox / KVM / QEMU | **VirtIO** (default) |
+| VMware | **VMXNET3** |
+| VirtualBox 6+ | **Paravirtualized Network** |
+| Hyper-V | **Default Network Adapter** |
+
+After boot, the VM prints the IP address and panel URLs on the console.
+
+### Access
+
+| Profile | Port | Purpose |
+|---|---:|---|
+| office | `8082` | DHCP, static hosts, DNS |
+| lab | `8083` | configuration, restore |
+| demo | `8084` | discovery, SSE, plugins, metrics |
+
+```text
+Panels:  admin / intermasq-lab
+         operator / operator-lab (RBAC)
+SSH:     root / intermasq-lab
+```
+
+Step-by-step GUI walkthrough: [`distro/MANUAL.en.md`](distro/MANUAL.en.md).
+Full build and run instructions: [`distro/README.en.md`](distro/README.en.md).
+
+---
+
 ## Project structure
 
 ```
@@ -261,6 +323,7 @@ http://<host>:<port>/swagger/index.html
 │   └── webapi/             # HTTP handlers and /api/* route registration
 ├── docs/                   # OpenAPI and user documentation
 ├── frontend/               # Vue 3 SPA (Vite, Bootstrap 5, vue-i18n)
+├── distro/                 # Training ISO lab (built via Podman)
 ├── .forgejo/workflows/     # CI: build, tests, smoke, optional fuzz/e2e/L5 VM
 ├── tests/                  # Smoke suites, Playwright E2E, performance, L5 VMs
 ├── LICENSE                 # GNU AGPL v3

@@ -47,6 +47,7 @@ Intermasq представляет собой автономное веб-при
 - [Конфигурация](#конфигурация)
 - [Права доступа](#права-доступа)
 - [API, плагины и метрики](#api-плагины-и-метрики)
+- [Учебная лаборатория (ISO)](#учебная-лаборатория-iso)
 - [Структура проекта](#структура-проекта)
 - [Технологический стек](#технологический-стек)
 - [Лицензия](#лицензия)
@@ -242,6 +243,68 @@ http://<host>:<port>/swagger/index.html
 
 ---
 
+## Учебная лаборатория (ISO)
+
+Каталог [`distro/`](distro/) содержит одноразовую учебную VM с тремя
+независимыми экземплярами Intermasq — каждый со своей сетью, dnsmasq,
+mock-устройствами, leases и DNS-записями. Лаборатория запускается одной
+командой через Podman и собирается в загрузочный ISO (~88 МБ).
+
+### Требования
+
+| Компонент | Версия | Назначение |
+|---|---|---|
+| **Podman** | 6.0.2+ | Сборка ISO |
+| **WSL2** | — | Только для Windows |
+
+Go, Node.js, Packer, Docker и локальный Alpine SDK **не требуются** — сборка
+скачивает проверенный release-бинарник и использует только открытые инструменты.
+
+### Сборка
+
+```bash
+# Linux / macOS
+./distro/build.sh
+
+# Windows PowerShell (использует WSL, не Hyper-V)
+.\distro\build.ps1
+```
+
+Результат: `distro/output/intermasq-lab-<version>-x86_64.iso`.
+
+### Запуск
+
+Загрузите ISO в любом гипервизоре. Сетевой адаптер должен быть
+паравиртуализированным:
+
+| Гипервизор | Тип адаптера |
+|---|---|
+| Proxmox / KVM / QEMU | **VirtIO** (по умолчанию) |
+| VMware | **VMXNET3** |
+| VirtualBox 6+ | **Paravirtualized Network** |
+| Hyper-V | **Default Network Adapter** |
+
+После загрузки на консоль выводятся IP-адрес и URL панелей.
+
+### Доступ
+
+| Профиль | Порт | Назначение |
+|---|---:|---|
+| office | `8082` | DHCP, статика, DNS |
+| lab | `8083` | конфигурация, восстановление |
+| demo | `8084` | discovery, SSE, плагины, метрики |
+
+```text
+Панели:  admin / intermasq-lab
+         operator / operator-lab (RBAC)
+SSH:     root / intermasq-lab
+```
+
+Пошаговое руководство по проверке GUI — в [`distro/MANUAL.md`](distro/MANUAL.md).
+Полное описание сборки и запуска — в [`distro/README.md`](distro/README.md).
+
+---
+
 ## Структура проекта
 
 ```
@@ -266,6 +329,7 @@ http://<host>:<port>/swagger/index.html
 │   └── webapi/             # HTTP-обработчики + регистрация роутов (/api/*)
 ├── docs/                   # OpenAPI и пользовательская документация
 ├── frontend/               # Vue 3 SPA (Vite, Bootstrap 5, vue-i18n)
+├── distro/                 # Учебная ISO-лаборатория (сборка через Podman)
 ├── .forgejo/workflows/     # CI: сборка, тесты, smoke, опц. fuzz/e2e/L5-ВМ
 ├── tests/                  # Smoke-сьюты, Playwright E2E, perf, L5 (живые ВМ)
 ├── LICENSE                 # GNU AGPL v3
