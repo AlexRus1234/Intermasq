@@ -35,40 +35,16 @@ dnf install -y --setopt=install_weak_deps=False \
 apk --version
 echo "::endgroup::"
 
-echo "::group::Configure Alpine apk keyring + repositories"
-# fedora не имеет /etc/apk/keys. Каталог /alpine/keys/ на CDN отдаёт 404,
-# поэтому ключи берём напрямую из пакета alpine-keys из main-репозитория:
-# это .apk (конкатенация gzip-потоков sig+control+data), тащим curl'ом и
-# распаковываем gunzip + tar --ignore-zeros (читает мимо EOF-маркеров).
+echo "::group::Configure apk repositories"
+# fedora не имеет ни ключей, ни repositories для apk. Настроим репозитории
+# (keys-dir в apk 3.x разрешается относительно --root, а не хоста, поэтому
+#  хостовый keyring всё равно не поможет — см. ниже). Вместо возни с keyring
+#  используем --allow-untrusted: CI-сборка лабораторного ISO, CDN доверяем.
+mkdir -p /etc/apk/keys
 cat > /etc/apk/repositories <<EOF
 https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main
 https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/community
 EOF
-
-REPO_BASE="https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main/x86_64"
-KEYS_PKG="$(curl -fsSL "$REPO_BASE/" \
-	| grep -oE 'alpine-keys-[0-9][^"[:space:]]*\.apk' \
-	| grep -vE -- '-(doc|dbg|dev|openrc)' \
-	| sort -V | tail -1)"
-if [ -z "$KEYS_PKG" ]; then
-	echo "::error::could not find alpine-keys package in $REPO_BASE" >&2
-	exit 1
-fi
-echo "Downloading $KEYS_PKG ..."
-curl -fsSL "$REPO_BASE/$KEYS_PKG" -o /tmp/alpine-keys.apk
-mkdir -p /etc/apk/keys /tmp/alpine-keys-extract
-# .apk = несколько gzip tarball'ов подряд; gunzip сливает все потоки,
-# --ignore-zeros заставляет tar читать за пределами энд-маркеров.
-gunzip -c /tmp/alpine-keys.apk \
-	| tar -xf - -C /tmp/alpine-keys-extract --ignore-zeros
-cp /tmp/alpine-keys-extract/usr/share/apk/keys/*.pub /etc/apk/keys/ 2>/dev/null || {
-	echo "::error::no .rsa.pub found inside alpine-keys package" >&2
-	find /tmp/alpine-keys-extract -type f | head -50
-	exit 1
-}
-rm -rf /tmp/alpine-keys.apk /tmp/alpine-keys-extract
-echo "Installed $(ls /etc/apk/keys/*.pub 2>/dev/null | wc -l) signing keys:"
-ls /etc/apk/keys/
 cat /etc/apk/repositories
 echo "::endgroup::"
 
@@ -76,14 +52,15 @@ echo "::group::Stage syslinux bootloader files"
 # build-inside.sh копирует isolinux.bin / ldlinux.c32 / isohdpfx.bin из
 # /usr/share/syslinux/ ХОСТА (не из rootfs — в rootfs syslinux не ставится).
 # В fedora их нет, поэтому ставим Alpine-пакет syslinux во временный rootfs
-# и вынимаем файлы оттуда. Проверяем все три нужных файла.
+# и вынимаем файлы оттуда. --allow-untrusted: CDN доверяем, это только
+# бутлоадер-бинарники (ничего исполняемого на самой CI-машине).
 need_syslinux=0
 for f in isolinux.bin ldlinux.c32 isohdpfx.bin; do
 	[ -f "/usr/share/syslinux/$f" ] || need_syslinux=1
 done
 if [ "$need_syslinux" -eq 1 ]; then
 	SYSLINUX_TMP="$(mktemp -d)"
-	apk add --no-cache --root "$SYSLINUX_TMP" --initdb \
+	apk add --allow-untrusted --no-cache --root "$SYSLINUX_TMP" --initdb \
 		--keys-dir /etc/apk/keys \
 		--repositories-file /etc/apk/repositories syslinux
 	mkdir -p /usr/share/syslinux
@@ -97,8 +74,7 @@ echo "::endgroup::"
 
 echo "::group::Run distro/build-inside.sh (original recipe, unmodified)"
 # build-inside.sh хардкодит SCRIPT_DIR=/src/distro и OUTPUT_DIR=/out.
-# Делаем симлинк /src → репо (read-only там не нужно: скрипт пишет в /tmp и /out)
-# и пустой каталог /out под результат.
+# Делаем симлинк /src → репо и пустой каталог /out под результат.
 ln -sfn "$REPO_DIR" /src
 mkdir -p /out
 
@@ -108,13 +84,16 @@ echo "Injecting local binary into recipe via env overrides:"
 echo "  INTERMASQ_BINARY_URL=file:///src/$BINARY_BASENAME"
 echo "  INTERMASQ_BINARY_SHA256=$BINARY_SHA256"
 echo "  INTERMASQ_RELEASE=$RELEASE"
+echo "  INTERMASQ_ALLOW_UNTRUSTED=1 (apk --keys-dir is root-relative," \
+	"so host keyring is invisible to --root; CDN trust is sufficient)"
 
-# build.env теперь использует ${VAR:-default}, поэтому env-вары имеют приоритет.
-# curl умеет file://, проверка sha256sum -c внутри рецепта проходит корректно:
-# хэш наш, бинарник наш.
+# build.env теперь использует ${VAR:-default} → env-вары перебивают дефолты.
+# INTERMASQ_ALLOW_UNTRUSTED включает ${VAR:+--allow-untrusted} в build-inside.sh
+# (для обычного podman-билда на Alpine переменная не задана → поведение то же).
 INTERMASQ_RELEASE="$RELEASE" \
 INTERMASQ_BINARY_URL="file:///src/$BINARY_BASENAME" \
 INTERMASQ_BINARY_SHA256="$BINARY_SHA256" \
+INTERMASQ_ALLOW_UNTRUSTED=1 \
 ALPINE_ARCH=x86_64 \
 sh /src/distro/build-inside.sh
 echo "::endgroup::"

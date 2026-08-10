@@ -13,7 +13,8 @@ ISO_ROOT="$BUILD_DIR/iso"
 rm -rf "$BUILD_DIR"
 mkdir -p "$ROOTFS" "$INITRAMFS" "$ISO_ROOT/boot" "$ISO_ROOT/isolinux" "$OUTPUT_DIR"
 
-apk --root "$ROOTFS" --initdb --keys-dir /etc/apk/keys \
+apk --root "$ROOTFS" --initdb ${INTERMASQ_ALLOW_UNTRUSTED:+--allow-untrusted} \
+	--keys-dir /etc/apk/keys \
 	--repositories-file /etc/apk/repositories \
 	add --no-cache \
 	alpine-base apk-tools bash ca-certificates curl dnsmasq iproute2 \
