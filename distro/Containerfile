@@ -1,0 +1,18 @@
+FROM alpine:3.24.1
+
+RUN apk add --no-cache \
+    alpine-base \
+    apk-tools \
+    bash \
+    ca-certificates \
+    cpio \
+    curl \
+    gzip \
+    linux-virt \
+    mkinitfs \
+    openssl \
+    openrc \
+    syslinux \
+    xorriso
+
+WORKDIR /src

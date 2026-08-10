@@ -5,6 +5,21 @@ description="Disposable Intermasq namespace laboratory"
 
 . /etc/intermasq-lab/lab.conf
 
+LAB_UPLINK=
+
+depend() {
+	need networking
+}
+
+setup_uplink() {
+	LAB_UPLINK=$(ip -o link show | awk -F': ' '$2 != "lo" {print $2; exit}')
+	[ -n "$LAB_UPLINK" ] || return 1
+	ip link set "$LAB_UPLINK" up || return 1
+	if ! ip -4 addr show dev "$LAB_UPLINK" | grep -q 'inet '; then
+		udhcpc -i "$LAB_UPLINK" -n -q >/dev/null 2>&1 || return 1
+	fi
+}
+
 instance_dir() {
 	echo "$LAB_ROOT/$1"
 }
@@ -182,6 +197,7 @@ start_instance() {
 
 	dir=$(instance_dir "$name")
 	mkdir -p "$dir/conf" "$dir/data" "$dir/history" || return 1
+	chmod 755 "$dir" || return 1
 	chown dnsmasq:dnsmasq "$dir/data" || return 1
 	for seed in /etc/intermasq-lab/seed/"$name"/*.conf; do
 		[ -f "$seed" ] || continue
@@ -197,6 +213,7 @@ start_instance() {
 		cp "/etc/intermasq-lab/templates/$name.json" "$dir/data/templates.json" || return 1
 	fi
 	mkdir -p "$dir/tftp" || return 1
+	chown dnsmasq:dnsmasq "$dir/tftp" || return 1
 	ensure_secret "$dir/data/secret" || return 1
 	secret=$(cat "$dir/data/secret")
 
@@ -272,10 +289,24 @@ stop_pidfile() {
 
 start() {
 	ebegin "Starting Intermasq lab"
+	setup_uplink || { eend 1; return 1; }
 	start_instance office im1 dev1 lab1-br 8082 10.10.1.0/24 10.10.1.1 10.10.1.254/24 office.test 10.10.1.10 02:00:00:01:10:01 o-h o-d dev1u 10.10.1.20 00:03:93:00:00:01 o-uh o-ud dev1l 02:00:00:01:20:01 o-l o-ld || { eend 1; return 1; }
 	start_instance lab im2 dev2 lab2-br 8083 10.10.2.0/24 10.10.2.1 10.10.2.254/24 lab.test 10.10.2.10 02:00:00:02:10:01 l-h l-d dev2u 10.10.2.20 00:1e:c2:00:00:01 l-uh l-ud dev2l 02:00:00:02:20:01 l-l l-ld || { eend 1; return 1; }
 	start_instance demo im3 dev3 lab3-br 8084 10.10.3.0/24 10.10.3.1 10.10.3.254/24 demo.test 10.10.3.10 02:00:00:03:10:01 d-h d-d dev3u 10.10.3.20 52:54:00:00:00:01 d-uh d-ud dev3l 02:00:00:03:20:01 d-l d-ld || { eend 1; return 1; }
 	eend 0
+	print_access
+}
+
+print_access() {
+	local address
+	address=$(ip -4 -o addr show dev "$LAB_UPLINK" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n 1)
+	printf '\nIntermasq Lab network: %s=%s\n' "$LAB_UPLINK" "${address:-NO-DHCP-ADDRESS}"
+	if [ -n "$address" ]; then
+		printf 'Panels: http://%s:8082  http://%s:8083  http://%s:8084\n' "$address" "$address" "$address"
+	else
+		printf 'No DHCP address was assigned. Check that the VM network adapter is connected.\n'
+		printf 'Console command: ip addr show %s\n' "$LAB_UPLINK"
+	fi
 }
 
 stop() {

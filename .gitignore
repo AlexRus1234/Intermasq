@@ -66,3 +66,6 @@ npm-debug.log*
 # Final code-review plan + per-session reports — strictly local, never commit
 рефакторинг/finsmotr/
 логи/finsmotr/
+
+# Distro build output (ISO, checksums)
+distro/output/

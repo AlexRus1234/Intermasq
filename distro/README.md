@@ -1,42 +1,133 @@
-# Intermasq Lab Distribution
+<!--
+Intermasq - Web panel for dnsmasq
+Copyright (C) 2026 AlexRus1234
 
-This directory is the build context for the disposable Intermasq laboratory.
-The ISO/image builder is intentionally not included yet.
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-## Layout
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
 
-- `manifest.yaml` describes the VM and laboratory topology.
-- `MANUAL.md` is the step-by-step GUI coverage walkthrough.
-- `rootfs/etc/intermasq-lab/lab.conf` contains runtime paths and instance data.
-- `rootfs/etc/intermasq-lab/seed/` contains per-profile managed config files.
-- `rootfs/etc/intermasq-lab/dnsmasq/` contains the seed dnsmasq configurations.
-- `rootfs/etc/intermasq-lab/devices/` contains static mock devices and DNS names.
-- `rootfs/etc/intermasq-lab/templates/` contains host-template examples.
-- `rootfs/etc/intermasq/plugins/` contains the Unix-socket demo plugin.
-- `rootfs/etc/init.d/intermasq-lab` creates namespaces and starts the lab.
-- `rootfs/usr/local/sbin/intermasq-lab-heartbeat` keeps selected mock devices
-  visible in the ARP table as online.
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+-->
 
-The runtime expects Alpine Linux with `iproute2`, `dnsmasq`, `socat`, `openssl`,
-and the Intermasq binary installed at `/usr/local/lib/intermasq`.
+**Русский** | [English](README.en.md) |
 
-The service is designed for a disposable VM. It generates per-instance secrets
-on first start and keeps all mutable state below `/var/lib/intermasq-lab`.
-It also creates the first `admin` user automatically. Generated credentials are
-stored in `/var/lib/intermasq-lab/<instance>/data/credentials.txt` with mode
-`0600`. This disposable lab intentionally uses public test credentials:
+# Дистрибутив лаборатории Intermasq
+
+Этот каталог — контекст сборки одноразовой учебной ISO-лаборатории Intermasq.
+
+## Структура
+
+- `manifest.yaml` — топология VM и лаборатории.
+- `MANUAL.md` — пошаговое руководство для проверки GUI.
+- `build.sh` — команда сборки для Linux/macOS.
+- `build.ps1` — команда сборки для Windows.
+- `Containerfile` — воспроизводимая среда сборки.
+- `build-inside.sh` — создание initramfs и загрузочного ISO.
+- `build.env` — фиксация версий Alpine и бинарника Intermasq.
+- `rootfs/etc/intermasq-lab/lab.conf` — пути и параметры экземпляров.
+- `rootfs/etc/intermasq-lab/seed/` — конфиги dnsmasq для каждого профиля.
+- `rootfs/etc/intermasq-lab/dnsmasq/` — базовые конфигурации dnsmasq.
+- `rootfs/etc/intermasq-lab/devices/` — статические mock-устройства и DNS.
+- `rootfs/etc/intermasq-lab/templates/` — шаблоны хостов.
+- `rootfs/etc/intermasq/plugins/` — демонстрационный плагин (Unix-сокет).
+- `rootfs/etc/init.d/intermasq-lab` — создание неймспейсов и запуск лаборатории.
+- `rootfs/usr/local/sbin/intermasq-lab-heartbeat` — удержание mock-устройств
+  в ARP-таблице.
+
+Среда выполнения: Alpine Linux с `iproute2`, `dnsmasq`, `socat`, `openssl`
+и бинарником Intermasq в `/usr/local/lib/intermasq`.
+
+Сервис рассчитан на одноразовую VM. При первом старте генерируются секреты
+для каждого экземпляра; всё изменяемое состояние хранится в
+`/var/lib/intermasq-lab`. Учётная запись `admin` создаётся автоматически.
+Учётные данные сохраняются в
+`/var/lib/intermasq-lab/<instance>/data/credentials.txt` с правами `0600`.
+Лаборатория использует публичные тестовые учётные данные:
 `admin` / `intermasq-lab`.
 
-Each network has two static mock devices. The first device is active and should
-show the green online indicator; the second intentionally remains offline.
+В каждой сети два mock-устройства: первое активно (зелёная лампочка online),
+второе намеренно offline.
 
-## Planned build flow
+## Сборка ISO
 
-```text
-manifest.yaml + rootfs/ + Intermasq binary
-    -> future image builder
-    -> ISO / qcow2 / OVA
+Требуется Podman `6.0.2` или новее. Go, Node.js, Packer, Docker, Podman
+Compose и локальный Alpine SDK не нужны.
+
+- **Linux**: любой запущенный движок Podman (system или rootless).
+- **macOS**: Podman Machine с провайдером по умолчанию.
+- **Windows**: требуется WSL2; скрипт использует Podman-машину по умолчанию
+  и автоматически создаёт WSL-машину при отсутствии. Hyper-V не нужен.
+
+Linux / macOS:
+
+```sh
+./distro/build.sh
 ```
 
-The current files can be installed manually into the prototype VM before the
-image builder is implemented.
+Windows PowerShell:
+
+```powershell
+.\distro\build.ps1
+```
+
+Результат записывается в `distro/output/` (ISO ≈ 88 МБ). Сборка скачивает
+проверенный release-бинарник Intermasq, проверяет SHA-256, создаёт Alpine
+rootfs, упаковывает в initramfs и формирует загрузочный ISO через Syslinux
+и xorriso.
+
+## Запуск ISO
+
+Загрузите ISO в любом гипервизоре. Сетевой адаптер VM должен быть
+паравиртуализированным:
+
+| Гипервизор | Тип адаптера |
+|---|---|
+| Proxmox / KVM / QEMU | **VirtIO (paravirtualized)** — по умолчанию |
+| VMware | **VMXNET3** |
+| VirtualBox 6+ | **Paravirtualized Network (virtio-net)** |
+| Hyper-V | **Default Network Adapter (synthetic)** |
+
+Ядро не содержит драйверов e1000/pcnet32/rtl8139.
+
+После загрузки VM автоматически определяет сетевой интерфейс, получает адрес
+по DHCP и выводит на консоль имя интерфейса, IP-адрес и URL всех трёх панелей.
+
+## Доступ
+
+| Профиль | Порт | Сеть | Назначение |
+|---|---:|---|---|
+| office | `8082` | `10.10.1.0/24` | DHCP, статика и DNS |
+| lab | `8083` | `10.10.2.0/24` | редактор конфигурации и восстановление |
+| demo | `8084` | `10.10.3.0/24` | discovery, SSE, плагин и метрики |
+
+Вход в панели (все экземпляры):
+
+```text
+admin / intermasq-lab
+operator / operator-lab   (RBAC-пользователь, ограниченные права)
+```
+
+SSH (консоль VM):
+
+```text
+root / intermasq-lab
+```
+
+## Сброс лаборатории
+
+Обычный restart сохраняет данные:
+
+```sh
+rc-service intermasq-lab restart
+```
+
+Для полного возврата к исходному состоянию: остановить сервис, удалить
+`/var/lib/intermasq-lab`, запустить заново. Это удаляет users, audit,
+history, templates и изменения конфигурации, но не трогает ISO.
