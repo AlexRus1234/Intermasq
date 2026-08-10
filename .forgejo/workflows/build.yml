@@ -34,16 +34,16 @@ on:
         required: true
         default: false
         type: boolean
-      publish_moshub:
-        description: "Create Mos.Hub Release and upload binary assets?"
-        required: true
-        default: false
-        type: boolean
       version_tag:
         description: "Fallback version when HEAD has no exact v* tag."
         required: false
         default: ""
         type: string
+      build_iso:
+        description: "Build the lab ISO from the just-built binary via Podman (uses distro/ recipe)?"
+        required: true
+        default: false
+        type: boolean
       run_race_tests:
         description: "Run go test with -race (slower, more thorough)?"
         required: true
@@ -647,6 +647,31 @@ jobs:
           cp intermasq-ci "$ARTIFACT_NAME"
           sha256sum "$ARTIFACT_NAME" | tee "${ARTIFACT_NAME}.sha256"
 
+      - name: Build lab ISO image (opt-in)
+        # Собираем ISO прямо в fedora:44 без podman — Linux есть Linux.
+        # Скрипт distro/build-ci.sh ставит apk-tools + syslinux + xorriso,
+        # настраивает Alpine keys/repos, кладёт syslinux-бутлоадеры в
+        # /usr/share/syslinux/ и гонит оригинальный distro/build-inside.sh
+        # (который использует apk --root + chroot, никаких контейнеров).
+        # Локальный бинарник прокидывается через env-овары build.env.
+        if: success() && github.event.inputs.build_iso == 'true'
+        run: |
+          set -e
+          if [ ! -x "$PWD/intermasq-ci" ]; then
+            echo "::error::intermasq-ci not found (build step must run first)"
+            exit 1
+          fi
+          INTERMASQ_RELEASE="$VERSION" \
+          INTERMASQ_CI_BINARY="$PWD/intermasq-ci" \
+          bash ./distro/build-ci.sh
+          ISO_NAME="intermasq-lab-${APP_VERSION}-x86_64.iso"
+          # Кладём финальный ISO + .sha256 в корень репо (рядом с бинарником),
+          # чтобы шаги публикации забирали их единообразно.
+          cp "distro/output/$ISO_NAME" "$ISO_NAME"
+          sha256sum "$ISO_NAME" | awk '{print $1}' > "${ISO_NAME}.sha256"
+          ls -lh "$ISO_NAME" "${ISO_NAME}.sha256"
+          echo "ISO_NAME=$ISO_NAME" >> "$GITHUB_ENV"
+
       - name: Publish to Forgejo Packages
         if: success() && github.event.inputs.push_to_registry == 'true'
         env:
@@ -655,38 +680,46 @@ jobs:
           echo "Publishing as version: $VERSION"
           ARTIFACT_NAME="intermasq-${VERSION}-linux-amd64"
 
-           curl -fSR --cacert /etc/pki/ca-trust/source/anchors/step-ca.crt \
-                --user "alexrus:${UPLOAD_TOKEN}" \
-                --upload-file "./${ARTIFACT_NAME}" \
-                "https://git.yadr00.internal/api/packages/AlexRus1234/generic/intermasq/${VERSION}/${ARTIFACT_NAME}"
+          # Бинарник + его sha256 — всегда; ISO + его sha256 — если собран.
+          PUBLISH_FILES="$ARTIFACT_NAME ${ARTIFACT_NAME}.sha256"
+          if [ -n "$ISO_NAME" ] && [ -f "$ISO_NAME" ]; then
+            PUBLISH_FILES="$PUBLISH_FILES $ISO_NAME ${ISO_NAME}.sha256"
+            echo "ISO attached: $ISO_NAME"
+          else
+            echo "ISO not built (build_iso=false) — publishing binary only"
+          fi
+          echo "Files to publish: $PUBLISH_FILES"
 
-           curl -fSR --cacert /etc/pki/ca-trust/source/anchors/step-ca.crt \
-                --user "alexrus:${UPLOAD_TOKEN}" \
-                --upload-file "./${ARTIFACT_NAME}.sha256" \
-                "https://git.yadr00.internal/api/packages/AlexRus1234/generic/intermasq/${VERSION}/${ARTIFACT_NAME}.sha256"
+          # Generic package registry: каждый файл по своему пути.
+          for FILE in $PUBLISH_FILES; do
+            curl -fSR --cacert /etc/pki/ca-trust/source/anchors/step-ca.crt \
+                 --user "alexrus:${UPLOAD_TOKEN}" \
+                 --upload-file "./${FILE}" \
+                 "https://git.yadr00.internal/api/packages/AlexRus1234/generic/intermasq/${VERSION}/${FILE}"
+          done
+          echo "Published Forgejo packages: $PUBLISH_FILES"
 
-           echo "Published Forgejo package ${ARTIFACT_NAME}"
-           API="https://git.yadr00.internal/api/v1/repos/AlexRus1234/Intermasq"
-           RELEASE_ID="$(curl -fsSL --user "alexrus:${UPLOAD_TOKEN}" \
-             "$API/releases/tags/${VERSION}" 2>/dev/null | jq -r '.id // empty' 2>/dev/null || true)"
-           if [ -z "$RELEASE_ID" ]; then
-             BODY="$(jq -n --arg tag "$VERSION" '{tag_name:$tag, name:$tag, draft:false, prerelease:($tag | test("-"))}')"
-             RELEASE="$(curl -fsSL -X POST \
-               --user "alexrus:${UPLOAD_TOKEN}" \
-               -H 'Content-Type: application/json' \
-               "$API/releases" -d "$BODY")"
-             RELEASE_ID="$(jq -r '.id' <<<"$RELEASE")"
-             test -n "$RELEASE_ID" && test "$RELEASE_ID" != "null"
-           else
-             echo "Release ${VERSION} already exists (id=${RELEASE_ID}), reusing"
-           fi
-           for FILE in "$ARTIFACT_NAME" "${ARTIFACT_NAME}.sha256"; do
-             curl -fsSL -X POST \
-               --user "alexrus:${UPLOAD_TOKEN}" \
-               -F "attachment=@${FILE}" \
-               "$API/releases/${RELEASE_ID}/assets?name=${FILE}"
-           done
-           echo "Published local Forgejo Release ${VERSION}"
+          API="https://git.yadr00.internal/api/v1/repos/AlexRus1234/Intermasq"
+          RELEASE_ID="$(curl -fsSL --user "alexrus:${UPLOAD_TOKEN}" \
+            "$API/releases/tags/${VERSION}" 2>/dev/null | jq -r '.id // empty' 2>/dev/null || true)"
+          if [ -z "$RELEASE_ID" ]; then
+            BODY="$(jq -n --arg tag "$VERSION" '{tag_name:$tag, name:$tag, draft:false, prerelease:($tag | test("-"))}')"
+            RELEASE="$(curl -fsSL -X POST \
+              --user "alexrus:${UPLOAD_TOKEN}" \
+              -H 'Content-Type: application/json' \
+              "$API/releases" -d "$BODY")"
+            RELEASE_ID="$(jq -r '.id' <<<"$RELEASE")"
+            test -n "$RELEASE_ID" && test "$RELEASE_ID" != "null"
+          else
+            echo "Release ${VERSION} already exists (id=${RELEASE_ID}), reusing"
+          fi
+          for FILE in $PUBLISH_FILES; do
+            curl -fsSL -X POST \
+              --user "alexrus:${UPLOAD_TOKEN}" \
+              -F "attachment=@${FILE}" \
+              "$API/releases/${RELEASE_ID}/assets?name=${FILE}"
+          done
+          echo "Published local Forgejo Release ${VERSION}"
 
       - name: Publish GitHub Release
         if: success() && github.event.inputs.publish_github == 'true'
@@ -698,6 +731,11 @@ jobs:
             exit 1
           fi
           ARTIFACT_NAME="intermasq-${VERSION}-linux-amd64"
+          PUBLISH_FILES="$ARTIFACT_NAME ${ARTIFACT_NAME}.sha256"
+          if [ -n "$ISO_NAME" ] && [ -f "$ISO_NAME" ]; then
+            PUBLISH_FILES="$PUBLISH_FILES $ISO_NAME ${ISO_NAME}.sha256"
+          fi
+          echo "Files to publish: $PUBLISH_FILES"
           API="https://api.github.com/repos/AlexRus1234/Intermasq"
           BODY="$(jq -n --arg tag "$VERSION" '{tag_name:$tag, name:$tag, draft:false, prerelease:($tag | test("-"))}')"
           RELEASE="$(curl -fsSL -X POST \
@@ -707,7 +745,7 @@ jobs:
             "$API/releases" -d "$BODY")"
           UPLOAD_URL="$(jq -r '.upload_url' <<<"$RELEASE" | sed 's/{?name,label}//')"
           test -n "$UPLOAD_URL" && test "$UPLOAD_URL" != "null"
-          for FILE in "$ARTIFACT_NAME" "${ARTIFACT_NAME}.sha256"; do
+          for FILE in $PUBLISH_FILES; do
             curl -fsSL -X POST \
               -H "Authorization: Bearer ${RELEASE_TOKEN}" \
               -H 'Accept: application/vnd.github+json' \
@@ -715,7 +753,7 @@ jobs:
               --data-binary "@${FILE}" \
               "${UPLOAD_URL}?name=${FILE}"
           done
-          echo "Published GitHub Release ${VERSION}"
+          echo "Published GitHub Release ${VERSION} (files: $PUBLISH_FILES)"
 
       - name: Publish Codeberg Release
         if: success() && github.event.inputs.publish_codeberg == 'true'
@@ -727,6 +765,11 @@ jobs:
             exit 1
           fi
           ARTIFACT_NAME="intermasq-${VERSION}-linux-amd64"
+          PUBLISH_FILES="$ARTIFACT_NAME ${ARTIFACT_NAME}.sha256"
+          if [ -n "$ISO_NAME" ] && [ -f "$ISO_NAME" ]; then
+            PUBLISH_FILES="$PUBLISH_FILES $ISO_NAME ${ISO_NAME}.sha256"
+          fi
+          echo "Files to publish: $PUBLISH_FILES"
           API="https://codeberg.org/api/v1/repos/AlexRus1234/Intermasq"
           BODY="$(jq -n --arg tag "$VERSION" '{tag_name:$tag, name:$tag, draft:false, prerelease:($tag | test("-"))}')"
           RELEASE="$(curl -fsSL -X POST \
@@ -735,48 +778,18 @@ jobs:
             "$API/releases" -d "$BODY")"
           RELEASE_ID="$(jq -r '.id' <<<"$RELEASE")"
           test -n "$RELEASE_ID" && test "$RELEASE_ID" != "null"
-          for FILE in "$ARTIFACT_NAME" "${ARTIFACT_NAME}.sha256"; do
+          for FILE in $PUBLISH_FILES; do
             curl -fsSL -X POST \
               -H "Authorization: token ${RELEASE_TOKEN}" \
               -F "attachment=@${FILE}" \
               "$API/releases/${RELEASE_ID}/assets?name=${FILE}"
           done
-          echo "Published Codeberg Release ${VERSION}"
-
-      - name: Publish Mos.Hub Release
-        if: success() && github.event.inputs.publish_moshub == 'true'
-        env:
-          RELEASE_TOKEN: ${{ secrets.TOKEN_MOSHUB }}
-        run: |
-          if [ "$EXACT_TAG" != "$VERSION" ]; then
-            echo "::error::Mos.Hub Release requires HEAD to have the exact tag $VERSION"
-            exit 1
-          fi
-          ARTIFACT_NAME="intermasq-${VERSION}-linux-amd64"
-          API="https://hub.mos.ru/api/v4/projects/AlexRUS1234%2Fintermasq"
-          RELEASE="$(curl -kfsSL -X POST \
-            -H "PRIVATE-TOKEN: ${RELEASE_TOKEN}" \
-            -H 'Content-Type: application/json' \
-            "$API/releases" \
-            -d "$(jq -n --arg tag "$VERSION" --arg name "$VERSION" \
-              '{tag_name:$tag, name:$name, description:(if ($tag | test("-")) then "Prerelease" else "" end)}')")"
-          echo "$RELEASE" | jq -e --arg tag "$VERSION" '.tag_name == $tag' >/dev/null
-          for FILE in "$ARTIFACT_NAME" "${ARTIFACT_NAME}.sha256"; do
-            UPLOAD="$(curl -kfsSL -X POST \
-              -H "PRIVATE-TOKEN: ${RELEASE_TOKEN}" \
-              -F "file=@${FILE}" \
-              "$API/uploads")"
-            UPLOAD_URL="$(jq -r '.url' <<<"$UPLOAD")"
-            test -n "$UPLOAD_URL" && test "$UPLOAD_URL" != "null"
-            curl -kfsSL -X POST \
-              -H "PRIVATE-TOKEN: ${RELEASE_TOKEN}" \
-              -H 'Content-Type: application/json' \
-              "$API/releases/${VERSION}/assets/links" \
-              -d "$(jq -n --arg name "$FILE" --arg url "https://hub.mos.ru${UPLOAD_URL}" \
-                '{name:$name, url:$url, link_type:"package"}')" >/dev/null
-          done
-          echo "Published Mos.Hub Release ${VERSION}"
+          echo "Published Codeberg Release ${VERSION} (files: $PUBLISH_FILES)"
 
       - name: Cleanup
         if: always()
-        run: rm -f intermasq-ci intermasq-*linux-amd64 intermasq-*linux-amd64.sha256
+        run: |
+          rm -f intermasq-ci \
+                intermasq-*linux-amd64 intermasq-*linux-amd64.sha256 \
+                intermasq-lab-*.iso intermasq-lab-*.iso.sha256
+          rm -rf distro/output
