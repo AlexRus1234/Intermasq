@@ -36,22 +36,39 @@ apk --version
 echo "::endgroup::"
 
 echo "::group::Configure Alpine apk keyring + repositories"
-# fedora не имеет /etc/apk/keys — скачиваем актуальные публичные ключи подписи
-# Alpine с CDN. Это разовый bootstrap; при повторных запусках ключи кешируются.
-mkdir -p /etc/apk/keys
-for keyfile in $(curl -fsSL https://dl-cdn.alpinelinux.org/alpine/keys/ \
-		| grep -oE 'alpine-devel@lists\.alpinelinux\.org-[0-9a-f]+\.rsa\.pub' \
-		| sort -u); do
-	[ -f "/etc/apk/keys/$keyfile" ] || \
-		curl -fsSL "https://dl-cdn.alpinelinux.org/alpine/keys/$keyfile" \
-			-o "/etc/apk/keys/$keyfile"
-done
-echo "Downloaded $(ls /etc/apk/keys | wc -l) signing keys"
-
+# fedora не имеет /etc/apk/keys. Каталог /alpine/keys/ на CDN отдаёт 404,
+# поэтому ключи берём напрямую из пакета alpine-keys из main-репозитория:
+# это .apk (конкатенация gzip-потоков sig+control+data), тащим curl'ом и
+# распаковываем gunzip + tar --ignore-zeros (читает мимо EOF-маркеров).
 cat > /etc/apk/repositories <<EOF
 https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main
 https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/community
 EOF
+
+REPO_BASE="https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main/x86_64"
+KEYS_PKG="$(curl -fsSL "$REPO_BASE/" \
+	| grep -oE 'alpine-keys-[0-9][^"[:space:]]*\.apk' \
+	| grep -vE -- '-(doc|dbg|dev|openrc)' \
+	| sort -V | tail -1)"
+if [ -z "$KEYS_PKG" ]; then
+	echo "::error::could not find alpine-keys package in $REPO_BASE" >&2
+	exit 1
+fi
+echo "Downloading $KEYS_PKG ..."
+curl -fsSL "$REPO_BASE/$KEYS_PKG" -o /tmp/alpine-keys.apk
+mkdir -p /etc/apk/keys /tmp/alpine-keys-extract
+# .apk = несколько gzip tarball'ов подряд; gunzip сливает все потоки,
+# --ignore-zeros заставляет tar читать за пределами энд-маркеров.
+gunzip -c /tmp/alpine-keys.apk \
+	| tar -xf - -C /tmp/alpine-keys-extract --ignore-zeros
+cp /tmp/alpine-keys-extract/usr/share/apk/keys/*.pub /etc/apk/keys/ 2>/dev/null || {
+	echo "::error::no .rsa.pub found inside alpine-keys package" >&2
+	find /tmp/alpine-keys-extract -type f | head -50
+	exit 1
+}
+rm -rf /tmp/alpine-keys.apk /tmp/alpine-keys-extract
+echo "Installed $(ls /etc/apk/keys/*.pub 2>/dev/null | wc -l) signing keys:"
+ls /etc/apk/keys/
 cat /etc/apk/repositories
 echo "::endgroup::"
 
