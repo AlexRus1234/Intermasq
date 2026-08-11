@@ -50,7 +50,8 @@ test('setup-screen: first-run admin setup', async ({ browser }) => {
   await page.locator('.btn-primary').click()
 
   // /api/setup returns a token → store.view='dashboard' (AuthScreen.vue:42),
-  // the user-menu toggle renders (App.vue v-if="store.token").
-  await expect(page.locator('.dropdown-toggle')).toBeVisible({ timeout: 15000 })
+  // the user-menu toggle renders (App.vue v-if="store.token"). testid is used
+  // because `.dropdown-toggle` is also present on the auth screen (language).
+  await expect(page.locator('[data-testid="user-menu"]')).toBeVisible({ timeout: 15000 })
   await page.close()
 })

@@ -36,11 +36,13 @@ test('login then logout via UI', async ({ page }) => {
   await page.locator('.btn-primary').click()
 
   // Dashboard indicator: the user-menu toggle is rendered only when
-  // store.token is set (App.vue `v-if="store.token"`).
-  await expect(page.locator('.dropdown-toggle')).toBeVisible({ timeout: 15000 })
+  // store.token is set (App.vue `v-if="store.token"`). Use the stable
+  // testid — `.dropdown-toggle` also matches the language selector on the
+  // auth screen, so it can't be used as a "dashboard loaded" signal.
+  await expect(page.locator('[data-testid="user-menu"]')).toBeVisible({ timeout: 15000 })
 
   // Logout via the menu's single .text-danger item.
-  await page.locator('.dropdown-toggle').click()
+  await page.locator('[data-testid="user-menu"]').click()
   await page.locator('.dropdown-item.text-danger').click()
 
   // Back to the auth screen.

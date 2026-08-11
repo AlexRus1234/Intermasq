@@ -127,7 +127,7 @@ onUnmounted(clearPluginFrame)
         </h2>
         
         <div v-if="store.token" class="dropdown">
-            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-testid="user-menu">
                 ⚙️ {{ $t('app.menu') }}
             </button>
             <ul class="dropdown-menu dropdown-menu-end shadow-sm">
