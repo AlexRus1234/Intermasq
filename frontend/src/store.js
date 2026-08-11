@@ -61,6 +61,7 @@ function decodeRole(token) {
 export const store = reactive({
     token: localStorage.getItem('token') || '',
     view: 'loading',
+    version: '',
     tab: 'static',
     isDnsmasqActive: false,
     searchQuery: '',
@@ -121,6 +122,7 @@ export const actions = {
         try {
             const res = await api.get('/status')
             store.isDnsmasqActive = res.data.dnsmasq_active
+            store.version = res.data.version || ''
             if (res.data.setup_required) store.view = 'setup'
             else if (store.token) { store.view = 'dashboard'; this.loadData() }
             else store.view = 'login'
