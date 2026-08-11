@@ -51,8 +51,10 @@ stored in `/var/lib/intermasq-lab/<instance>/data/credentials.txt` with mode
 `0600`. This disposable lab intentionally uses public test credentials:
 `admin` / `intermasq-lab`.
 
-Each network has two static mock devices. The first device is active and should
-show the green online indicator; the second intentionally remains offline.
+Each network has four static mock devices: the first is active and should show
+the green online indicator; the other three intentionally remain offline. An
+unknown-ARP entry and a fresh DHCP lease are also generated for the Discovery
+tab.
 
 ## Build ISO
 
