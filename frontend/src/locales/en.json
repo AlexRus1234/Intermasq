@@ -41,7 +41,10 @@
     "login": "Login",
     "enterCredentials": "Enter username and password",
     "setupError": "Setup error",
-    "wrongCredentials": "Invalid username or password"
+    "wrongCredentials": "Invalid username or password",
+    "language": "Language",
+    "themeLight": "Light theme",
+    "themeDark": "Dark theme"
   },
   "hosts": {
     "editing": "Editing",

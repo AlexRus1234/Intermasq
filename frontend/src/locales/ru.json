@@ -41,7 +41,10 @@
     "login": "Войти",
     "enterCredentials": "Введите логин и пароль",
     "setupError": "Ошибка настройки",
-    "wrongCredentials": "Неверный логин или пароль"
+    "wrongCredentials": "Неверный логин или пароль",
+    "language": "Язык",
+    "themeLight": "Светлая тема",
+    "themeDark": "Тёмная тема"
   },
   "hosts": {
     "editing": "Редактирование",
