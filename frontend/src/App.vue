@@ -125,7 +125,7 @@ onUnmounted(clearPluginFrame)
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="fw-bold d-flex align-items-center mb-0">
             <span class="text-primary me-2">🛡️ Intermasq</span>
-            <span v-if="store.version" class="text-muted me-2" style="font-size: 0.75rem;">v{{ store.version }}</span>
+            <span v-if="store.version" class="text-muted me-2" style="font-size: 0.75rem;">{{ store.version }}</span>
             <span class="badge" :class="store.isDnsmasqActive ? 'bg-success' : 'bg-danger'" style="font-size: 0.6rem; margin-top: 5px;">
                 {{ store.isDnsmasqActive ? '🟢 ' + $t('app.statusActive') : '🔴 ' + $t('app.statusStopped') }}
             </span>
