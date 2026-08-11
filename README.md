@@ -1,3 +1,6 @@
+> **Это зеркало репозитория. Оригинал находится по адресу:**
+> [https://git.alexrus1234.ru/AlexRus1234/Intermasq](https://git.alexrus1234.ru/AlexRus1234/Intermasq)
+
 <!--
 Intermasq - Web panel for dnsmasq
 Copyright (C) 2026 AlexRus1234
