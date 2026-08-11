@@ -20,13 +20,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
   <div class="row justify-content-center mt-5">
     <div class="col-12 col-md-6 col-lg-4" style="min-width: 320px;">
       <div class="d-flex gap-2 mb-3">
-        <button @click="switchLocale" class="btn btn-outline-secondary btn-lg flex-fill d-flex align-items-center justify-content-center gap-2">
-          <span style="font-size: 1.3rem;">🌐</span>
-          <span class="fw-bold">{{ locale === 'ru' ? 'Русский' : 'English' }}</span>
-        </button>
+        <div class="dropdown flex-fill">
+          <button class="btn btn-outline-secondary btn-lg w-100 d-flex align-items-center justify-content-center gap-2 dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+            <span style="font-size: 1.3rem;">🌐</span>
+            <span class="fw-bold">{{ currentLocaleName }}</span>
+          </button>
+          <ul class="dropdown-menu w-100 shadow-sm">
+            <li v-for="l in locales" :key="l.code">
+              <a class="dropdown-item d-flex align-items-center gap-2" href="#" @click.prevent="setLocale(l.code)">
+                <span style="font-size: 1.1rem;">{{ l.flag }}</span>
+                <span class="fw-bold">{{ l.name }}</span>
+                <span v-if="locale === l.code" class="ms-auto text-primary">✓</span>
+              </a>
+            </li>
+          </ul>
+        </div>
         <button @click="toggleTheme" class="btn btn-outline-secondary btn-lg flex-fill d-flex align-items-center justify-content-center gap-2">
-          <span style="font-size: 1.3rem;">{{ isDark ? '🌙' : '☀️' }}</span>
-          <span class="fw-bold">{{ isDark ? $t('auth.themeDark') : $t('auth.themeLight') }}</span>
+          <span style="font-size: 1.3rem;">{{ isDark ? '☀️' : '🌙' }}</span>
+          <span class="fw-bold">{{ isDark ? $t('auth.themeLight') : $t('auth.themeDark') }}</span>
         </button>
       </div>
 
@@ -49,12 +60,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { store, api, actions } from '../store.js'
 import { translateApiError } from '../i18n.js'
 
 const { t, locale } = useI18n()
+
+const locales = [
+  { code: 'ru', name: 'Русский', flag: '🇷🇺' },
+  { code: 'en', name: 'English', flag: '🇬🇧' }
+]
+const currentLocaleName = computed(() => locales.find(l => l.code === locale.value)?.name ?? locale.value)
 
 const username = ref('')
 const password = ref('')
@@ -69,10 +86,9 @@ function toggleTheme() {
   localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
 }
 
-function switchLocale() {
-  const next = locale.value === 'ru' ? 'en' : 'ru'
-  locale.value = next
-  localStorage.setItem('locale', next)
+function setLocale(code) {
+  locale.value = code
+  localStorage.setItem('locale', code)
 }
 
 async function submit() {
